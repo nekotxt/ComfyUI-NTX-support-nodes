@@ -9,6 +9,6 @@ dependencies  = []
 Repository = "https://github.com/nekotxt/ComfyUI-NTX-support-nodes.git"
 
 [tool.comfy]
-PublisherId = "" # TODO (fill in Publisher ID from Comfy Registry Website).
+PublisherId = "nekotxt"
 DisplayName = "ComfyUI-NTX-support-nodes"
-Icon = "https://github.com/nekotxt/ComfyUI-NTX-support-nodes/images/lamp.png"
+Icon = "https://github.com/nekotxt/ComfyUI-NTX-support-nodes/blob/main/images/lamp.png?raw=true"
