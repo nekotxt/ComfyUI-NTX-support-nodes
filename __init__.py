@@ -1,3 +1,5 @@
+import re
+
 ADDON_PREFIX = "NTX"
 ADDON_CATEGORY = "NTXUtils"
 
@@ -159,12 +161,10 @@ class DictSet:
 
         if key == "":
             return (pipe, )
+        if value == None:
+            return (pipe, )
 
         pipe = {} if pipe == None else clone_data(pipe)
-
-        if value == None:
-            value = self.__class__.DEFAULT_VALUE
-
         pipe[key] = value
 
         return (pipe, )
@@ -197,6 +197,9 @@ class DictGet:
     OUTPUT_NODE = False
 
     def unpack(self, pipe, key, default=None):
+
+        if default == None:
+            default = self.__class__.DEFAULT_VALUE
 
         return (pipe, pipe.get(key, default), )
 
@@ -404,6 +407,80 @@ class ListGet:
 
         return (items, items[index], )
 
+# ===== NODES : UTILITIES ==================================================================================================================
+
+class ReplaceTextParameters:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "parameters": ("DICT", ),
+                "text": ("STRING", {"default": ""})
+            },
+            "optional": {
+            }
+        }
+
+    RETURN_TYPES = ("STRING", )
+    RETURN_NAMES = ("text", )
+
+    FUNCTION = "parse"
+    CATEGORY = "utils"
+    DESCRIPTION = "Replace text parameters"
+
+    OUTPUT_NODE = False
+
+    def parse(self, parameters, text ):
+
+        if parameters != None:
+            pattern = r'%%([^%]+)%%'
+            matches = re.findall(pattern, text)
+            for match in matches:
+                text = text.replace(f"%%{match}%%", parameters.get(match, ""))
+
+        return (text, )
+
+class SwitchAny:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+            },
+            "optional": {
+                "input1": (ANY_TYPE,),
+                "input2": (ANY_TYPE,),
+                "input3": (ANY_TYPE,),
+                "input4": (ANY_TYPE,),
+                "input5": (ANY_TYPE,),
+            },
+        }
+
+    RETURN_TYPES = (ANY_TYPE, )
+    RETURN_NAMES = ("output", )
+
+    FUNCTION = "execute"
+    CATEGORY = "utils"
+    DESCRIPTION = "Return the first non-null input"
+
+    OUTPUT_NODE = False
+
+    def execute(self, input1 = None, input2 = None, input3 = None, input4 = None, input5 = None):        
+        if input1 != None:
+            return (input1, )
+        if input2 != None:
+            return (input2, )
+        if input3 != None:
+            return (input3, )
+        if input4 != None:
+            return (input4, )
+        return (input5, )
+
 # ===== INITIALIZATION =====================================================================================================================
 
 NODE_LIST = {
@@ -455,7 +532,10 @@ NODE_LIST = {
     
     "ListSet": ListSet,
     "ListCount": ListCount,
-    "ListGet": ListGet
+    "ListGet": ListGet,
+
+    "ReplaceTextParameters": ReplaceTextParameters,
+    "SwitchAny": SwitchAny
 }
 
 def generate_node_mappings(node_config):

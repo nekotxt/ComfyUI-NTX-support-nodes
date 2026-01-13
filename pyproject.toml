@@ -1,0 +1,14 @@
+[project]
+name = "ComfyUI-NTX-support-nodes"
+description = "Utility nodes to support the creation of pipes"
+version = "1.0.0"
+license = { file = "LICENSE.txt" }
+dependencies  = []
+
+[project.urls]
+Repository = "https://github.com/nekotxt/ComfyUI-NTX-support-nodes.git"
+
+[tool.comfy]
+PublisherId = "" # TODO (fill in Publisher ID from Comfy Registry Website).
+DisplayName = "ComfyUI-NTX-support-nodes"
+Icon = "https://github.com/nekotxt/ComfyUI-NTX-support-nodes/images/lamp.png"
