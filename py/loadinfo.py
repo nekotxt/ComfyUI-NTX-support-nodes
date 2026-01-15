@@ -22,6 +22,7 @@ else:
     CHARS_DATA = {}
     CHARS_LIST_OF_NAMES = []
     CHARS_LIST_OF_OPTIONS = []
+    
 class LoadCharInfo:
     def __init__(self):
         pass

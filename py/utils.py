@@ -51,6 +51,10 @@ def dict_merge(base:dict, overwrite:dict):
         else:
             base[k] = clone_data(v)
 
+# utility for cleaning path names
+def clean_path(path:str):
+    return path.replace("\\", os.path.sep).replace("/", os.path.sep)
+
 # ===== AnyType CLASS ==================================================================================================================
 
 class AnyType(str):

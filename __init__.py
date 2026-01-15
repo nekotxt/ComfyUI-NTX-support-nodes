@@ -1,39 +1,34 @@
-# get a reference to the custom_nodes dir
 import sys
+
 from pathlib import Path
-COMFY_DIR = Path.cwd()
-if not COMFY_DIR in sys.path:
-    sys.path.append(COMFY_DIR)
-COMFY_EXTRAS_DIR = COMFY_DIR / "comfy_extras"
-if not COMFY_EXTRAS_DIR in sys.path:
-    sys.path.append(COMFY_EXTRAS_DIR)
-
-# custom_nodes_dir = Path(__file__)
-# while custom_nodes_dir.stem != "custom_nodes":
-#     new_custom_nodes_dir = custom_nodes_dir.parent
-#     if new_custom_nodes_dir == custom_nodes_dir:
-#         custom_nodes_dir = ""
-#         break
-#     custom_nodes_dir = new_custom_nodes_dir
-
-# # add references to the main comfy dirs (to load core nodes)
-# if custom_nodes_dir != "":
-#     comfy_dir = str(custom_nodes_dir.parent)
-#     if not comfy_dir in sys.path:
-#         sys.path.append(comfy_dir)
-#     comfy_extras_dir = str(custom_nodes_dir.parent / "comfy_extras")
-#     if not comfy_extras_dir in sys.path:
-#         sys.path.append(comfy_extras_dir)
 
 from .py.utils import is_string_empty
 
+ADDON_NAME = "NTX-support-nodes"
 ADDON_PREFIX = "NTX"
 ADDON_CATEGORY = "NTXUtils"
 API_PREFIX = "ntx-sn"
 
 # ===== INITIALIZATION =====================================================================================================================
 
+# get a reference to the custom_nodes dir
+COMFY_DIR = Path.cwd()
+COMFY_DIR_str = str(COMFY_DIR)
+if not COMFY_DIR_str in sys.path:
+    sys.path.append(COMFY_DIR_str)
+COMFY_EXTRAS_DIR = COMFY_DIR / "comfy_extras"
+COMFY_EXTRAS_DIR_str = str(COMFY_EXTRAS_DIR)
+if not COMFY_EXTRAS_DIR_str in sys.path:
+    sys.path.append(COMFY_EXTRAS_DIR_str)
+
+# logging
+from .py.logging import log_setup
+log_setup(addon_name=ADDON_NAME, log_info=True, log_info_node_name=True, log_info_load_model=True, log_info_apply_model=True, log_warning=True)
+
 NODE_LIST = {}
+
+from .py.images import NODE_LIST as IMAGES_NODE_LIST
+NODE_LIST.update(IMAGES_NODE_LIST)
 
 from .py.loadinfo import NODE_LIST as LOADINFO_NODE_LIST
 NODE_LIST.update(LOADINFO_NODE_LIST)
@@ -69,6 +64,8 @@ WEB_DIRECTORY = "./web"
 # Add custom API routes, using router
 from aiohttp import web
 from server import PromptServer
+
+# Support routes for node LoadCharInfo
 
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/get_options_for_char")
 async def get_options_for_char(request):
