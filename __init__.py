@@ -72,8 +72,8 @@ async def get_options_for_char(request):
     data = await request.json()
     char_name = data.get("char_name", "")
     
-    from .py.loadinfo import get_options_for_char
-    options_for_char = get_options_for_char(char_name=char_name)
+    from .py.loadinfo import g_characters_manager#get_options_for_char
+    options_for_char = g_characters_manager.get_options_for_char(char_name=char_name)
 
     return web.json_response({"options_for_char": options_for_char})
 
@@ -83,7 +83,7 @@ async def get_prompt_for_char_option(request):
     char_name = data.get("char_name", "")
     option_name = data.get("option_name", "")
     
-    from .py.loadinfo import get_prompt_for_char_option
-    prompt_data = get_prompt_for_char_option(char_name=char_name, option_name=option_name)
+    from .py.loadinfo import g_characters_manager#get_prompt_for_char_option
+    prompt_data = g_characters_manager.get_prompt_for_char_option(char_name=char_name, option_name=option_name)
 
     return web.json_response(prompt_data)
