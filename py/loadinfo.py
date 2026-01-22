@@ -33,14 +33,14 @@ class ModelsManager():
         
         # ensure that all the IDs are aligned with the path separator used by the OS
         for model_type in MODEL_TYPES:
-            for model_data in self.catalogue[model_type]:
+            for model_data in self.catalogue.get(model_type, []):
                 model_data["id"] = clean_path(model_data.get("id", ""))
 
         models_by_ID = {}
         duplicates = 0
         # scan each model type (chekpoints, loras, vae ...)
         for model_type in MODEL_TYPES:
-            for model_data in self.catalogue[model_type]:
+            for model_data in self.catalogue.get(model_type, []):
                 model_id = model_data.get("id", "")
                 if model_id != "":
                     # assign references to recover the data, and check for possible duplicates
@@ -63,19 +63,18 @@ class ModelsManager():
 
         categories_list = []
         for model_type in MODEL_TYPES:
-            if model_type in self.catalogue:
-                for model_data in self.catalogue[model_type]:
-                    # the first token of model_id is assumed to be the model base type, e.g. :
-                    # FLUX => (empty)
-                    # FLUX\styles => styles
-                    # FLUX\styles\vixon => styles.vixon
-                    model_id = model_data.get("id", "") # e.g. FLUX\styles\vixon\fantasy.safetensors
-                    parent_subdir = str(Path(model_id).parent) # e.g. FLUX\styles\vixon
-                    parent_subdir = parent_subdir.replace("\\", ".").replace("/", ".") # e.g. FLUX.styles.vixon
-                    parts = parent_subdir.split('.', 1) # the 1 means that only the first . will be considered, so the result has either 1 or 2 entries  e.g. FLUX
-                    category = parts[1] if (len(parts)>1) else ""
-                    if not (category in categories_list):
-                        categories_list.append(category)
+            for model_data in self.catalogue.get(model_type, []):
+                # the first token of model_id is assumed to be the model base type, e.g. :
+                # FLUX => (empty)
+                # FLUX\styles => styles
+                # FLUX\styles\vixon => styles.vixon
+                model_id = model_data.get("id", "") # e.g. FLUX\styles\vixon\fantasy.safetensors
+                parent_subdir = str(Path(model_id).parent) # e.g. FLUX\styles\vixon
+                parent_subdir = parent_subdir.replace("\\", ".").replace("/", ".") # e.g. FLUX.styles.vixon
+                parts = parent_subdir.split('.', 1) # the 1 means that only the first . will be considered, so the result has either 1 or 2 entries  e.g. FLUX
+                category = parts[1] if (len(parts)>1) else ""
+                if not (category in categories_list):
+                    categories_list.append(category)
         self.categories_list = categories_list
 
     def get_model(self, model_type:str, model_id:str):
