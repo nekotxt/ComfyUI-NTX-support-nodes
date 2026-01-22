@@ -4,7 +4,7 @@ import ruamel.yaml
 from pathlib import Path
 
 from .logging import log_info, log_warning
-from .utils import clone_data, clean_path
+from .utils import clone_data, clean_path, load_list_vaes, load_list_samplers, load_list_schedulers, ANY_TYPE
 
 SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
 MODEL_TYPES = ["vae", "checkpoints", "loras"]
@@ -103,6 +103,83 @@ class ModelsManager():
 g_models_manager = ModelsManager()
 g_models_manager.load()
 log_info(f"Create g_models_manager from {g_models_manager.models_file}")
+
+class LoadCheckpointInfo:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        global g_models_manager
+        return {
+            "required": {
+                "ckpt_name": (g_models_manager.get_models_list("checkpoints"),),
+
+                "clip_skip": ("INT", {
+                    "default": -1,
+                    "min": -100,
+                    "max": 0,
+                    "step": 1,
+                }),
+                "vae_name": (
+                    ["Baked VAE"] + load_list_vaes(),
+                    {"default": "Baked VAE"},
+                ),
+
+                "steps": ("INT", {
+                    "default": 20,
+                    "min": 1, 
+                    "max": 100, 
+                    "step": 1,
+                }),
+                "cfg": ("FLOAT", {
+                    "default": 1.0, 
+                    "min": 0.0, 
+                    "max": 20.0, 
+                    "step":0.1, 
+                    "round": 0.1, 
+                }),
+                "sampler_name": (
+                    load_list_samplers(), 
+                ),
+                "scheduler": (
+                    load_list_schedulers(), 
+                ),
+
+                "model_prompt_positive": ("STRING", {
+                    "multiline": False, #True if you want the field to look like the one on the ClipTextEncode node
+                    "dynamicPrompts": False,
+                    "default": ""
+                }),
+                "model_prompt_negative": ("STRING", {
+                    "multiline": False, #True if you want the field to look like the one on the ClipTextEncode node
+                    "dynamicPrompts": False,
+                    "default": ""
+                }),
+
+                "notes": ("STRING", {
+                    "multiline": True, #True if you want the field to look like the one on the ClipTextEncode node
+                    "dynamicPrompts": False,
+                    "default": ""
+                }),
+            },
+            "optional": {
+            },
+        }
+
+    RETURN_TYPES = (ANY_TYPE   , "INT"      , "BOOLEAN"       , ANY_TYPE  , "INT"  , "FLOAT", ANY_TYPE      , ANY_TYPE   , "STRING"               , "STRING"               , )
+    RETURN_NAMES = ("ckpt_name", "clip_skip", "use_custom_vae", "vae_name", "steps", "cfg"  , "sampler_name", "scheduler", "model_prompt_positive", "model_prompt_negative", )
+
+    FUNCTION = "execute"
+
+    #OUTPUT_NODE = False
+
+    CATEGORY = "loadinfo"
+
+    def execute(self, ckpt_name, clip_skip, vae_name, steps, cfg, sampler_name, scheduler, model_prompt_positive, model_prompt_negative, notes, ):   
+
+        use_custom_vae = (vae_name != "Baked VAE")
+        return (ckpt_name, clip_skip, use_custom_vae, vae_name, steps, cfg, sampler_name, scheduler, model_prompt_positive, model_prompt_negative, )
 
 # ===== LOAD CHARACTER DEFINITIONS ===============================================================================================
 
@@ -235,19 +312,60 @@ class LoadCharInfo:
 
     CATEGORY = "loadinfo"
 
-    def execute(self, name, option, char, save_name, parameters = {}, ):   
+    def execute(self, name, option, char, save_name, parameters = None, ):   
 
-        parameters = clone_data(parameters)
+        parameters = {} if parameters == None else clone_data(parameters)
 
         parameters["char"] = char
         parameters["save_name"] = save_name
 
         return (parameters, char, save_name, )
 
+class LoadCharacterInfo:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        global g_characters_manager
+        return {
+            "required": {
+                "name": (g_characters_manager.get_char_names(),),
+                "option": (g_characters_manager.get_all_char_options(),),
+                "char": ("STRING", {
+                    "multiline": True, #True if you want the field to look like the one on the ClipTextEncode node
+                    "dynamicPrompts": True,
+                    "default": ""
+                }),
+                "save_name": ("STRING", {
+                    "multiline": False, #True if you want the field to look like the one on the ClipTextEncode node
+                    "dynamicPrompts": False,
+                    "default": ""
+                }),
+            },
+            "optional": {
+            },
+        }
+
+    RETURN_TYPES = ("STRING", "STRING"   , )
+    RETURN_NAMES = ("char"  , "save_name", )
+
+    FUNCTION = "execute"
+
+    #OUTPUT_NODE = False
+
+    CATEGORY = "loadinfo"
+
+    def execute(self, name, option, char, save_name, ):   
+
+        return (char, save_name, )
+
 # ===== INITIALIZATION =====================================================================================================================
 
 NODE_LIST = {
+    "LoadCheckpointInfo": LoadCheckpointInfo,
     "LoadCharInfo": LoadCharInfo,
+    "LoadCharacterInfo": LoadCharacterInfo,
 }
 
 # ===== DEBUG ========================================================================================================================

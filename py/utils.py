@@ -1,4 +1,6 @@
 import comfy.samplers
+import comfy.sd
+import comfy.utils
 import folder_paths
 
 import os
@@ -6,7 +8,17 @@ import re
 import torch
 from pathlib import Path
 
+from .logging import log_info, log_warning
+
 SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
+
+MAX_CACHED_LORAS = 5
+
+def util_setup(max_cached_loras:int):
+    global MAX_CACHED_LORAS
+
+    MAX_CACHED_LORAS = max_cached_loras
+    log_info(f"MAX_CACHED_LORAS = {MAX_CACHED_LORAS}")
 
 # ===== General use functions ==================================================================================================================
 
@@ -406,7 +418,9 @@ class CreateImageLatent:
 
     FUNCTION = "execute"
     CATEGORY = "utils"
-    DESCRIPTION = "Build the latents from the specified image size. If an image is provided, its size will be used"
+    DESCRIPTION = """Build the latents from the specified image size. If an image is provided, its size will be used.
+                    To customize the list of image sizes, create a file /input/ntx_data/image_sizes.txt
+                    and write the sizes, one for each row, int the form WIDTHxHEIGHT"""
 
     OUTPUT_NODE = False
 
@@ -438,6 +452,103 @@ class CreateImageLatent:
             (latent, ) = VAEEncode().encode(vae, opt_image, )
             return (width, height, 1, latent, opt_image, )
 
+CACHED_LORAS = []
+class ApplyLoraStack:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "lora_stack" :("LORA_STACK", ),
+                "model": ("MODEL", ),
+            },
+            "optional": {
+                "clip": ("CLIP", ),
+            },
+        }
+
+    RETURN_TYPES = ("LORA_STACK", "MODEL"  , "CLIP", )
+    RETURN_NAMES = ("lora_stack", "model"  , "clip", ) 
+
+    FUNCTION = "execute"
+    CATEGORY = "utils"
+    DESCRIPTION = "Apply lora stack to model and (optionally) clip"
+
+    OUTPUT_NODE = False
+
+    def execute(self, lora_stack, model, clip=None, ):        
+
+        global CACHED_LORAS
+        global MAX_CACHED_LORAS
+
+        if(lora_stack == None):
+            return (lora_stack, model, clip, )
+            
+        if(len(lora_stack) == 0):
+            return (lora_stack, model, clip, )
+        
+        log_info("ApplyLoraStack :")
+        applied_lora_stack = []
+        for (lora_name, strength_model, strength_clip) in lora_stack:
+            if strength_model == 0 and strength_clip == 0:
+                log_info(f"- SKIP [{lora_name}] - strength=0")
+                continue
+
+            duplicated = False
+            for (applied_lora_name, _, _) in applied_lora_stack:
+                if lora_name == applied_lora_name:
+                    duplicated = True
+                    break
+            if duplicated:
+                log_info(f"- SKIP [{lora_name}] - already applied")
+                continue
+
+            try:
+                lora_path = folder_paths.get_full_path_or_raise("loras", lora_name)
+
+                lora = None
+                for(cached_lora_path, cached_lora) in CACHED_LORAS:
+                    if cached_lora_path == lora_path:
+                        lora = cached_lora
+                        break
+
+                if lora == None:
+                    lora = comfy.utils.load_torch_file(lora_path, safe_load=True)
+                    CACHED_LORAS.append([lora_path, lora])
+                    msg = "loaded from disk (added to cache)"
+                else:
+                    msg = "retrieved from cache"
+
+                model, clip = comfy.sd.load_lora_for_models(model, clip, lora, strength_model, strength_clip)
+
+                applied_lora_stack.append([lora_name, strength_model, strength_clip])
+
+                log_info(f"- OK [{lora_name}] - {msg}")
+            except Exception as e:
+                log_info(f"- ERROR [{lora_name}] - {e}")
+
+        log_info("Final stack :")
+        for (lora_name, strength_model, strength_clip) in applied_lora_stack:
+            log_info(f"- {lora_name} {strength_model} {strength_clip}")
+
+        log_info("Current cache :")
+        for (cached_lora_path, _) in CACHED_LORAS:
+            log_info(f"- {cached_lora_path}")
+
+        if len(CACHED_LORAS) > MAX_CACHED_LORAS:
+            log_info(f"Pruning cache (max={MAX_CACHED_LORAS}):")
+            while len(CACHED_LORAS) > MAX_CACHED_LORAS:
+                (cached_lora_path, cached_lora) = CACHED_LORAS.pop(0)
+                log_info(f"- remove {cached_lora_path}")
+            log_info("Final cache :")
+            for (cached_lora_path, _) in CACHED_LORAS:
+                log_info(f"- {cached_lora_path}")
+
+        return (applied_lora_stack, model, clip, )
+
+
 # ===== INITIALIZATION =====================================================================================================================
 
 NODE_LIST = {
@@ -447,4 +558,5 @@ NODE_LIST = {
     "ConvertLoraStackToString": ConvertLoraStackToString,
     "ConvertLoraStringToStack": ConvertLoraStringToStack,
     "CreateImageLatent": CreateImageLatent,
+    "ApplyLoraStack": ApplyLoraStack,
 }

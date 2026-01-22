@@ -76,7 +76,55 @@ app.registerExtension({
 
     async nodeCreated(node) {
 
-        if(isClassInList(node.comfyClass, ["LoadCharInfo"])){
+        if(isClassInList(node.comfyClass, ["LoadCheckpointInfo"])){
+            // recover references to the widgets used by the script   ["PromptLora"].map(s=>ADDON_PREFIX+s).includes(node.comfyClass)
+            var widget_ckpt_name = getWidget(node, "ckpt_name")
+            if (widget_ckpt_name == null) return
+
+            // define the function to load the model data
+            function getModelData(){
+                // recover and assign the model data
+                var query_data = {ckpt_name: widget_ckpt_name.value}
+                fetch(`/${API_PREFIX}/get_checkpoint_info`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(query_data)
+                })
+                .then(response => response.json())
+                .then(data => { 
+                    writeIntToWidget(node, "clip_skip", data, "clip_skip", -1)
+                    writeStringToWidget(node, "vae_name", data, "vae", "Baked VAE")
+                    writeIntToWidget(node, "steps", data, "steps", 20)
+                    writeFloatToWidget(node, "cfg", data, "cfg", 3.0)
+                    writeStringToWidget(node, "sampler_name", data, "sampler_name", "euler")
+                    writeStringToWidget(node, "scheduler", data, "scheduler", "simple")
+                    writeStringToWidget(node, "model_prompt_positive", data, "positive", "")
+                    writeStringToWidget(node, "model_prompt_negative", data, "negative", "")
+                    writeStringToWidget(node, "notes", data, "notes", "")
+                })
+                .catch(error => {console.error('Error(get_checkpoint_info):', error);} );
+            }
+
+            // add a right-click menu entry which enables to fill the model data
+            const original_getExtraMenuOptions = node.getExtraMenuOptions;
+            node.getExtraMenuOptions = function(_, options) {
+                original_getExtraMenuOptions?.apply(this, arguments);
+                options.push({
+                    content: `[${ADDON_PREFIX}] Load model data`,
+                    callback: async () => {
+                        getModelData()
+                    }
+                })
+            }
+            
+            // create a callback which loads the model data when the model is changed
+            widget_ckpt_name.callback = (val) => {
+                //alert("New checkpoint selected : " + val)
+                getModelData()
+            }
+        }
+
+        if(isClassInList(node.comfyClass, ["LoadCharInfo", "LoadCharacterInfo"])){
 
             // recover references to the widgets used by the script
             var widget_subcategory = getWidget(node, "name")

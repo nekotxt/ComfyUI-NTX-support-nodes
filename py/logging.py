@@ -52,14 +52,26 @@ COLORS = {
   'BG_BRIGHT_WHITE': '\33[107m',
 }
 
-def log_setup(addon_name:str, log_info:bool, log_info_node_name:bool, log_info_load_model:bool, log_info_apply_model:bool, log_warning:bool):
+def log_setup(addon_name:str, show_info:bool, show_info_node_name:bool, show_info_load_model:bool, show_info_apply_model:bool, show_warning:bool):
   global ADDON_NAME, LOG_INFO, LOG_INFO_NODE_NAME, LOG_INFO_LOAD_MODEL, LOG_INFO_APPLY_MODEL, LOG_WARNING
+
   ADDON_NAME = addon_name
-  LOG_INFO = log_info
-  LOG_INFO_NODE_NAME = log_info_node_name
-  LOG_INFO_LOAD_MODEL = log_info_load_model
-  LOG_INFO_APPLY_MODEL = log_info_apply_model
-  LOG_WARNING = log_warning
+  log_info(f"ADDON_NAME = {ADDON_NAME}")
+
+  LOG_INFO = show_info
+  log_info(f"LOG_INFO = {LOG_INFO}")
+
+  LOG_INFO_NODE_NAME = show_info_node_name
+  log_info(f"LOG_INFO_NODE_NAME = {LOG_INFO_NODE_NAME}")
+
+  LOG_INFO_LOAD_MODEL = show_info_load_model
+  log_info(f"LOG_INFO_LOAD_MODEL = {LOG_INFO_LOAD_MODEL}")
+
+  LOG_INFO_APPLY_MODEL = show_info_apply_model
+  log_info(f"LOG_INFO_APPLY_MODEL = {LOG_INFO_APPLY_MODEL}")
+
+  LOG_WARNING = show_warning
+  log_info(f"LOG_WARNING = {LOG_WARNING}")
 
 def log(message, color=None, msg_color=None, prefix=None):
   """Basic logging."""
