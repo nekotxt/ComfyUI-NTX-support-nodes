@@ -5,6 +5,7 @@ import folder_paths
 
 import os
 import re
+import shutil
 import torch
 from pathlib import Path
 
@@ -548,6 +549,56 @@ class ApplyLoraStack:
 
         return (applied_lora_stack, model, clip, )
 
+class CollectModelNtxdata:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+            },
+            "optional": {
+                "ckpt_name"  :(ANY_TYPE, ),
+                "lora_stack" :("LORA_STACK", ),
+            },
+        }
+
+    RETURN_TYPES = ()
+    RETURN_NAMES = () 
+
+    FUNCTION = "execute"
+    CATEGORY = "utils"
+    DESCRIPTION = ""
+
+    OUTPUT_NODE = True
+
+    def execute(self, ckpt_name=None, lora_stack=None, ):        
+
+        models_list = []
+
+        if ckpt_name != None:
+            models_list.append(folder_paths.get_full_path_or_raise("checkpoints", ckpt_name))
+
+        if lora_stack != None:
+            for (lora_name, _, _) in lora_stack:
+                models_list.append(folder_paths.get_full_path_or_raise("loras", lora_name))
+
+        download_dir = SETTINGS_DIR / "downloads"
+        download_dir.mkdir(parents=True, exist_ok=True)
+        log_info(f"Copy to {download_dir}")
+
+        for model_name in models_list:
+            model_path = Path(model_name)
+            datafile_path = model_path.with_suffix('.ntxdata')
+            if datafile_path.is_file():
+                shutil.copy(datafile_path, download_dir / datafile_path.name)
+                log_info(f"- copied {datafile_path}")
+            else:
+                log_warning(f"- not found! {model_name}")
+
+        return ()
+
 
 # ===== INITIALIZATION =====================================================================================================================
 
@@ -559,4 +610,5 @@ NODE_LIST = {
     "ConvertLoraStringToStack": ConvertLoraStringToStack,
     "CreateImageLatent": CreateImageLatent,
     "ApplyLoraStack": ApplyLoraStack,
+    "CollectModelNtxdata": CollectModelNtxdata,
 }

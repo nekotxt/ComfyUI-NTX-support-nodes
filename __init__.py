@@ -13,7 +13,6 @@ API_PREFIX = "ntx-sn"
 
 SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
 SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
-(SETTINGS_DIR / "downloads").mkdir(parents=True, exist_ok=True)
 
 # ===== INITIALIZATION =====================================================================================================================
 
@@ -130,3 +129,16 @@ async def get_prompt_for_char_option(request):
     prompt_data = g_characters_manager.get_prompt_for_char_option(char_name=char_name, option_name=option_name)
 
     return web.json_response(prompt_data)
+
+# Support routes for downloading of models
+
+@PromptServer.instance.routes.get(f"/{API_PREFIX}/download_models")
+async def download_models(request):
+    global COMFY_DIR
+    global CONFIGURATION
+    global SETTINGS_DIR
+
+    from .scripts.download_ntxdata import main_execution
+    main_execution(downloads_dir=SETTINGS_DIR / "downloads", models_dir=COMFY_DIR / "models", tokens=CONFIGURATION.get("tokens", {}), simulation_only=False)
+
+    return web.json_response("")
