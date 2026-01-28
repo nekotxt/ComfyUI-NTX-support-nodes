@@ -118,8 +118,9 @@ def try_downloads(model_type:str, name:str, model:dict, save_path:Path, tokens:d
             log_error(f"for model {name} : {str(x)}")
 
     # try to download from cloud storage
-    log_message(f"- try download from cloud storage {cloud_storage_id}:models/{model_type}/{name}")
-    result = subprocess.run(["rclone", "copy", f"{cloud_storage_id}:models/{model_type}/{name}", f"{save_path.parent}", "-P"], capture_output=True, text=True)
+    cloud_storage_path = f"{cloud_storage_id}:models/{model_type}/" + name.replace("\\", "/")
+    log_message(f"- try download from cloud storage {cloud_storage_path}")
+    result = subprocess.run(["rclone", "copy", cloud_storage_path, f"{save_path.parent}", "-P"], capture_output=True, text=True)
     if result.stderr == "":
         log_message("- file downloaded from cloud storage")
         return True
@@ -161,6 +162,8 @@ def main_execution(downloads_dir:Path, models_dir:Path, tokens:dict, simulation_
     msg_log = []
     err_log = []
 
+    downloaded_files = []
+
     log_message(f"Downloads dir is {downloads_dir}")
     log_message(f"Models dir is {models_dir}")
     
@@ -200,6 +203,7 @@ def main_execution(downloads_dir:Path, models_dir:Path, tokens:dict, simulation_
             if not file_exists:
                 downloaded = try_downloads(model_type, name, model, save_path, tokens, cloud_storage_id)
                 file_exists = save_path.is_file()
+                downloaded_files.append(save_path)
 
             # if there is a file, retrieve the hash (always calculate it if the file was just downloaded) and check the match with the model data
             if file_exists:
@@ -225,9 +229,24 @@ def main_execution(downloads_dir:Path, models_dir:Path, tokens:dict, simulation_
         except Exception as x:
             log_error(f"for model {name} : {str(x)}")
 
+    full_log = []
+
     if len(err_log) == 0:
-        print("Execution terminated without errors")
+        result = "Execution terminated without errors"
+        full_log.append(result)
+        print(result)
     else:
-        print(f"There were {len(err_log)} errors :")
+        result = f"There were {len(err_log)} errors:"
+        full_log.append(result)
+        print(result)
         for msg in err_log:
+            full_log.append(f"- {msg}")
             print(f"- {msg}")
+
+    if len(downloaded_files) > 0:
+        full_log.append("Downloaded files:")
+        for s in downloaded_files:
+            full_log.append(f"- {s}")
+
+    return full_log
+    

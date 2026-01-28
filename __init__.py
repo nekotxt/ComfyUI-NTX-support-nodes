@@ -148,6 +148,6 @@ async def download_models(request):
     cloud_storage_id = CONFIGURATION.get("cloud_storage_id", "pcloud")
 
     from .scripts.download_ntxdata import main_execution
-    main_execution(downloads_dir=SETTINGS_DIR / "downloads", models_dir=COMFY_DIR / "models", tokens=CONFIGURATION.get("tokens", {}), simulation_only=False, cloud_storage_id=cloud_storage_id)
+    result = main_execution(downloads_dir=SETTINGS_DIR / "downloads", models_dir=COMFY_DIR / "models", tokens=CONFIGURATION.get("tokens", {}), simulation_only=False, cloud_storage_id=cloud_storage_id)
 
-    return web.json_response("download_models completed")
+    return web.json_response(result)
