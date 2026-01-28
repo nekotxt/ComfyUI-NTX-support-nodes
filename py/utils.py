@@ -13,6 +13,15 @@ from .logging import log_info, log_warning
 
 SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
 
+# used by CreateImageLatent
+image_sizes_file = SETTINGS_DIR / "image_sizes.txt"
+if image_sizes_file.is_file():
+    IMAGE_SIZES = image_sizes_file.read_text(encoding="utf-8").splitlines()
+else:
+    IMAGE_SIZES = ["512x512", "512x768", "768x512", "832x1216", "1216x832", "896x1152", "1152x896", "1024x1024", "1024x1536", "1536x1024"]
+
+# used by ApplyLoraStack
+CACHED_LORAS = []
 MAX_CACHED_LORAS = 5
 
 def util_setup(max_cached_loras:int):
@@ -362,98 +371,6 @@ class ConvertLoraStringToStack:
 
         return (clean_prompt, final_lora_stack, )
 
-image_sizes_file = SETTINGS_DIR / "image_sizes.txt"
-if image_sizes_file.is_file():
-    IMAGE_SIZES = image_sizes_file.read_text(encoding="utf-8").splitlines()
-else:
-    IMAGE_SIZES = ["512x512", "512x768", "768x512", "832x1216", "1216x832", "896x1152", "1152x896", "1024x1024", "1024x1536", "1536x1024"]
-class CreateImageLatent:
-    def __init__(self):
-        pass
-    
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "image_size": (
-                    ["custom"] + IMAGE_SIZES,
-                    {
-                        "default": "custom"
-                    }
-                ),
-                "width": (
-                    "INT",
-                    {
-                        "default": 0, 
-                        "min": 0, 
-                        "max": 4096, 
-                        "step": 1
-                    },
-                ),
-                "height": (
-                    "INT",
-                    {
-                        "default": 0, 
-                        "min": 0, 
-                        "max": 4096, 
-                        "step": 1
-                    },
-                ),
-                "batch_size": (
-                    "INT",
-                    {
-                        "default": 1,
-                        "min": 1,
-                        "max": 24,
-                    },
-                ),
-            },
-            "optional": {
-                "opt_image": ("IMAGE", ),
-                "vae": ("VAE", ),
-            },
-        }
-
-    RETURN_TYPES = ("INT"  , "INT"   , "INT"       , "LATENT", "IMAGE"    , )
-    RETURN_NAMES = ("width", "height", "batch_size", "latent", "opt_image", ) 
-
-    FUNCTION = "execute"
-    CATEGORY = "utils"
-    DESCRIPTION = """Build the latents from the specified image size. If an image is provided, its size will be used.
-                    To customize the list of image sizes, create a file /input/ntx_data/image_sizes.txt
-                    and write the sizes, one for each row, int the form WIDTHxHEIGHT"""
-
-    OUTPUT_NODE = False
-
-    def execute(self, image_size, width, height, batch_size, opt_image=None, vae=None):        
-
-        if opt_image == None:
-            if image_size != "custom": # decode standard image size if any
-                match = re.search(r'([\d]+)x([\d]+)', image_size)
-                if match == None:
-                    width = 512
-                    height = 512
-                else:
-                    width = int(match[1])
-                    height = int(match[2])
-            
-            latent_width = width // 8
-            latent_height = height // 8
-            samples = torch.zeros([batch_size, 4, latent_height, latent_width], device=comfy.model_management.intermediate_device())
-            width = latent_width * 8
-            height = latent_height * 8
-            
-            latent = {"samples":samples}
-            
-            return (width, height, batch_size, latent, None, )
-        else:
-            width = opt_image.shape[2]
-            height = opt_image.shape[1]
-            from nodes import VAEEncode # the nodes module can be referenced, because its path is added to sys.path in __init__
-            (latent, ) = VAEEncode().encode(vae, opt_image, )
-            return (width, height, 1, latent, opt_image, )
-
-CACHED_LORAS = []
 class ApplyLoraStack:
     def __init__(self):
         pass
@@ -549,6 +466,136 @@ class ApplyLoraStack:
 
         return (applied_lora_stack, model, clip, )
 
+class MergeLoraStacks:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+            },
+            "optional": {
+                "lora_stack_1" :("LORA_STACK", ),
+                "lora_stack_2" :("LORA_STACK", ),
+            },
+        }
+
+    RETURN_TYPES = ("LORA_STACK", )
+    RETURN_NAMES = ("lora_stack", ) 
+
+    FUNCTION = "execute"
+    CATEGORY = "utils"
+    DESCRIPTION = "Merge two lora stacks"
+
+    OUTPUT_NODE = False
+
+    def execute(self, lora_stack_1 = None, lora_stack_2 = None, ):        
+
+        global CACHED_LORAS
+        global MAX_CACHED_LORAS
+
+        merged_lora_stack = []
+
+        if(lora_stack_1 != None):
+            for (name, s1, s2) in lora_stack_1:
+                merged_lora_stack.append((name, s1, s2))
+            
+        if(lora_stack_2 != None):
+            for (name, s1, s2) in lora_stack_2:
+                merged_lora_stack.append((name, s1, s2))
+
+        return (merged_lora_stack, )
+
+class CreateImageLatent:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "image_size": (
+                    ["custom"] + IMAGE_SIZES,
+                    {
+                        "default": "custom"
+                    }
+                ),
+                "width": (
+                    "INT",
+                    {
+                        "default": 0, 
+                        "min": 0, 
+                        "max": 4096, 
+                        "step": 1
+                    },
+                ),
+                "height": (
+                    "INT",
+                    {
+                        "default": 0, 
+                        "min": 0, 
+                        "max": 4096, 
+                        "step": 1
+                    },
+                ),
+                "batch_size": (
+                    "INT",
+                    {
+                        "default": 1,
+                        "min": 1,
+                        "max": 24,
+                    },
+                ),
+            },
+            "optional": {
+                "opt_image": ("IMAGE", ),
+                "vae": ("VAE", ),
+            },
+        }
+
+    RETURN_TYPES = ("INT"  , "INT"   , "INT"       , "LATENT", "IMAGE"    , )
+    RETURN_NAMES = ("width", "height", "batch_size", "latent", "opt_image", ) 
+
+    FUNCTION = "execute"
+    CATEGORY = "utils"
+    DESCRIPTION = """Build the latents from the specified image size. If an image is provided, its size will be used.
+                    To customize the list of image sizes, create a file /input/ntx_data/image_sizes.txt
+                    and write the sizes, one for each row, int the form WIDTHxHEIGHT"""
+
+    OUTPUT_NODE = False
+
+    def execute(self, image_size, width, height, batch_size, opt_image=None, vae=None):        
+
+        if opt_image == None:
+            if image_size != "custom": # decode standard image size if any
+                match = re.search(r'([\d]+)x([\d]+)', image_size)
+                if match == None:
+                    width = 512
+                    height = 512
+                else:
+                    width = int(match[1])
+                    height = int(match[2])
+            
+            latent_width = width // 8
+            latent_height = height // 8
+            samples = torch.zeros([batch_size, 4, latent_height, latent_width], device=comfy.model_management.intermediate_device())
+            width = latent_width * 8
+            height = latent_height * 8
+            
+            latent = {"samples":samples}
+            
+            return (width, height, batch_size, latent, None, )
+        else:
+            width = opt_image.shape[2]
+            height = opt_image.shape[1]
+            from nodes import VAEEncode # the nodes module can be referenced, because its path is added to sys.path in __init__
+            (latent, ) = VAEEncode().encode(vae, opt_image, )
+            if batch_size > 1:
+                from nodes import RepeatLatentBatch # the nodes module can be referenced, because its path is added to sys.path in __init__
+                (latent, ) = RepeatLatentBatch().repeat(latent, batch_size, )
+            return (width, height, batch_size, latent, opt_image, )
+
 class CollectModelNtxdata:
     def __init__(self):
         pass
@@ -608,7 +655,8 @@ NODE_LIST = {
     "LoadCustomVae": LoadCustomVae,
     "ConvertLoraStackToString": ConvertLoraStackToString,
     "ConvertLoraStringToStack": ConvertLoraStringToStack,
-    "CreateImageLatent": CreateImageLatent,
     "ApplyLoraStack": ApplyLoraStack,
-    "CollectModelNtxdata": CollectModelNtxdata,
+    "MergeLoraStacks": MergeLoraStacks,
+    "CreateImageLatent": CreateImageLatent,
+    "CollectModelNtxdata": [CollectModelNtxdata, "CollectModelNtxdata (do not use)"],
 }

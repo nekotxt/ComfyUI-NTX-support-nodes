@@ -58,8 +58,13 @@ def generate_node_mappings(node_config):
 
     for node_name, node_class in node_config.items():
         full_name = f"{ADDON_PREFIX}{node_name}"
+        if isinstance(node_class, list):
+            node_class, node_display_name = node_class[0], f"{ADDON_PREFIX}{node_class[1]}"
+        else:
+            node_display_name = full_name
+
         node_class_mappings[full_name] = node_class
-        node_display_name_mappings[full_name] = full_name
+        node_display_name_mappings[full_name] = node_display_name
         if is_string_empty(node_class.CATEGORY):
             node_class.CATEGORY = ADDON_CATEGORY
         else:
@@ -132,13 +137,17 @@ async def get_prompt_for_char_option(request):
 
 # Support routes for downloading of models
 
+log_info(f"To download the models defined in {SETTINGS_DIR / 'downloads'} go to : /{API_PREFIX}/download_models")
+
 @PromptServer.instance.routes.get(f"/{API_PREFIX}/download_models")
 async def download_models(request):
     global COMFY_DIR
     global CONFIGURATION
     global SETTINGS_DIR
 
-    from .scripts.download_ntxdata import main_execution
-    main_execution(downloads_dir=SETTINGS_DIR / "downloads", models_dir=COMFY_DIR / "models", tokens=CONFIGURATION.get("tokens", {}), simulation_only=False)
+    cloud_storage_id = CONFIGURATION.get("cloud_storage_id", "pcloud")
 
-    return web.json_response("")
+    from .scripts.download_ntxdata import main_execution
+    main_execution(downloads_dir=SETTINGS_DIR / "downloads", models_dir=COMFY_DIR / "models", tokens=CONFIGURATION.get("tokens", {}), simulation_only=False, cloud_storage_id=cloud_storage_id)
+
+    return web.json_response("download_models completed")

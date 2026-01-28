@@ -3,6 +3,7 @@ import hashlib
 import os
 import requests
 import shutil
+import subprocess
 from pathlib import Path
 from ruamel.yaml import YAML
 #import subprocess
@@ -81,7 +82,7 @@ def download_file(url, save_path):
 
     log_message(f"- file downloaded successfully")
 
-def try_downloads(name:str, model:dict, save_path:Path, tokens:dict):
+def try_downloads(model_type:str, name:str, model:dict, save_path:Path, tokens:dict, cloud_storage_id:str):
 
     urls = []
 
@@ -99,9 +100,9 @@ def try_downloads(name:str, model:dict, save_path:Path, tokens:dict):
             if url != "":
                 urls.append(url)
     
-    if len(urls) == 0:
-        log_error(f"- the download url for the model '{name}' is not defined")
-        return False
+    # if len(urls) == 0:
+    #     log_error(f"- the download url for the model '{name}' is not defined")
+    #     return False
 
     for url in urls:
         try:
@@ -112,10 +113,16 @@ def try_downloads(name:str, model:dict, save_path:Path, tokens:dict):
 
             # actual download
             download_file(url, save_path)
-
             return True
         except Exception as x:
             log_error(f"for model {name} : {str(x)}")
+
+    # try to download from cloud storage
+    log_message(f"- try download from cloud storage {cloud_storage_id}:models/{model_type}/{name}")
+    result = subprocess.run(["rclone", "copy", f"{cloud_storage_id}:models/{model_type}/{name}", f"{save_path.parent}", "-P"], capture_output=True, text=True)
+    if result.stderr == "":
+        log_message("- file downloaded from cloud storage")
+        return True
 
     log_error(f"- it was not possible to find a valid download for model '{name}'")
     return False
@@ -148,7 +155,7 @@ def create_sha256(file_path, force_recalc:bool = False):
 
     return v_sha256
 
-def main_execution(downloads_dir:Path, models_dir:Path, tokens:dict, simulation_only:bool=False):
+def main_execution(downloads_dir:Path, models_dir:Path, tokens:dict, simulation_only:bool=False, cloud_storage_id:str=""):
     global msg_log
     global err_log
     msg_log = []
@@ -191,7 +198,7 @@ def main_execution(downloads_dir:Path, models_dir:Path, tokens:dict, simulation_
             # try download the file, and check if the file now exists
             downloaded = False
             if not file_exists:
-                downloaded = try_downloads(name, model, save_path, tokens)
+                downloaded = try_downloads(model_type, name, model, save_path, tokens, cloud_storage_id)
                 file_exists = save_path.is_file()
 
             # if there is a file, retrieve the hash (always calculate it if the file was just downloaded) and check the match with the model data
