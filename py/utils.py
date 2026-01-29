@@ -171,6 +171,43 @@ def format_lora_as_string(lora_name, strength_model, strength_clip, compact_form
     else:
         return f"<lora:{lora_name}:{strength_model}:{strength_clip}>"
 
+LIST_OF_LORA_DIRS = None
+def solve_lora_name(lora_name:str):
+    # log_info(f"Solve lora name [{lora_name}]")
+    
+    lora_path = ""
+    try:
+        lora_path = folder_paths.get_full_path_or_raise("loras", lora_name)
+        # log_info(f"- found [{lora_name}] => {lora_path}")
+        return (lora_name, lora_path)
+    except Exception as e:
+        log_info(f"- {e}")
+
+    # generate the list of candidate dirs, if needed
+    global LIST_OF_LORA_DIRS
+    if LIST_OF_LORA_DIRS == None:
+        log_info("RETRIEVE LIST OF LORA DIRS")
+        LIST_OF_LORA_DIRS = []
+        for lora_dir in folder_paths.folder_names_and_paths.get("loras", ([], []))[0]:
+            lora_dir_path = Path(lora_dir)
+            for subdir in lora_dir_path.rglob("*"):
+                if subdir.is_dir():
+                    LIST_OF_LORA_DIRS.append((lora_dir, subdir))
+
+    # try with file name only
+    lora_name_short = Path(lora_name).name
+    for (lora_dir, subdir) in LIST_OF_LORA_DIRS:
+        # log_info(f"- try with dir:{subdir}")
+        lora_path = subdir / lora_name_short
+        if lora_path.exists():
+            lora_path = str(lora_path)
+            lora_name_updated = lora_path[len(lora_dir)+1:]
+            log_info(f"- found [{lora_name}] => [{lora_name_updated}] => {lora_path}")
+            return (lora_name_updated, lora_path)
+
+    # it could not find the model
+    return (lora_name, None)
+
 # ===== NODES : UTILITIES ==================================================================================================================
 
 class ReplaceTextParameters:
@@ -423,8 +460,13 @@ class ApplyLoraStack:
                 log_info(f"- SKIP [{lora_name}] - already applied")
                 continue
 
+            (lora_name, lora_path) = solve_lora_name(lora_name)
+            if lora_path == None:
+                log_info(f"- ERROR [{lora_name}] model file not found")
+                continue
+
             try:
-                lora_path = folder_paths.get_full_path_or_raise("loras", lora_name)
+                # lora_path = folder_paths.get_full_path_or_raise("loras", lora_name)
 
                 lora = None
                 for(cached_lora_path, cached_lora) in CACHED_LORAS:
@@ -551,6 +593,13 @@ class CreateImageLatent:
             "optional": {
                 "opt_image": ("IMAGE", ),
                 "vae": ("VAE", ),
+                "opt_image_size": (["use image size", "crop to input size", "resize and use new size"], ),
+                "opt_image_encode": ("BOOLEAN", {
+                    "default": True, 
+                    "label_on": "yes", 
+                    "label_off": "no", 
+                    "tooltip": ""
+                }),                
             },
         }
 
@@ -565,7 +614,7 @@ class CreateImageLatent:
 
     OUTPUT_NODE = False
 
-    def execute(self, image_size, width, height, batch_size, opt_image=None, vae=None):        
+    def execute(self, image_size, width, height, batch_size, opt_image=None, vae=None, opt_image_size=None, opt_image_encode=True):        
 
         if opt_image == None:
             if image_size != "custom": # decode standard image size if any
@@ -575,26 +624,95 @@ class CreateImageLatent:
                     height = 512
                 else:
                     width = int(match[1])
-                    height = int(match[2])
-            
+                    height = int(match[2])            
+        else:
+            if opt_image_size == "crop to input size":
+                opt_image = comfy.utils.common_upscale(opt_image.movedim(-1, 1), width, height, "lanczos", "center").movedim(1, -1)
+            elif opt_image_size == "resize and use new size":
+                image_w = opt_image.shape[2]
+                image_h = opt_image.shape[1]
+                ratio_w = width / image_w
+                ratio_h = height / image_h
+                if ratio_w < ratio_h:
+                    final_width = width
+                    final_height = round(image_h * ratio_w)
+                else:
+                    final_width = round(image_w * ratio_h)
+                    final_height = height
+
+                opt_image = comfy.utils.common_upscale(opt_image.movedim(-1, 1), final_width, final_height, "lanczos", "disabled").movedim(1, -1)
+                width = opt_image.shape[2]
+                height = opt_image.shape[1]
+            else:
+                width = opt_image.shape[2]
+                height = opt_image.shape[1]
+
+        if (opt_image == None) or (opt_image_encode == False):
             latent_width = width // 8
             latent_height = height // 8
             samples = torch.zeros([batch_size, 4, latent_height, latent_width], device=comfy.model_management.intermediate_device())
             width = latent_width * 8
             height = latent_height * 8
-            
             latent = {"samples":samples}
-            
-            return (width, height, batch_size, latent, None, )
         else:
-            width = opt_image.shape[2]
-            height = opt_image.shape[1]
             from nodes import VAEEncode # the nodes module can be referenced, because its path is added to sys.path in __init__
             (latent, ) = VAEEncode().encode(vae, opt_image, )
             if batch_size > 1:
                 from nodes import RepeatLatentBatch # the nodes module can be referenced, because its path is added to sys.path in __init__
                 (latent, ) = RepeatLatentBatch().repeat(latent, batch_size, )
-            return (width, height, batch_size, latent, opt_image, )
+
+        return (width, height, batch_size, latent, opt_image, )
+
+    # def execute(self, image_size, width, height, batch_size, opt_image=None, vae=None, opt_image_size=None):        
+
+    #     if opt_image == None:
+    #         if image_size != "custom": # decode standard image size if any
+    #             match = re.search(r'([\d]+)x([\d]+)', image_size)
+    #             if match == None:
+    #                 width = 512
+    #                 height = 512
+    #             else:
+    #                 width = int(match[1])
+    #                 height = int(match[2])
+            
+    #         latent_width = width // 8
+    #         latent_height = height // 8
+    #         samples = torch.zeros([batch_size, 4, latent_height, latent_width], device=comfy.model_management.intermediate_device())
+    #         width = latent_width * 8
+    #         height = latent_height * 8
+            
+    #         latent = {"samples":samples}
+            
+    #         return (width, height, batch_size, latent, None, )
+    #     else:
+    #         if opt_image_size == "crop to input size":
+    #             opt_image = comfy.utils.common_upscale(opt_image.movedim(-1, 1), width, height, "lanczos", "center").movedim(1, -1)
+    #         elif opt_image_size == "resize and use new size":
+    #             image_w = opt_image.shape[2]
+    #             image_h = opt_image.shape[1]
+    #             ratio_w = width / image_w
+    #             ratio_h = height / image_h
+    #             if ratio_w < ratio_h:
+    #                 final_width = width
+    #                 final_height = round(image_h * ratio_w)
+    #             else:
+    #                 final_width = round(image_w * ratio_h)
+    #                 final_height = height
+
+    #             opt_image = comfy.utils.common_upscale(opt_image.movedim(-1, 1), final_width, final_height, "lanczos", "disabled").movedim(1, -1)
+    #             width = opt_image.shape[2]
+    #             height = opt_image.shape[1]
+    #         else:
+    #             width = opt_image.shape[2]
+    #             height = opt_image.shape[1]
+
+    #         from nodes import VAEEncode # the nodes module can be referenced, because its path is added to sys.path in __init__
+    #         (latent, ) = VAEEncode().encode(vae, opt_image, )
+    #         if batch_size > 1:
+    #             from nodes import RepeatLatentBatch # the nodes module can be referenced, because its path is added to sys.path in __init__
+    #             (latent, ) = RepeatLatentBatch().repeat(latent, batch_size, )
+            
+    #         return (width, height, batch_size, latent, opt_image, )
 
 class CollectModelNtxdata:
     def __init__(self):
@@ -646,6 +764,32 @@ class CollectModelNtxdata:
 
         return ()
 
+class Test:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "lora_stack" :("LORA_STACK", ),
+            },
+            "optional": {
+            },
+        }
+
+    RETURN_TYPES = ("LORA_STACK", )
+    RETURN_NAMES = ("lora_stack", ) 
+
+    FUNCTION = "execute"
+    CATEGORY = "utils"
+    DESCRIPTION = ""
+
+    OUTPUT_NODE = False
+
+    def execute(self, lora_stack, ):        
+
+        return (lora_stack, )
 
 # ===== INITIALIZATION =====================================================================================================================
 
@@ -659,4 +803,5 @@ NODE_LIST = {
     "MergeLoraStacks": MergeLoraStacks,
     "CreateImageLatent": CreateImageLatent,
     "CollectModelNtxdata": [CollectModelNtxdata, "CollectModelNtxdata (do not use)"],
+    #"Test": Test,
 }

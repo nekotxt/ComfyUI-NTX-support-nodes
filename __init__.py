@@ -91,11 +91,17 @@ async def get_checkpoint_info(request):
     ckpt_name = data.get("ckpt_name", "")
     if ckpt_name == "":
         return web.json_response({"notes": "ERROR : ckpt_name is empty!"})
-    
+
+    # print("get_checkpoint_info : ckpt_name")
+    # print(ckpt_name)
+
     from .py.loadinfo import g_models_manager
     ckpt_info = g_models_manager.get_model(model_type="checkpoints", model_id=ckpt_name)
     if ckpt_info == None:
         return web.json_response({"notes": f"ERROR : ckpt_info is Null for {ckpt_name}!"})
+
+    # print("get_checkpoint_info : initial data")
+    # print(ckpt_info)
     
     # copy the notes info to the model data
     ckpt_info = clone_data(ckpt_info) # copy to prevent change of original data
@@ -109,6 +115,14 @@ async def get_checkpoint_info(request):
         ckpt_info["model"]["sampler_name"] = "euler"
     if not ckpt_info["model"].get("scheduler", "") in load_list_schedulers():
         ckpt_info["model"]["scheduler"] = "simple"
+    
+    # ensure clip_skip is negative
+    clip_skip = int(ckpt_info["model"].get("clip_skip", 0))
+    if clip_skip > 0:
+        ckpt_info["model"]["clip_skip"] = - clip_skip
+
+    # print("get_checkpoint_info : final data")
+    # print(ckpt_info.get("model"))
 
     return web.json_response(ckpt_info.get("model"))
 
