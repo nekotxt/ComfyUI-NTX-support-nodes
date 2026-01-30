@@ -84,6 +84,7 @@ class DictSet:
         pass
 
     DATA_TYPE = ANY_TYPE
+    DATA_OPTIONS = {}
     DEFAULT_VALUE = None
 
     @classmethod
@@ -94,7 +95,7 @@ class DictSet:
             },
             "optional": {
                 "pipe": ("DICT", ),
-                "value": (cls.DATA_TYPE, {"default": cls.DEFAULT_VALUE})
+                "value": (cls.DATA_TYPE, cls.DATA_OPTIONS | {"default": cls.DEFAULT_VALUE})
             }
         }
 
@@ -123,6 +124,7 @@ class DictGet:
         pass
 
     DATA_TYPE = ANY_TYPE
+    DATA_OPTIONS = {}
     DEFAULT_VALUE = None
 
     @classmethod
@@ -133,9 +135,9 @@ class DictGet:
                 "key": ("STRING", {"default": ""}),
             },
             "optional": {
-                "default": (cls.DATA_TYPE, {"default": cls.DEFAULT_VALUE})
+                "default": (cls.DATA_TYPE, cls.DATA_OPTIONS | {"default": cls.DEFAULT_VALUE})
             },
-        }
+        }   
 
     RETURN_TYPES = ("DICT", DATA_TYPE, )
     RETURN_NAMES = ("pipe", "value" , )
@@ -182,6 +184,10 @@ class DictGetInt(DictGet):
 
 class DictSetString(DictSet):
     DATA_TYPE = "STRING"
+    DEFAULT_VALUE = ""
+class DictSetStringMultiline(DictSet):
+    DATA_TYPE = "STRING"
+    DATA_OPTIONS = {"multiline": True, "dynamicPrompts": False}
     DEFAULT_VALUE = ""
 class DictGetString(DictGet):
     DATA_TYPE = "STRING"
@@ -502,6 +508,7 @@ NODE_LIST = {
     "DictGetInt": DictGetInt,
 
     "DictSetString": DictSetString,
+    "DictSetStringMultiline": DictSetStringMultiline,
     "DictGetString": DictGetString,
 
     "DictSetModel": DictSetModel,

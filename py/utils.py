@@ -616,21 +616,22 @@ class CreateImageLatent:
 
     def execute(self, image_size, width, height, batch_size, opt_image=None, vae=None, opt_image_size=None, opt_image_encode=True):        
 
-        if opt_image == None:
-            if image_size != "custom": # decode standard image size if any
-                match = re.search(r'([\d]+)x([\d]+)', image_size)
-                if match == None:
-                    width = 512
-                    height = 512
-                else:
-                    width = int(match[1])
-                    height = int(match[2])            
-        else:
+        if image_size != "custom": # decode standard image size if any
+            match = re.search(r'([\d]+)x([\d]+)', image_size)
+            if match == None:
+                width = 512
+                height = 512
+            else:
+                width = int(match[1])
+                height = int(match[2])            
+
+        if opt_image != None:
             if opt_image_size == "crop to input size":
                 opt_image = comfy.utils.common_upscale(opt_image.movedim(-1, 1), width, height, "lanczos", "center").movedim(1, -1)
             elif opt_image_size == "resize and use new size":
                 image_w = opt_image.shape[2]
                 image_h = opt_image.shape[1]
+                
                 ratio_w = width / image_w
                 ratio_h = height / image_h
                 if ratio_w < ratio_h:
@@ -639,7 +640,7 @@ class CreateImageLatent:
                 else:
                     final_width = round(image_w * ratio_h)
                     final_height = height
-
+                
                 opt_image = comfy.utils.common_upscale(opt_image.movedim(-1, 1), final_width, final_height, "lanczos", "disabled").movedim(1, -1)
                 width = opt_image.shape[2]
                 height = opt_image.shape[1]
@@ -662,57 +663,6 @@ class CreateImageLatent:
                 (latent, ) = RepeatLatentBatch().repeat(latent, batch_size, )
 
         return (width, height, batch_size, latent, opt_image, )
-
-    # def execute(self, image_size, width, height, batch_size, opt_image=None, vae=None, opt_image_size=None):        
-
-    #     if opt_image == None:
-    #         if image_size != "custom": # decode standard image size if any
-    #             match = re.search(r'([\d]+)x([\d]+)', image_size)
-    #             if match == None:
-    #                 width = 512
-    #                 height = 512
-    #             else:
-    #                 width = int(match[1])
-    #                 height = int(match[2])
-            
-    #         latent_width = width // 8
-    #         latent_height = height // 8
-    #         samples = torch.zeros([batch_size, 4, latent_height, latent_width], device=comfy.model_management.intermediate_device())
-    #         width = latent_width * 8
-    #         height = latent_height * 8
-            
-    #         latent = {"samples":samples}
-            
-    #         return (width, height, batch_size, latent, None, )
-    #     else:
-    #         if opt_image_size == "crop to input size":
-    #             opt_image = comfy.utils.common_upscale(opt_image.movedim(-1, 1), width, height, "lanczos", "center").movedim(1, -1)
-    #         elif opt_image_size == "resize and use new size":
-    #             image_w = opt_image.shape[2]
-    #             image_h = opt_image.shape[1]
-    #             ratio_w = width / image_w
-    #             ratio_h = height / image_h
-    #             if ratio_w < ratio_h:
-    #                 final_width = width
-    #                 final_height = round(image_h * ratio_w)
-    #             else:
-    #                 final_width = round(image_w * ratio_h)
-    #                 final_height = height
-
-    #             opt_image = comfy.utils.common_upscale(opt_image.movedim(-1, 1), final_width, final_height, "lanczos", "disabled").movedim(1, -1)
-    #             width = opt_image.shape[2]
-    #             height = opt_image.shape[1]
-    #         else:
-    #             width = opt_image.shape[2]
-    #             height = opt_image.shape[1]
-
-    #         from nodes import VAEEncode # the nodes module can be referenced, because its path is added to sys.path in __init__
-    #         (latent, ) = VAEEncode().encode(vae, opt_image, )
-    #         if batch_size > 1:
-    #             from nodes import RepeatLatentBatch # the nodes module can be referenced, because its path is added to sys.path in __init__
-    #             (latent, ) = RepeatLatentBatch().repeat(latent, batch_size, )
-            
-    #         return (width, height, batch_size, latent, opt_image, )
 
 class CollectModelNtxdata:
     def __init__(self):
@@ -764,6 +714,42 @@ class CollectModelNtxdata:
 
         return ()
 
+class PromptChainer:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "prompt": ("STRING", {
+                    "multiline": True, #True if you want the field to look like the one on the ClipTextEncode node
+                    "dynamicPrompts": True,
+                    "default": ""
+                }),
+            },
+            "optional": {
+                "prev_prompt": ("STRING", {
+                    "multiline": True, #True if you want the field to look like the one on the ClipTextEncode node
+                    "dynamicPrompts": True,
+                    "default": "", 
+                    "forceInput": True
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("STRING", )
+    RETURN_NAMES = ("prompt", )
+
+    FUNCTION = "execute"
+
+    #OUTPUT_NODE = False
+
+    CATEGORY = "utils"
+
+    def execute(self, prompt, prev_prompt = ""):        
+        return (prev_prompt + prompt, )
+
 class Test:
     def __init__(self):
         pass
@@ -803,5 +789,6 @@ NODE_LIST = {
     "MergeLoraStacks": MergeLoraStacks,
     "CreateImageLatent": CreateImageLatent,
     "CollectModelNtxdata": [CollectModelNtxdata, "CollectModelNtxdata (do not use)"],
+    "PromptChainer": PromptChainer,
     #"Test": Test,
 }
