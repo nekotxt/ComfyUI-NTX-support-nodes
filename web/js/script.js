@@ -102,6 +102,10 @@ app.registerExtension({
                 })
                 .then(response => response.json())
                 .then(data => { 
+                    if(data == null){
+                        alert("No data available for this checkpoint")
+                        return
+                    }
                     // console.log("Node " + node.title)
                     // console.log(data)
                     writeIntToWidget(node, "clip_skip", data, "clip_skip", -1)

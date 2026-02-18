@@ -1,3 +1,5 @@
+import folder_paths
+
 import json
 import ruamel.yaml
 
@@ -80,12 +82,14 @@ class ModelsManager():
     def get_model(self, model_type:str, model_id:str):
         full_model_id = _get_full_model_id(model_type, model_id)
         return self.models_by_ID.get(full_model_id, None)
-    
+
     def get_models_list(self, model_type:str):
         models_list = []
         if model_type in self.catalogue:
             for model_data in self.catalogue[model_type]:
                 models_list.append(model_data.get("id", ""))
+            models_list.sort()
+        models_list = folder_paths.get_filename_list(model_type) + ["----- models from data file ----"] + models_list
         return models_list
         
     def get_model_categories_list(self):

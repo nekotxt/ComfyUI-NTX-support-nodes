@@ -90,7 +90,8 @@ async def get_checkpoint_info(request):
     data = await request.json()
     ckpt_name = data.get("ckpt_name", "")
     if ckpt_name == "":
-        return web.json_response({"notes": "ERROR : ckpt_name is empty!"})
+        return web.json_response(None)
+        #return web.json_response({"notes": "ERROR : ckpt_name is empty!"})
 
     # print("get_checkpoint_info : ckpt_name")
     # print(ckpt_name)
@@ -98,7 +99,8 @@ async def get_checkpoint_info(request):
     from .py.loadinfo import g_models_manager
     ckpt_info = g_models_manager.get_model(model_type="checkpoints", model_id=ckpt_name)
     if ckpt_info == None:
-        return web.json_response({"notes": f"ERROR : ckpt_info is Null for {ckpt_name}!"})
+        return web.json_response(None)
+        #return web.json_response({"notes": f"ERROR : ckpt_info is Null for {ckpt_name}!"})
 
     # print("get_checkpoint_info : initial data")
     # print(ckpt_info)
