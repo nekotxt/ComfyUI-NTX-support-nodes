@@ -102,6 +102,7 @@ class ModelsManager():
 g_models_manager = ModelsManager()
 g_models_manager.load()
 log_info(f"Create g_models_manager from {g_models_manager.models_file}")
+#log_info(g_models_manager.get_models_list("checkpoints"))
 
 class LoadCheckpointInfo:
     def __init__(self):

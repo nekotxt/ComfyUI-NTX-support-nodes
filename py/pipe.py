@@ -322,8 +322,8 @@ class ListCount:
             },
         }
 
-    RETURN_TYPES = ("LIST" , "INTEGER", )
-    RETURN_NAMES = ("items", "count"  , )
+    RETURN_TYPES = ("LIST" , "INT"  , )
+    RETURN_NAMES = ("items", "count", )
 
     FUNCTION = "unpack"
     CATEGORY = "pipe"
