@@ -17,16 +17,17 @@ class RerouteBase:
     def INPUT_TYPES(s):
         return {
             "required": {
+            },
+            "optional": {
                 s.RETURN_NAMES[0] :(s.RETURN_TYPES[0], {
                     "forceInput": True
                 }),
             },
-            "optional": {
-            },
         }
 
-    RETURN_TYPES = ("ANY", )
-    RETURN_NAMES = ("x", ) 
+    RETURN_TYPES = (ANY_TYPE, )
+    RETURN_NAMES = ("value", ) 
+    DEFAULT_VALUE_IF_DISCONNECTED = None
 
     FUNCTION = "execute"
     CATEGORY = "reroute"
@@ -35,7 +36,13 @@ class RerouteBase:
     OUTPUT_NODE = False
 
     def execute(self, **kwargs, ):        
-        return (list(kwargs.values())[0], )
+        args = list(kwargs.values())
+        print(kwargs)
+        print(args)
+        if len(args) > 0:
+            return (args[0], )
+        else:
+            return (self.__class__.DEFAULT_VALUE_IF_DISCONNECTED, )
 
 class RerouteAny(RerouteBase):
     RETURN_TYPES = (ANY_TYPE, )
@@ -44,18 +51,22 @@ class RerouteAny(RerouteBase):
 class RerouteBoolean(RerouteBase):
     RETURN_TYPES = ("BOOLEAN", )
     RETURN_NAMES = ("boolean", ) 
+    DEFAULT_VALUE_IF_DISCONNECTED = False
 
 class RerouteFloat(RerouteBase):
     RETURN_TYPES = ("FLOAT", )
     RETURN_NAMES = ("float", ) 
+    DEFAULT_VALUE_IF_DISCONNECTED = 0.0
 
 class RerouteInteger(RerouteBase):
     RETURN_TYPES = ("INT", )
     RETURN_NAMES = ("integer", ) 
+    DEFAULT_VALUE_IF_DISCONNECTED = 0
 
 class RerouteString(RerouteBase):
     RETURN_TYPES = ("STRING", )
     RETURN_NAMES = ("string", ) 
+    DEFAULT_VALUE_IF_DISCONNECTED = ""
 
 class RerouteModel(RerouteBase):
     RETURN_TYPES = ("MODEL", )
