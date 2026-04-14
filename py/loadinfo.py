@@ -106,7 +106,6 @@ class ModelsManager():
 g_models_manager = ModelsManager()
 g_models_manager.load()
 log_info(f"Create g_models_manager from {g_models_manager.models_file}")
-#log_info(g_models_manager.get_models_list("checkpoints"))
 
 class LoadCheckpointInfo:
     def __init__(self):
@@ -193,61 +192,6 @@ class CharactersManager():
         self.models_file = SETTINGS_DIR / "catalogue_of_ntxdata.json"
         self.extra_chars_file = SETTINGS_DIR / "extra_chars.yaml"
         self.characters_file = SETTINGS_DIR / "characters.json"        
-
-    def rebuild_from_models_data(self):
-        global SETTINGS_DIR
-
-        prompts_data = {}
-        
-        # load chars defined in lora models
-        if self.models_file.is_file():
-            with open(self.models_file,'r', encoding='utf-8') as f:
-                models_data = json.load(f)
-            for model_id, full_model_data in models_file.get("loras", {}):
-                if ("model" in full_model_data) and ("prompts" in full_model_data):
-                    model_data = full_model_data.get("model", {})
-                    model_prompts = full_model_data.get("prompts", {})
-                    if (model_data.get("category", "") == "chars") and (isinstance(model_prompts, dict)):
-                        char_name = model_data.get("title", model_id)
-                        list_of_chars.append(char_name)
-                        save_name = model_data.get("save_name", char_name)
-                        prompts_data_for_char = {}
-                        lora_strength = model_data.get("lora_strength", 1.0)
-                        clip_strength = model_data.get("clip_strength", 1.0)
-                        lora_syntax = f"<lora:{model_id}:{lora_strength}:{clip_strength}>".replace(',','.')
-                        for prompt_name, prompt_text in model_prompts.items():                    
-                            prompt_parts = prompt_text.split(NEGATIVE_SEPARATOR)
-                            prompts_data_for_char[prompt_name] = {
-                                "positive": (prompt_parts[0] + ", " + lora_syntax).replace(',,',','),
-                                "negative": prompt_parts[1] if len(prompt_parts) > 1 else "",
-                                "save_name": save_name
-                            }
-                        prompts_data[char_name] = prompts_data_for_char
-        
-        # load additional chars defined in standalone forms
-        if self.extra_chars_file.is_file():
-            with open(self.extra_chars_file, 'r', encoding='utf-8') as f:
-                extra_chars_text_data = f.read()
-            yaml = ruamel.yaml.YAML(typ='safe', pure=True)
-            extra_chars_data = yaml.load(extra_chars_text_data)
-            for char_name, char_data in extra_chars_data.items():
-                char_name_mod = char_name + " (extra)"
-                list_of_chars.append(char_name_mod)
-                save_name = char_data.get("extras", {}).get("save_name", char_name)
-                prompts_data_for_char = {}
-                for prompt_name, prompt_line in char_data.get("prompts", {}).items():
-                    prompt_parts = prompt_line.split(NEGATIVE_SEPARATOR)
-                    positive = prompt_parts[0]
-                    negative = prompt_parts[1] if len(prompt_parts) > 1 else ""
-                    prompts_data_for_char[prompt_name] = {
-                        "positive": positive,
-                        "negative": negative,
-                        "save_name": save_name
-                    }
-                prompts_data[char_name_mod] = prompts_data_for_char  
-
-        with open(self.characters_file, 'w', encoding='utf-8') as f:
-            json.dump(prompts_data, f, ensure_ascii=False, indent=4)
 
     def load(self):
         if self.characters_file.is_file():

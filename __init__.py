@@ -39,6 +39,9 @@ log_setup(addon_name=ADDON_NAME, show_info=True, show_info_node_name=True, show_
 
 NODE_LIST = {}
 
+#from .py.cascade_collage_node import NODE_LIST as CCN_NODE_LIST
+#NODE_LIST.update(CCN_NODE_LIST)
+
 from .py.images import NODE_LIST as IMAGES_NODE_LIST
 NODE_LIST.update(IMAGES_NODE_LIST)
 
@@ -47,6 +50,9 @@ NODE_LIST.update(LOADINFO_NODE_LIST)
 
 from .py.pipe import NODE_LIST as PIPE_NODE_LIST
 NODE_LIST.update(PIPE_NODE_LIST)
+
+from .py.reroute import NODE_LIST as REROUTE_NODE_LIST
+NODE_LIST.update(REROUTE_NODE_LIST)
 
 from .py.utils import NODE_LIST as UTILS_NODE_LIST, util_setup
 NODE_LIST.update(UTILS_NODE_LIST)
@@ -151,7 +157,7 @@ async def get_prompt_for_char_option(request):
 
     return web.json_response(prompt_data)
 
-# Support routes for downloading of models
+# Support routes for downloading of models (using module scripts/download_ntxdata.py)
 
 log_info(f"To download the models defined in {SETTINGS_DIR / 'downloads'} go to : /{API_PREFIX}/download_models")
 
@@ -167,3 +173,55 @@ async def download_models(request):
     result = main_execution(downloads_dir=SETTINGS_DIR / "downloads", models_dir=COMFY_DIR / "models", tokens=CONFIGURATION.get("tokens", {}), simulation_only=False, cloud_storage_id=cloud_storage_id)
 
     return web.json_response(result)
+
+# Support routes for rescan of models (using module scripts/scan_models.py)
+
+log_info(f"To rescan the models contained in {COMFY_DIR / 'models'} go to : /{API_PREFIX}/rescan_models")
+
+@PromptServer.instance.routes.get(f"/{API_PREFIX}/rescan_models")
+async def download_models(request):
+    global COMFY_DIR
+    global CONFIGURATION
+
+    # the location of the models dir is retrieved from the configuration file, or defaults to 'models' subdir
+    models_dir = Path(CONFIGURATION.get("models_dir_local", ""))
+    if models_dir == "":
+        # defaults to standard comfy dir
+        models_dir = COMFY_DIR / "models"
+        # branches to scan (the key and value is the standard comfy name)
+        model_types_mapping = {
+            "vae": "vae", 
+            "checkpoints": "checkpoints",
+            "diffusion_models": "diffusion_models",
+            "loras": "loras",
+        }
+    else:
+        # branches to scan (the key is the standard comfy name, the value is the actual name of the directory to scan on disk)
+        model_types_mapping = {
+            "vae": "VAE", 
+            "checkpoints": "Checkpoints",
+            "diffusion_models": "diffusion_models",
+            "loras": "Lora",
+        }
+    if models_dir.exists():
+        log_info(f"Processing {models_dir}")
+    else:
+        return web.json_response(f"Models dir not found: {models_dir}")
+
+    from .scripts.scan_models import generate_models_catalogue
+    result_models = generate_models_catalogue(models_dir=models_dir, model_types_mapping=model_types_mapping, force_rescan=False)
+    log_info(result_models)
+
+    from .scripts.scan_models import generate_chars_catalogue
+    result_chars = generate_chars_catalogue()
+    log_info(result_chars)
+
+    from .py.loadinfo import g_models_manager
+    g_models_manager.load()
+    log_info(f"Updated g_models_manager from {g_models_manager.models_file}")
+
+    from .py.loadinfo import g_characters_manager
+    g_characters_manager.load()
+    log_info(f"Updated g_characters_manager from {g_characters_manager.characters_file}")
+
+    return web.json_response(result_models + "\n" + result_chars)

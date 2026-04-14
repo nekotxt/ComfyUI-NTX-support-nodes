@@ -1,2 +1,6 @@
 __pycache__/*
 py/__pycache__/*
+*.pyc
+scripts/OPTIMIZATION_REPORT.md
+scripts/model_downloader_optimized.py
+.vscode/launch.json
