@@ -44,10 +44,6 @@ class RerouteBase:
         else:
             return (self.__class__.DEFAULT_VALUE_IF_DISCONNECTED, )
 
-class RerouteAny(RerouteBase):
-    RETURN_TYPES = (ANY_TYPE, )
-    RETURN_NAMES = ("value", ) 
-
 class RerouteBoolean(RerouteBase):
     RETURN_TYPES = ("BOOLEAN", )
     RETURN_NAMES = ("boolean", ) 
@@ -96,10 +92,29 @@ class RerouteLatent(RerouteBase):
     RETURN_TYPES = ("LATENT", )
     RETURN_NAMES = ("latent", ) 
 
+class RerouteDict(RerouteBase):
+    RETURN_TYPES = ("DICT", )
+    RETURN_NAMES = ("dict", ) 
+    DEFAULT_VALUE_IF_DISCONNECTED = {}
+
+class RerouteConditioning(RerouteBase):
+    RETURN_TYPES = ("CONDITIONING", )
+    RETURN_NAMES = ("conditioning", ) 
+
+class RerouteLoraStack(RerouteBase):
+    RETURN_TYPES = ("LORA_STACK", )
+    RETURN_NAMES = ("lora_stack", ) 
+    DEFAULT_VALUE_IF_DISCONNECTED = []
+
+class RerouteControlNetStack(RerouteBase):
+    RETURN_TYPES = ("CONTROL_NET_STACK", )
+    RETURN_NAMES = ("control_net_stack", ) 
+    DEFAULT_VALUE_IF_DISCONNECTED = []
+
 # ===== INITIALIZATION =====================================================================================================================
 
 NODE_LIST = {
-    "RerouteAny": RerouteAny,
+    "RerouteAny": RerouteBase,
     "RerouteBoolean": RerouteBoolean,
     "RerouteFloat": RerouteFloat,
     "RerouteInteger": RerouteInteger,
@@ -111,4 +126,8 @@ NODE_LIST = {
     "RerouteImage": RerouteImage,
     "RerouteMask": RerouteMask,
     "RerouteLatent": RerouteLatent,
+    "RerouteDict": RerouteDict,
+    "RerouteConditioning": RerouteConditioning,
+    "RerouteLoraStack": RerouteLoraStack,
+    "RerouteControlNetStack": RerouteControlNetStack,
 }

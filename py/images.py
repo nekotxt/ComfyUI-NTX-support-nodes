@@ -117,7 +117,8 @@ class SaveMultipleImages:
             file_name = f"{file_name}_{str(now.year)[-2:]}{now.month:02}{now.day:02}{now.hour:02}{now.minute:02}{now.second:02}"
 
         if model_name != None: 
-            model_name = model_name.replace('\\', '_').replace('/', '_') # replace slash with underscore
+            #model_name = model_name.replace('\\', '_').replace('/', '_') # replace slash with underscore
+            model_name = Path(model_name).stem
             file_name = f"{file_name}_{model_name}"
         
         if sampler_name != None: 

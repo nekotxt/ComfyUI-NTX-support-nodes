@@ -179,9 +179,12 @@ async def download_models(request):
 log_info(f"To rescan the models contained in {COMFY_DIR / 'models'} go to : /{API_PREFIX}/rescan_models")
 
 @PromptServer.instance.routes.get(f"/{API_PREFIX}/rescan_models")
-async def download_models(request):
+async def rescan_models(request):
     global COMFY_DIR
     global CONFIGURATION
+
+    # accept force_rescan from query string
+    force_rescan = bool(request.query.get("force_rescan", False))
 
     # the location of the models dir is retrieved from the configuration file, or defaults to 'models' subdir
     models_dir = Path(CONFIGURATION.get("models_dir_local", ""))
@@ -209,7 +212,7 @@ async def download_models(request):
         return web.json_response(f"Models dir not found: {models_dir}")
 
     from .scripts.scan_models import generate_models_catalogue
-    result_models = generate_models_catalogue(models_dir=models_dir, model_types_mapping=model_types_mapping, force_rescan=False)
+    result_models = generate_models_catalogue(models_dir=models_dir, model_types_mapping=model_types_mapping, force_rescan=force_rescan)
     log_info(result_models)
 
     from .scripts.scan_models import generate_chars_catalogue
@@ -224,4 +227,4 @@ async def download_models(request):
     g_characters_manager.load()
     log_info(f"Updated g_characters_manager from {g_characters_manager.characters_file}")
 
-    return web.json_response(result_models + "\n" + result_chars)
+    return web.json_response(f"force_rescan={force_rescan}" + "\n" + result_models + "\n" + result_chars)
