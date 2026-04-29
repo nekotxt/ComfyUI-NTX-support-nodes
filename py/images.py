@@ -1,3 +1,5 @@
+from comfy_api.latest import ComfyExtension, io
+
 import folder_paths
 
 import json
@@ -7,12 +9,19 @@ import torch
 import typing
 from datetime import datetime
 from pathlib import Path
-from PIL import Image #, ImageOps, ImageSequence, ImageFile
+from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 from torchvision.transforms import InterpolationMode
+from typing_extensions import override
 
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY
 from .logging import log_info, log_node_name
-from .utils import ANY_TYPE
+
+# ===== Custom types ===========================================================================================================================
+
+LIST_SAVED_IMAGES = io.Custom("LIST_SAVED_IMAGES")
+
+# ===== Image utilities ========================================================================================================================
 
 # decode image from tensor
 def tensor_to_pillow(image: typing.Any) -> Image.Image:
@@ -54,81 +63,68 @@ def create_images_grid(images: list[Image.Image], gap=2, background_color="black
         x = (i % max_columns) * (size[0] + gap)
         y = (i // max_columns) * (size[1] + gap)
         grid_image.paste(image, (x, y))
-    
+
     return grid_image
 
 
-class SaveMultipleImages:
-    def __init__(self):
-        pass
+# ===== NODES : IMAGES ==================================================================================================================
+
+class SaveMultipleImages(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}SaveMultipleImages",
+            display_name=f"{ADDON_PREFIX}Save Multiple Images",
+            category=f"{ADDON_CATEGORY}/utils",
+            is_output_node=True,
+            inputs=[
+                io.Image.Input("images"),
+                io.Boolean.Input("date_in_name", default=True, label_on="yes", label_off="no"),
+                io.String.Input("save_prefix", multiline=False, dynamic_prompts=False, default=""),
+                io.Boolean.Input("save_individual", default=False, label_on="yes", label_off="no"),
+                io.Boolean.Input("save_grid", default=True, label_on="yes", label_off="no"),
+                io.Int.Input("grid_gap", default=2, min=1, max=50, step=1),
+                io.String.Input("grid_color", default="black"),
+                io.Boolean.Input("save_workflow", default=True, label_on="yes", label_off="no"),
+                io.AnyType.Input("model_name", optional=True),
+                io.AnyType.Input("sampler_name", optional=True),
+                io.AnyType.Input("scheduler", optional=True),
+            ],
+            outputs=[
+                io.Image.Output("grid"),
+                LIST_SAVED_IMAGES.Output("list_saved_images"),
+            ],
+            hidden=[io.Hidden.extra_pnginfo],
+        )
 
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "images": ("IMAGE", ),
-                "date_in_name": ("BOOLEAN", {"default": True, "label_on": "yes", "label_off": "no"}),
-                "save_prefix": ("STRING", {
-                    "multiline": False,
-                    "dynamicPrompts": False,
-                    "default": ""
-                }),
-                "save_individual": ("BOOLEAN", {"default": False, "label_on": "yes", "label_off": "no"}),
-                "save_grid": ("BOOLEAN", {"default": True, "label_on": "yes", "label_off": "no"}),
-                "grid_gap": ("INT", {"default": 2, "min": 1, "max": 50, "step": 1}),
-                "grid_color": ("STRING", {"default": "black"}),
-                "save_workflow": ("BOOLEAN", {"default": True, "label_on": "yes", "label_off": "no"}),
-            },
-            "optional": {
-                "model_name": (ANY_TYPE,),
-                "sampler_name": (ANY_TYPE, ),
-                "scheduler": (ANY_TYPE, ),
-            },
-            "hidden": {
-                "extra_pnginfo": "EXTRA_PNGINFO"
-            },
-        }
-                        
-    RETURN_TYPES = ("IMAGE", "LIST_SAVED_IMAGES", )
-    RETURN_NAMES = ("grid" , "list_saved_images", )
-
-    FUNCTION = "save_images"
-
-    OUTPUT_NODE = True
-
-    CATEGORY = "utils"
-
-    def save_images(self, images, date_in_name:bool, save_prefix:str, save_individual:bool, save_grid:bool, grid_gap:int, grid_color:str, save_workflow:bool, model_name=None, sampler_name=None, scheduler=None, extra_pnginfo=None ):
+    def execute(cls, images, date_in_name: bool, save_prefix: str, save_individual: bool, save_grid: bool, grid_gap: int, grid_color: str, save_workflow: bool, model_name=None, sampler_name=None, scheduler=None):
 
         log_node_name("SaveMultipleImages")
-        
-        # exit if there are no images
 
-        if images == None:
+        # exit if there are no images
+        if images is None:
             log_info("no input images, exit")
-            return (None, [], )
+            return io.NodeOutput(None, [])
 
         # calculate file save name
+        file_name = save_prefix
 
-        file_name = save_prefix#.replace("\\", os.path.sep).replace("/", os.path.sep)
-
-        if date_in_name: 
+        if date_in_name:
             now = datetime.now()
             file_name = f"{file_name}_{str(now.year)[-2:]}{now.month:02}{now.day:02}{now.hour:02}{now.minute:02}{now.second:02}"
 
-        if model_name != None: 
-            #model_name = model_name.replace('\\', '_').replace('/', '_') # replace slash with underscore
+        if model_name is not None:
             model_name = Path(model_name).stem
             file_name = f"{file_name}_{model_name}"
-        
-        if sampler_name != None: 
+
+        if sampler_name is not None:
             file_name = f"{file_name}_{sampler_name}"
 
-        if scheduler != None: 
+        if scheduler is not None:
             file_name = f"{file_name}_{scheduler}"
 
         # ensure the output directory exists
-
         output_dir = Path(folder_paths.get_output_directory())
 
         example_file = output_dir / f"{file_name}.png"
@@ -136,6 +132,7 @@ class SaveMultipleImages:
         directory = example_file.parent
         directory.mkdir(parents=True, exist_ok=True)
 
+        extra_pnginfo = cls.hidden.extra_pnginfo
         metadata = PngInfo()
         if save_workflow:
             if extra_pnginfo is not None:
@@ -143,51 +140,44 @@ class SaveMultipleImages:
                     metadata.add_text(x, json.dumps(extra_pnginfo[x]))
 
         # build a single grid image
-        
         img_list = []
         for (batch_number, image) in enumerate(images):
             img = tensor_to_pillow(image)
             img_list.append(img)
-        
+
         img_grid = img_list[0] if len(img_list) == 1 else create_images_grid(img_list, grid_gap, grid_color)
 
         # create a list to keep track of the files generated
-
         list_saved_images = list()
 
         # if requested save the single grid image
-
         if save_grid:
-
             log_info("Save grid image :")
-
             image_grid_path = output_dir / f"{file_name}.png"
             img_grid.save(image_grid_path, pnginfo=metadata, compress_level=4)
             list_saved_images.append(str(image_grid_path))
-    
-        # if requested save the image files (but skip if the grid was saved and there is only 1 image)
 
+        # if requested save the image files (but skip if the grid was saved and there is only 1 image)
         if save_grid & (len(img_list) == 1):
             save_individual = False
 
         if save_individual:
-
             log_info("Save single images :")
-            
             counter = 1
             for img in img_list:
                 image_file_path = output_dir / f"{file_name}_{counter:05}.png"
                 img.save(image_file_path, pnginfo=metadata, compress_level=4)
                 list_saved_images.append(str(image_file_path))
                 counter += 1
-        
+
         for s in list_saved_images:
             log_info(f"Saved file : {s}")
 
-        return (pillow_to_tensor(img_grid), list_saved_images, )
+        return io.NodeOutput(pillow_to_tensor(img_grid), list_saved_images)
 
 # ===== INITIALIZATION =====================================================================================================================
 
-NODE_LIST = {
-    "SaveMultipleImages": SaveMultipleImages,
-}
+def get_nodes_list() -> list[type[io.ComfyNode]]:
+    return [
+        SaveMultipleImages,
+    ]

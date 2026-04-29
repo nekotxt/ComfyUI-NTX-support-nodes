@@ -1,9 +1,10 @@
-ADDON_NAME = ""
-LOG_INFO = True
-LOG_INFO_NODE_NAME = True
-LOG_INFO_LOAD_MODEL = True
-LOG_INFO_APPLY_MODEL = True
-LOG_WARNING = True
+from ..config_variables import ADDON_NAME, LOG_INFO, LOG_INFO_NODE_NAME, LOG_INFO_LOAD_MODEL, LOG_INFO_APPLY_MODEL, LOG_WARNING
+
+# LOG_INFO = True
+# LOG_INFO_NODE_NAME = True
+# LOG_INFO_LOAD_MODEL = True
+# LOG_INFO_APPLY_MODEL = True
+# LOG_WARNING = True
 
 # https://stackoverflow.com/questions/4842424/list-of-ansi-color-escape-sequences
 # https://en.wikipedia.org/wiki/ANSI_escape_code#3-bit_and_4-bit
@@ -52,11 +53,8 @@ COLORS = {
   'BG_BRIGHT_WHITE': '\33[107m',
 }
 
-def log_setup(addon_name:str, show_info:bool, show_info_node_name:bool, show_info_load_model:bool, show_info_apply_model:bool, show_warning:bool):
-  global ADDON_NAME, LOG_INFO, LOG_INFO_NODE_NAME, LOG_INFO_LOAD_MODEL, LOG_INFO_APPLY_MODEL, LOG_WARNING
-
-  ADDON_NAME = addon_name
-  log_info(f"ADDON_NAME = {ADDON_NAME}")
+def log_setup(show_info:bool, show_info_node_name:bool, show_info_load_model:bool, show_info_apply_model:bool, show_warning:bool):
+  global LOG_INFO, LOG_INFO_NODE_NAME, LOG_INFO_LOAD_MODEL, LOG_INFO_APPLY_MODEL, LOG_WARNING
 
   LOG_INFO = show_info
   log_info(f"LOG_INFO = {LOG_INFO}")

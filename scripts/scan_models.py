@@ -22,6 +22,20 @@ SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
 def _clean_path(path):
     return path.replace("\\", os.path.sep).replace("/", os.path.sep)
 
+def _order_data(data:dict):
+    # force an order for the dict keys
+    ordered_data = {}
+    list_of_std_keys = ["id", "model_type", "hash", "model", "prompts", "download", "notes"]
+    # - add standard keys in the given order
+    for k in list_of_std_keys:
+        if k in data:
+            ordered_data[k] = data[k]
+    # - add other keys as they appear in the original dict
+    for k in data:
+        if not(k in list_of_std_keys):
+            ordered_data[k] = data[k]
+    return ordered_data
+
 class DataFile:
     def __init__(self, path: Path):
         if not (path.suffix in [".ntxdata", ".txt", ".yaml"]):
@@ -260,20 +274,6 @@ def _rebuild_data_file(path: Path) -> DataFile:
     resulting_data_file.data = data
     return resulting_data_file
 
-def _order_data(data:dict):
-    # force an order for the dict keys
-    ordered_data = {}
-    list_of_std_keys = ["id", "model_type", "hash", "model", "prompts", "download", "notes"]
-    # - add standard keys in the given order
-    for k in list_of_std_keys:
-        if k in data:
-            ordered_data[k] = data[k]
-    # - add other keys as they appear in the original dict
-    for k in data:
-        if not(k in list_of_std_keys):
-            ordered_data[k] = data[k]
-    return ordered_data
-
 def _process_dir(root: Path, files_to_ignore: list, force_overwrite: bool, catalogue: list, model_type: str, log: list):
     global VALID_EXTENSIONS
 
@@ -291,8 +291,11 @@ def _process_dir(root: Path, files_to_ignore: list, force_overwrite: bool, catal
             # Prepare output path with .ntxdata extension
             out_path = p.with_suffix(".ntxdata")
 
-            # If file exists and overwrite is not required, return the current content
-            # but only if related files (i.e. files with different extension) have not been modified
+            # The file is rebuilt, unless 3 conditions are met:
+            # - the file already exists 
+            # - overwrite is not required
+            # - the related files (i.e. files with different extension) have not been modified
+            # If all 3 conditions are met, return the current content from file
             rebuild_file = True
             if out_path.exists():
                 if force_overwrite == False:

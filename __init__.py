@@ -1,84 +1,74 @@
+from comfy_api.latest import ComfyExtension, io, ui
+
 import json
-import sys
+# import sys
 
 from pathlib import Path
 
-from .py.logging import log_info, log_warning
+from .config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, COMFY_DIR, SETTINGS_DIR, CONFIGURATION
+from .py.logging import log_setup, log_info, log_warning
 from .py.utils import is_string_empty, clone_data, load_list_vaes, load_list_samplers, load_list_schedulers
 
-ADDON_NAME = "NTX-support-nodes"
-ADDON_PREFIX = "NTX"
-ADDON_CATEGORY = "NTXUtils"
-API_PREFIX = "ntx-sn"
-
-SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
-SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+#SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
+#SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ===== INITIALIZATION =====================================================================================================================
 
-# get a reference to the custom_nodes dir
-COMFY_DIR = Path.cwd()
-COMFY_DIR_str = str(COMFY_DIR)
-if not COMFY_DIR_str in sys.path:
-    sys.path.append(COMFY_DIR_str)
-COMFY_EXTRAS_DIR = COMFY_DIR / "comfy_extras"
-COMFY_EXTRAS_DIR_str = str(COMFY_EXTRAS_DIR)
-if not COMFY_EXTRAS_DIR_str in sys.path:
-    sys.path.append(COMFY_EXTRAS_DIR_str)
+# # get a reference to the custom_nodes dir
+# COMFY_DIR = Path.cwd()
+# COMFY_DIR_str = str(COMFY_DIR)
+# if not COMFY_DIR_str in sys.path:
+#     sys.path.append(COMFY_DIR_str)
+# COMFY_EXTRAS_DIR = COMFY_DIR / "comfy_extras"
+# COMFY_EXTRAS_DIR_str = str(COMFY_EXTRAS_DIR)
+# if not COMFY_EXTRAS_DIR_str in sys.path:
+#     sys.path.append(COMFY_EXTRAS_DIR_str)
 
-# configuration file
-CONFIGURATION = {}
-configuration_file = SETTINGS_DIR / "config.json"
-if configuration_file.is_file():
-    with open(configuration_file,'r', encoding='utf-8') as f:
-        CONFIGURATION = json.load(f)
+# # configuration file
+# CONFIGURATION = {}
+# configuration_file = SETTINGS_DIR / "config.json"
+# if configuration_file.is_file():
+#     with open(configuration_file,'r', encoding='utf-8') as f:
+#         CONFIGURATION = json.load(f)
 
 # logging
-from .py.logging import log_setup
-log_setup(addon_name=ADDON_NAME, show_info=True, show_info_node_name=True, show_info_load_model=True, show_info_apply_model=True, show_warning=True)
+log_setup(show_info=True, show_info_node_name=True, show_info_load_model=True, show_info_apply_model=True, show_warning=True)
 
-NODE_LIST = {}
+# ===== NODES INITIALIZATION =====================================================================================================================
 
-#from .py.cascade_collage_node import NODE_LIST as CCN_NODE_LIST
-#NODE_LIST.update(CCN_NODE_LIST)
+from comfy_api.latest import ComfyExtension
 
-from .py.images import NODE_LIST as IMAGES_NODE_LIST
-NODE_LIST.update(IMAGES_NODE_LIST)
+class NTX_SE_Extension(ComfyExtension):
+    # must be declared as async
+    async def get_node_list(self) -> list[type[io.ComfyNode]]:
+        list_of_nodes = []
+        
+        from .py.context import get_nodes_list as context_get_nodes_list
+        list_of_nodes.extend(context_get_nodes_list())
+        
+        from .py.images import get_nodes_list as images_get_nodes_list
+        list_of_nodes.extend(images_get_nodes_list())
+        
+        from .py.loadinfo import get_nodes_list as loadinfo_get_nodes_list
+        list_of_nodes.extend(loadinfo_get_nodes_list())
+        
+        from .py.pipe import get_nodes_list as pipe_get_nodes_list
+        list_of_nodes.extend(pipe_get_nodes_list())
+        
+        from .py.reroutes import get_nodes_list as reroutes_get_nodes_list
+        list_of_nodes.extend(reroutes_get_nodes_list())
+        
+        from .py.test import get_nodes_list as test_get_nodes_list
+        list_of_nodes.extend(test_get_nodes_list())
+        
+        from .py.utils import get_nodes_list as utils_get_nodes_list
+        list_of_nodes.extend(utils_get_nodes_list())
+        
+        return list_of_nodes
 
-from .py.loadinfo import NODE_LIST as LOADINFO_NODE_LIST
-NODE_LIST.update(LOADINFO_NODE_LIST)
-
-from .py.pipe import NODE_LIST as PIPE_NODE_LIST
-NODE_LIST.update(PIPE_NODE_LIST)
-
-from .py.reroute import NODE_LIST as REROUTE_NODE_LIST
-NODE_LIST.update(REROUTE_NODE_LIST)
-
-from .py.utils import NODE_LIST as UTILS_NODE_LIST, util_setup
-NODE_LIST.update(UTILS_NODE_LIST)
-util_setup(max_cached_loras=CONFIGURATION.get("cache", {}).get("max_loras", 8))
-
-def generate_node_mappings(node_config):
-    node_class_mappings = {}
-    node_display_name_mappings = {}
-
-    for node_name, node_class in node_config.items():
-        full_name = f"{ADDON_PREFIX}{node_name}"
-        if isinstance(node_class, list):
-            node_class, node_display_name = node_class[0], f"{ADDON_PREFIX}{node_class[1]}"
-        else:
-            node_display_name = full_name
-
-        node_class_mappings[full_name] = node_class
-        node_display_name_mappings[full_name] = node_display_name
-        if is_string_empty(node_class.CATEGORY):
-            node_class.CATEGORY = ADDON_CATEGORY
-        else:
-            node_class.CATEGORY = f"{ADDON_CATEGORY}/{node_class.CATEGORY}"
-
-    return node_class_mappings, node_display_name_mappings
-
-NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS = generate_node_mappings(NODE_LIST)
+# can be declared async or not, both will work
+async def comfy_entrypoint() -> NTX_SE_Extension:
+    return NTX_SE_Extension()
 
 # ===== JAVASCRIPT API =====================================================================================================================
 

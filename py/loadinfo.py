@@ -1,3 +1,7 @@
+from comfy_api.latest import ComfyExtension, io
+
+from typing_extensions import override
+
 import folder_paths
 
 import json
@@ -5,11 +9,12 @@ import ruamel.yaml
 
 from pathlib import Path
 
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, SETTINGS_DIR, MODEL_TYPES
 from .logging import log_info, log_warning
-from .utils import clone_data, clean_path, load_list_vaes, load_list_samplers, load_list_schedulers, ANY_TYPE
+from .utils import clone_data, clean_path, load_list_vaes, load_list_samplers, load_list_schedulers, DICT_TYPE
 
-SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
-MODEL_TYPES = ["vae", "checkpoints", "loras"]
+#SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
+#MODEL_TYPES = ["vae", "checkpoints", "loras"]
 
 # ===== LOAD MODELS FILE =========================================================================================================
 
@@ -107,82 +112,43 @@ g_models_manager = ModelsManager()
 g_models_manager.load()
 log_info(f"Create g_models_manager from {g_models_manager.models_file}")
 
-class LoadCheckpointInfo:
-    def __init__(self):
-        pass
-    
+class LoadCheckpointInfo(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        global g_models_manager
-        return {
-            "required": {
-                "ckpt_name": (g_models_manager.get_models_list("checkpoints"),),
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}LoadCheckpointInfo",
+            display_name=f"{ADDON_PREFIX}Load Checkpoint Info",
+            category=f"{ADDON_CATEGORY}/loadinfo",
+            inputs=[
+                io.Combo.Input("ckpt_name", options=g_models_manager.get_models_list("checkpoints")),
+                io.Int.Input("clip_skip", default=-1, min=-100, max=0, step=1),
+                io.Combo.Input("vae_name", options=["Baked VAE"] + load_list_vaes(), default="Baked VAE"),
+                io.Int.Input("steps", default=20, min=1, max=100, step=1),
+                io.Float.Input("cfg", default=1.0, min=0.0, max=20.0, step=0.1, round=0.1),
+                io.Combo.Input("sampler_name", options=load_list_samplers()),
+                io.Combo.Input("scheduler", options=load_list_schedulers()),
+                io.String.Input("model_prompt_positive", multiline=False, dynamic_prompts=False, default=""),
+                io.String.Input("model_prompt_negative", multiline=False, dynamic_prompts=False, default=""),
+                io.String.Input("notes", multiline=True, dynamic_prompts=False, default=""),
+            ],
+            outputs=[
+                io.AnyType.Output("ckpt_name"),
+                io.Int.Output("clip_skip"),
+                io.Boolean.Output("use_custom_vae"),
+                io.AnyType.Output("vae_name"),
+                io.Int.Output("steps"),
+                io.Float.Output("cfg"),
+                io.AnyType.Output("sampler_name"),
+                io.AnyType.Output("scheduler"),
+                io.String.Output("model_prompt_positive"),
+                io.String.Output("model_prompt_negative"),
+            ],
+        )
 
-                "clip_skip": ("INT", {
-                    "default": -1,
-                    "min": -100,
-                    "max": 0,
-                    "step": 1,
-                }),
-                "vae_name": (
-                    ["Baked VAE"] + load_list_vaes(),
-                    {"default": "Baked VAE"},
-                ),
-
-                "steps": ("INT", {
-                    "default": 20,
-                    "min": 1, 
-                    "max": 100, 
-                    "step": 1,
-                }),
-                "cfg": ("FLOAT", {
-                    "default": 1.0, 
-                    "min": 0.0, 
-                    "max": 20.0, 
-                    "step":0.1, 
-                    "round": 0.1, 
-                }),
-                "sampler_name": (
-                    load_list_samplers(), 
-                ),
-                "scheduler": (
-                    load_list_schedulers(), 
-                ),
-
-                "model_prompt_positive": ("STRING", {
-                    "multiline": False, #True if you want the field to look like the one on the ClipTextEncode node
-                    "dynamicPrompts": False,
-                    "default": ""
-                }),
-                "model_prompt_negative": ("STRING", {
-                    "multiline": False, #True if you want the field to look like the one on the ClipTextEncode node
-                    "dynamicPrompts": False,
-                    "default": ""
-                }),
-
-                "notes": ("STRING", {
-                    "multiline": True, #True if you want the field to look like the one on the ClipTextEncode node
-                    "dynamicPrompts": False,
-                    "default": ""
-                }),
-            },
-            "optional": {
-            },
-        }
-
-    RETURN_TYPES = (ANY_TYPE   , "INT"      , "BOOLEAN"       , ANY_TYPE  , "INT"  , "FLOAT", ANY_TYPE      , ANY_TYPE   , "STRING"               , "STRING"               , )
-    RETURN_NAMES = ("ckpt_name", "clip_skip", "use_custom_vae", "vae_name", "steps", "cfg"  , "sampler_name", "scheduler", "model_prompt_positive", "model_prompt_negative", )
-
-    FUNCTION = "execute"
-
-    #OUTPUT_NODE = False
-
-    CATEGORY = "loadinfo"
-
-    def execute(self, ckpt_name, clip_skip, vae_name, steps, cfg, sampler_name, scheduler, model_prompt_positive, model_prompt_negative, notes, ):   
-
+    @classmethod
+    def execute(cls, ckpt_name, clip_skip, vae_name, steps, cfg, sampler_name, scheduler, model_prompt_positive, model_prompt_negative, notes):
         use_custom_vae = (vae_name != "Baked VAE")
-        return (ckpt_name, clip_skip, use_custom_vae, vae_name, steps, cfg, sampler_name, scheduler, model_prompt_positive, model_prompt_negative, )
+        return io.NodeOutput(ckpt_name, clip_skip, use_custom_vae, vae_name, steps, cfg, sampler_name, scheduler, model_prompt_positive, model_prompt_negative)
 
 # ===== LOAD CHARACTER DEFINITIONS ===============================================================================================
 
@@ -224,97 +190,67 @@ g_characters_manager = CharactersManager()
 g_characters_manager.load()
 log_info(f"Create g_characters_manager from {g_characters_manager.characters_file}")
 
-class LoadCharInfo:
-    def __init__(self):
-        pass
-    
+class LoadCharInfo(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        global g_characters_manager
-        return {
-            "required": {
-                "name": (g_characters_manager.get_char_names(),),
-                "option": (g_characters_manager.get_all_char_options(),),
-                "char": ("STRING", {
-                    "multiline": True, #True if you want the field to look like the one on the ClipTextEncode node
-                    "dynamicPrompts": True,
-                    "default": ""
-                }),
-                "save_name": ("STRING", {
-                    "multiline": False, #True if you want the field to look like the one on the ClipTextEncode node
-                    "dynamicPrompts": False,
-                    "default": ""
-                }),
-            },
-            "optional": {
-                "parameters": ("DICT", ),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}LoadCharInfo",
+            display_name=f"{ADDON_PREFIX}Load Char Info",
+            category=f"{ADDON_CATEGORY}/loadinfo",
+            inputs=[
+                io.Combo.Input("name", options=g_characters_manager.get_char_names()),
+                io.Combo.Input("option", options=g_characters_manager.get_all_char_options()),
+                io.String.Input("char", multiline=True, dynamic_prompts=True, default=""),
+                io.String.Input("save_name", multiline=False, dynamic_prompts=False, default=""),
+                DICT_TYPE.Input("parameters", optional=True),
+            ],
+            outputs=[
+                DICT_TYPE.Output("parameters"),
+                io.String.Output("char"),
+                io.String.Output("save_name"),
+            ],
+        )
 
-    RETURN_TYPES = ("DICT"      , "STRING", "STRING"   , )
-    RETURN_NAMES = ("parameters", "char"  , "save_name", )
-
-    FUNCTION = "execute"
-
-    #OUTPUT_NODE = False
-
-    CATEGORY = "loadinfo"
-
-    def execute(self, name, option, char, save_name, parameters = None, ):   
-
-        parameters = {} if parameters == None else clone_data(parameters)
-
+    @classmethod
+    def execute(cls, name, option, char, save_name, parameters=None):
+        parameters = {} if parameters is None else clone_data(parameters)
         parameters["char"] = char
         parameters["save_name"] = save_name
+        return io.NodeOutput(parameters, char, save_name)
 
-        return (parameters, char, save_name, )
-
-class LoadCharacterInfo:
-    def __init__(self):
-        pass
-    
+class LoadCharacterInfo(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        global g_characters_manager
-        return {
-            "required": {
-                "name": (g_characters_manager.get_char_names(),),
-                "option": (g_characters_manager.get_all_char_options(),),
-                "char": ("STRING", {
-                    "multiline": True, #True if you want the field to look like the one on the ClipTextEncode node
-                    "dynamicPrompts": True,
-                    "default": ""
-                }),
-                "save_name": ("STRING", {
-                    "multiline": False, #True if you want the field to look like the one on the ClipTextEncode node
-                    "dynamicPrompts": False,
-                    "default": ""
-                }),
-            },
-            "optional": {
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}LoadCharacterInfo",
+            display_name=f"{ADDON_PREFIX}Load Character Info",
+            category=f"{ADDON_CATEGORY}/loadinfo",
+            inputs=[
+                io.Combo.Input("name", options=g_characters_manager.get_char_names()),
+                io.Combo.Input("option", options=g_characters_manager.get_all_char_options()),
+                io.String.Input("char", multiline=True, dynamic_prompts=True, default=""),
+                io.String.Input("save_name", multiline=False, dynamic_prompts=False, default=""),
+            ],
+            outputs=[
+                io.String.Output("char"),
+                io.String.Output("save_name"),
+            ],
+        )
 
-    RETURN_TYPES = ("STRING", "STRING"   , )
-    RETURN_NAMES = ("char"  , "save_name", )
+    @classmethod
+    def execute(cls, name, option, char, save_name):
+        return io.NodeOutput(char, save_name)
 
-    FUNCTION = "execute"
-
-    #OUTPUT_NODE = False
-
-    CATEGORY = "loadinfo"
-
-    def execute(self, name, option, char, save_name, ):   
-
-        return (char, save_name, )
 
 # ===== INITIALIZATION =====================================================================================================================
 
-NODE_LIST = {
-    "LoadCheckpointInfo": LoadCheckpointInfo,
-    "LoadCharInfo": LoadCharInfo,
-    "LoadCharacterInfo": LoadCharacterInfo,
-}
+def get_nodes_list() -> list[type[io.ComfyNode]]:
+    return [
+        LoadCheckpointInfo,
+        LoadCharInfo,
+        LoadCharacterInfo,
+    ]
+
 
 # ===== DEBUG ========================================================================================================================
 

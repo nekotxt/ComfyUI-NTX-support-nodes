@@ -1,3 +1,5 @@
+from comfy_api.latest import ComfyExtension, io
+
 import comfy.samplers
 import comfy.sd
 import comfy.utils
@@ -8,17 +10,12 @@ import re
 import shutil
 import torch
 from pathlib import Path
+from typing_extensions import override
 
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, SETTINGS_DIR
 from .logging import log_info, log_warning
 
-SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
-
-# used by CreateImageLatent
-image_sizes_file = SETTINGS_DIR / "image_sizes.txt"
-if image_sizes_file.is_file():
-    IMAGE_SIZES = image_sizes_file.read_text(encoding="utf-8").splitlines()
-else:
-    IMAGE_SIZES = ["512x512", "512x768", "768x512", "832x1216", "1216x832", "896x1152", "1152x896", "1024x1024", "1024x1536", "1536x1024"]
+#SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
 
 # used by ApplyLoraStack
 CACHED_LORAS = []
@@ -30,13 +27,20 @@ def util_setup(max_cached_loras:int):
     MAX_CACHED_LORAS = max_cached_loras
     log_info(f"MAX_CACHED_LORAS = {MAX_CACHED_LORAS}")
 
+# ===== Custom types ===========================================================================================================================
+
+DICT_TYPE = io.Custom("DICT")
+LIST_TYPE = io.Custom("LIST")
+LORA_STACK_TYPE = io.Custom("LORA_STACK")
+CONTROL_NET_STACK_TYPE = io.Custom("CONTROL_NET_STACK")
+
 # ===== General use functions ==================================================================================================================
 
 # check empty string
 def is_string_empty(string):
     return not string or string.isspace()
 
-# utility function to make a semi-deep copy of an object 
+# utility function to make a semi-deep copy of an object
 # (it duplicates simple data types like string, int ..., and also duplicates dict and list,
 #  but not complex objects like models or images)
 def clone_data(data):
@@ -60,12 +64,12 @@ def clone_data(data):
 def dict_merge(base:dict, overwrite:dict):
     for k,v in overwrite.items():
         if type(v) is dict:
-            if k in base and base[k] != None:
+            if k in base and base[k] is not None:
                 dict_merge(base[k], v)
             else:
                 base[k] = clone_data(v)
         elif type(v) is list:
-            if k in base and base[k] != None:
+            if k in base and base[k] is not None:
                 for entry in v:
                     base[k].append(clone_data(entry))
             else:
@@ -76,15 +80,6 @@ def dict_merge(base:dict, overwrite:dict):
 # utility for cleaning path names
 def clean_path(path:str):
     return path.replace("\\", os.path.sep).replace("/", os.path.sep)
-
-# ===== AnyType CLASS ==================================================================================================================
-
-class AnyType(str):
-    """A special type that can be connected to any other types. Credit to pythongosssss"""
-    def __ne__(self, __value: object) -> bool:
-        return False
-
-ANY_TYPE = AnyType("*")
 
 # ===== UTILITY FUNCTIONS TO RETRIEVE INFORMATION ========================================================================================
 
@@ -101,13 +96,29 @@ def load_list_loras():
     return folder_paths.get_filename_list("loras")
 
 def load_list_vaes():
-    return folder_paths.get_filename_list("vae") #["Baked VAE"] + 
+    return folder_paths.get_filename_list("vae") #["Baked VAE"] +
 
 def load_list_samplers():
     return comfy.samplers.KSampler.SAMPLERS
 
 def load_list_schedulers():
     return comfy.samplers.KSampler.SCHEDULERS
+
+image_sizes_file = SETTINGS_DIR / "image_sizes.txt"
+if image_sizes_file.is_file():
+    IMAGE_SIZES = image_sizes_file.read_text(encoding="utf-8").splitlines()
+else:
+    IMAGE_SIZES = ["512x512", "512x768", "768x512", "832x1216", "1216x832", "896x1152", "1152x896", "1024x1024", "1024x1536", "1536x1024"]
+def load_list_image_sizes():
+    global IMAGE_SIZES
+    return IMAGE_SIZES
+def extract_image_size(image_size):
+    match = re.search(r'([\d]+)x([\d]+)', image_size)
+    if match is None:
+        return (512, 512)
+    else:
+        return (int(match[1]), int(match[2]))
+
 
 # ===== LoRA utilities =================================================================================================================
 
@@ -117,14 +128,14 @@ def extract_lora_strings(text):
     Args:
         text (str): Input text to search for lora-formatted strings
     Returns:
-        list of tuples: Each tuple contains (lora_name, strength_model, strength_clip), 
+        list of tuples: Each tuple contains (lora_name, strength_model, strength_clip),
         where strength_model = strength_clip if not present in the string
     """
 
     # Regular expression pattern to match <lora:name:value1[:value2]> format
     # (?::([^>]+))? makes the :value2 part optional
     pattern = r'<lora:([^:]+):([^:>]+)(?::([^>]+))?>'
-    
+
     # Find all matches in the text
     matches = re.findall(pattern, text)
 
@@ -154,10 +165,10 @@ def remove_text_between_angle_brackets(text):
     """
     # Use regex to remove text between < and >
     cleaned_text = re.sub(r'<[^>]*>', '', text)
-    
+
     # Optional: Remove multiple consecutive whitespaces created by removal
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
-    
+
     return cleaned_text
 
 def format_lora_as_string(lora_name, strength_model, strength_clip, compact_form=False):
@@ -174,7 +185,7 @@ def format_lora_as_string(lora_name, strength_model, strength_clip, compact_form
 LIST_OF_LORA_DIRS = None
 def solve_lora_name(lora_name:str):
     # log_info(f"Solve lora name [{lora_name}]")
-    
+
     lora_path = ""
     try:
         lora_path = folder_paths.get_full_path_or_raise("loras", lora_name)
@@ -185,7 +196,7 @@ def solve_lora_name(lora_name:str):
 
     # generate the list of candidate dirs, if needed
     global LIST_OF_LORA_DIRS
-    if LIST_OF_LORA_DIRS == None:
+    if LIST_OF_LORA_DIRS is None:
         log_info("RETRIEVE LIST OF LORA DIRS")
         LIST_OF_LORA_DIRS = []
         for lora_dir in folder_paths.folder_names_and_paths.get("loras", ([], []))[0]:
@@ -210,40 +221,34 @@ def solve_lora_name(lora_name:str):
 
 # ===== NODES : UTILITIES ==================================================================================================================
 
-class ReplaceTextParameters:
-    def __init__(self):
-        pass
-
+class ReplaceTextParameters(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "text": ("STRING", {"default": ""})
-            },
-            "optional": {
-                "parameters": ("DICT", ),
-            }
-        }
-
-    RETURN_TYPES = ("STRING", )
-    RETURN_NAMES = ("text", )
-
-    FUNCTION = "parse"
-    CATEGORY = "utils"
-    DESCRIPTION = """
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}ReplaceTextParameters",
+            display_name=f"{ADDON_PREFIX}Replace Text Parameters",
+            description="""
     Replace text parameters.
     The parameters must be in the form '%%name%%'
     For instance, if text='in the style of %%artist%%'
     and parameters contains an entry 'artist': 'anime'
     then the returned text will be 'in the style of anime'
     If the parameter name is not found in the dictionary, it will be replaced with an empty string.
-    """
+    """,
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.String.Input("text", default=""),
+                DICT_TYPE.Input("parameters", optional=True),
+            ],
+            outputs=[
+                io.String.Output("text"),
+            ],
+        )
 
-    OUTPUT_NODE = False
+    @classmethod
+    def execute(cls, text, parameters=None):
 
-    def parse(self, text, parameters=None ):
-
-        if parameters == None:
+        if parameters is None:
             parameters = {}
 
         pattern = r'%%([^%]+)%%'
@@ -251,77 +256,64 @@ class ReplaceTextParameters:
         for match in matches:
             text = text.replace(f"%%{match}%%", parameters.get(match, ""))
 
-        return (text, )
+        return io.NodeOutput(text)
 
-class SwitchAny:
-    def __init__(self):
-        pass
-    
+
+class SwitchAny(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-            },
-            "optional": {
-                "input1": (ANY_TYPE,),
-                "input2": (ANY_TYPE,),
-                "input3": (ANY_TYPE,),
-                "input4": (ANY_TYPE,),
-                "input5": (ANY_TYPE,),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}SwitchAny",
+            display_name=f"{ADDON_PREFIX}Switch Any",
+            description="Return the first non-null input, or None if all inputs are missing",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.AnyType.Input("input1", optional=True),
+                io.AnyType.Input("input2", optional=True),
+                io.AnyType.Input("input3", optional=True),
+                io.AnyType.Input("input4", optional=True),
+                io.AnyType.Input("input5", optional=True),
+            ],
+            outputs=[
+                io.AnyType.Output("output"),
+            ],
+        )
 
-    RETURN_TYPES = (ANY_TYPE, )
-    RETURN_NAMES = ("output", )
-
-    FUNCTION = "execute"
-    CATEGORY = "utils"
-    DESCRIPTION = "Return the first non-null input, or None if all inputs are missing"
-
-    OUTPUT_NODE = False
-
-    def execute(self, input1 = None, input2 = None, input3 = None, input4 = None, input5 = None):        
-        if input1 != None:
-            return (input1, )
-        if input2 != None:
-            return (input2, )
-        if input3 != None:
-            return (input3, )
-        if input4 != None:
-            return (input4, )
-        return (input5, )
-
-class LoadCustomVae:
-    def __init__(self):
-        pass
-    
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "use_custom_vae": ("BOOLEAN", {
-                    "default": True, 
-                    "label_on": "yes", 
-                    "label_off": "no", 
-                    "tooltip": "if yes, load and pass the specified VAE, instead of the input value"
-                }),                
-                "vae_name": (load_list_vaes(), ),
-            },
-            "optional": {
-                "vae": ("VAE",),
-            },
-        }
+    def execute(cls, input1=None, input2=None, input3=None, input4=None, input5=None):
+        if input1 is not None:
+            return io.NodeOutput(input1)
+        if input2 is not None:
+            return io.NodeOutput(input2)
+        if input3 is not None:
+            return io.NodeOutput(input3)
+        if input4 is not None:
+            return io.NodeOutput(input4)
+        return io.NodeOutput(input5)
 
-    RETURN_TYPES = ("VAE", "STRING"  , )
-    RETURN_NAMES = ("vae", "vae_name", )
 
-    FUNCTION = "execute"
-    CATEGORY = "utils"
-    DESCRIPTION = "If the flag is set to True, load the specified vae"
+class LoadCustomVae(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}LoadCustomVae",
+            display_name=f"{ADDON_PREFIX}Load Custom Vae",
+            description="If the flag is set to True, load the specified vae",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.Boolean.Input("use_custom_vae", default=True, label_on="yes", label_off="no",
+                                 tooltip="if yes, load and pass the specified VAE, instead of the input value"),
+                io.Combo.Input("vae_name", options=load_list_vaes()),
+                io.Vae.Input("vae", optional=True),
+            ],
+            outputs=[
+                io.Vae.Output("vae"),
+                io.String.Output("vae_name"),
+            ],
+        )
 
-    OUTPUT_NODE = False
-
-    def execute(self, use_custom_vae, vae_name, vae = None):        
+    @classmethod
+    def execute(cls, use_custom_vae, vae_name, vae=None):
 
         if use_custom_vae:
             from nodes import VAELoader # the nodes module can be referenced, because its path is added to sys.path in __init__
@@ -329,36 +321,31 @@ class LoadCustomVae:
         else:
             vae_name = ""
 
-        return (vae, vae_name, )
+        return io.NodeOutput(vae, vae_name)
 
-class ConvertLoraStackToString:
-    def __init__(self):
-        pass
-    
+
+class ConvertLoraStackToString(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-            },
-            "optional": {
-                "lora_stack": ("LORA_STACK",),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}ConvertLoraStackToString",
+            display_name=f"{ADDON_PREFIX}Convert Lora Stack To String",
+            description="Convert a list of LoRAs into a string",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                LORA_STACK_TYPE.Input("lora_stack", optional=True),
+            ],
+            outputs=[
+                io.String.Output("stack_text"),
+            ],
+        )
 
-    RETURN_TYPES = ("STRING"    , )
-    RETURN_NAMES = ("stack_text", )
-
-    FUNCTION = "execute"
-    CATEGORY = "utils"
-    DESCRIPTION = "Convert a list of LoRAs into a string"
-
-    OUTPUT_NODE = False
-
-    def execute(self, lora_stack = None):        
+    @classmethod
+    def execute(cls, lora_stack=None):
 
         text = ""
 
-        if lora_stack != None:
+        if lora_stack is not None:
             for lora_def in lora_stack:
                 if len(lora_def) >= 3:
                     text += format_lora_as_string(lora_def[0], lora_def[1], lora_def[2]) + "\n"
@@ -367,83 +354,72 @@ class ConvertLoraStackToString:
                 elif len(lora_def) >= 1:
                     text += format_lora_as_string(lora_def[0], 1.0, 1.0) + "\n"
 
-        return (text, )
- 
-class ConvertLoraStringToStack:
-    def __init__(self):
-        pass
-    
+        return io.NodeOutput(text)
+
+
+class ConvertLoraStringToStack(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "prompt": ("STRING", {
-                    "multiline": False,
-                    "dynamicPrompts": False,
-                    "default": ""
-                }),
-            },
-            "optional": {
-                "initial_lora_stack": ("LORA_STACK",),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}ConvertLoraStringToStack",
+            display_name=f"{ADDON_PREFIX}Convert Lora String To Stack",
+            description="Parse a text prompt and convert the LoRA references to a stack",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.String.Input("prompt", multiline=False, dynamic_prompts=False, default=""),
+                LORA_STACK_TYPE.Input("initial_lora_stack", optional=True),
+            ],
+            outputs=[
+                io.String.Output("clean_prompt"),
+                LORA_STACK_TYPE.Output("final_lora_stack"),
+            ],
+        )
 
-    RETURN_TYPES = ("STRING",       "LORA_STACK"      , )
-    RETURN_NAMES = ("clean_prompt", "final_lora_stack", )
+    @classmethod
+    def execute(cls, prompt, initial_lora_stack=None):
 
-    FUNCTION = "execute"
-    CATEGORY = "utils"
-    DESCRIPTION = "Parse a text prompt and convert the LoRA references to a stack"
-
-    OUTPUT_NODE = False
-
-    def execute(self, prompt, initial_lora_stack=None):        
-
-        if initial_lora_stack == None:
+        if initial_lora_stack is None:
             initial_lora_stack = []
-        
+
         final_lora_stack = initial_lora_stack + extract_lora_strings(prompt)
 
         clean_prompt = remove_text_between_angle_brackets(prompt)
 
-        return (clean_prompt, final_lora_stack, )
+        return io.NodeOutput(clean_prompt, final_lora_stack)
 
-class ApplyLoraStack:
-    def __init__(self):
-        pass
-    
+
+class ApplyLoraStack(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "lora_stack" :("LORA_STACK", ),
-                "model": ("MODEL", ),
-            },
-            "optional": {
-                "clip": ("CLIP", ),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}ApplyLoraStack",
+            display_name=f"{ADDON_PREFIX}Apply Lora Stack",
+            description="Apply lora stack to model and (optionally) clip",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                LORA_STACK_TYPE.Input("lora_stack"),
+                io.Model.Input("model"),
+                io.Clip.Input("clip", optional=True),
+            ],
+            outputs=[
+                LORA_STACK_TYPE.Output("lora_stack"),
+                io.Model.Output("model"),
+                io.Clip.Output("clip"),
+            ],
+        )
 
-    RETURN_TYPES = ("LORA_STACK", "MODEL"  , "CLIP", )
-    RETURN_NAMES = ("lora_stack", "model"  , "clip", ) 
-
-    FUNCTION = "execute"
-    CATEGORY = "utils"
-    DESCRIPTION = "Apply lora stack to model and (optionally) clip"
-
-    OUTPUT_NODE = False
-
-    def execute(self, lora_stack, model, clip=None, ):        
+    @classmethod
+    def execute(cls, lora_stack, model, clip=None):
 
         global CACHED_LORAS
         global MAX_CACHED_LORAS
 
-        if(lora_stack == None):
-            return (lora_stack, model, clip, )
-            
-        if(len(lora_stack) == 0):
-            return (lora_stack, model, clip, )
-        
+        if lora_stack is None:
+            return io.NodeOutput(lora_stack, model, clip)
+
+        if len(lora_stack) == 0:
+            return io.NodeOutput(lora_stack, model, clip)
+
         log_info("ApplyLoraStack :")
         applied_lora_stack = []
         for (lora_name, strength_model, strength_clip) in lora_stack:
@@ -461,20 +437,18 @@ class ApplyLoraStack:
                 continue
 
             (lora_name, lora_path) = solve_lora_name(lora_name)
-            if lora_path == None:
+            if lora_path is None:
                 log_info(f"- ERROR [{lora_name}] model file not found")
                 continue
 
             try:
-                # lora_path = folder_paths.get_full_path_or_raise("loras", lora_name)
-
                 lora = None
                 for(cached_lora_path, cached_lora) in CACHED_LORAS:
                     if cached_lora_path == lora_path:
                         lora = cached_lora
                         break
 
-                if lora == None:
+                if lora is None:
                     lora = comfy.utils.load_torch_file(lora_path, safe_load=True)
                     CACHED_LORAS.append([lora_path, lora])
                     msg = "loaded from disk (added to cache)"
@@ -506,132 +480,84 @@ class ApplyLoraStack:
             for (cached_lora_path, _) in CACHED_LORAS:
                 log_info(f"- {cached_lora_path}")
 
-        return (applied_lora_stack, model, clip, )
+        return io.NodeOutput(applied_lora_stack, model, clip)
 
-class MergeLoraStacks:
-    def __init__(self):
-        pass
-    
+
+class MergeLoraStacks(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-            },
-            "optional": {
-                "lora_stack_1" :("LORA_STACK", ),
-                "lora_stack_2" :("LORA_STACK", ),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}MergeLoraStacks",
+            display_name=f"{ADDON_PREFIX}Merge Lora Stacks",
+            description="Merge two lora stacks",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                LORA_STACK_TYPE.Input("lora_stack_1", optional=True),
+                LORA_STACK_TYPE.Input("lora_stack_2", optional=True),
+            ],
+            outputs=[
+                LORA_STACK_TYPE.Output("lora_stack"),
+            ],
+        )
 
-    RETURN_TYPES = ("LORA_STACK", )
-    RETURN_NAMES = ("lora_stack", ) 
-
-    FUNCTION = "execute"
-    CATEGORY = "utils"
-    DESCRIPTION = "Merge two lora stacks"
-
-    OUTPUT_NODE = False
-
-    def execute(self, lora_stack_1 = None, lora_stack_2 = None, ):        
-
-        global CACHED_LORAS
-        global MAX_CACHED_LORAS
+    @classmethod
+    def execute(cls, lora_stack_1=None, lora_stack_2=None):
 
         merged_lora_stack = []
 
-        if(lora_stack_1 != None):
+        if lora_stack_1 is not None:
             for (name, s1, s2) in lora_stack_1:
                 merged_lora_stack.append((name, s1, s2))
-            
-        if(lora_stack_2 != None):
+
+        if lora_stack_2 is not None:
             for (name, s1, s2) in lora_stack_2:
                 merged_lora_stack.append((name, s1, s2))
 
-        return (merged_lora_stack, )
+        return io.NodeOutput(merged_lora_stack)
 
-class CreateImageLatent:
-    def __init__(self):
-        pass
-    
+
+class CreateImageLatent(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "image_size": (
-                    ["custom"] + IMAGE_SIZES,
-                    {
-                        "default": "custom"
-                    }
-                ),
-                "width": (
-                    "INT",
-                    {
-                        "default": 0, 
-                        "min": 0, 
-                        "max": 4096, 
-                        "step": 1
-                    },
-                ),
-                "height": (
-                    "INT",
-                    {
-                        "default": 0, 
-                        "min": 0, 
-                        "max": 4096, 
-                        "step": 1
-                    },
-                ),
-                "batch_size": (
-                    "INT",
-                    {
-                        "default": 1,
-                        "min": 1,
-                        "max": 24,
-                    },
-                ),
-            },
-            "optional": {
-                "opt_image": ("IMAGE", ),
-                "vae": ("VAE", ),
-                "opt_image_size": (["use image size", "crop to input size", "resize and use new size"], ),
-                "opt_image_encode": ("BOOLEAN", {
-                    "default": True, 
-                    "label_on": "yes", 
-                    "label_off": "no", 
-                    "tooltip": ""
-                }),                
-            },
-        }
-
-    RETURN_TYPES = ("INT"  , "INT"   , "INT"       , "LATENT", "IMAGE"    , )
-    RETURN_NAMES = ("width", "height", "batch_size", "latent", "opt_image", ) 
-
-    FUNCTION = "execute"
-    CATEGORY = "utils"
-    DESCRIPTION = """Build the latents from the specified image size. If an image is provided, its size will be used.
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}CreateImageLatent",
+            display_name=f"{ADDON_PREFIX}Create Image Latent",
+            description="""Build the latents from the specified image size. If an image is provided, its size will be used.
                     To customize the list of image sizes, create a file /input/ntx_data/image_sizes.txt
-                    and write the sizes, one for each row, int the form WIDTHxHEIGHT"""
+                    and write the sizes, one for each row, int the form WIDTHxHEIGHT""",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.Combo.Input("image_size", options=["custom"] + load_list_image_sizes(), default="custom"),
+                io.Int.Input("width", default=0, min=0, max=4096, step=1),
+                io.Int.Input("height", default=0, min=0, max=4096, step=1),
+                io.Int.Input("batch_size", default=1, min=1, max=24),
+                io.Image.Input("opt_image", optional=True),
+                io.Vae.Input("vae", optional=True),
+                io.Combo.Input("opt_image_size", options=["use image size", "crop to input size", "resize and use new size"], optional=True),
+                io.Boolean.Input("opt_image_encode", default=True, label_on="yes", label_off="no", optional=True),
+            ],
+            outputs=[
+                io.Int.Output("width"),
+                io.Int.Output("height"),
+                io.Int.Output("batch_size"),
+                io.Latent.Output("latent"),
+                io.Image.Output("opt_image"),
+            ],
+        )
 
-    OUTPUT_NODE = False
-
-    def execute(self, image_size, width, height, batch_size, opt_image=None, vae=None, opt_image_size=None, opt_image_encode=True):        
+    @classmethod
+    def execute(cls, image_size, width, height, batch_size, opt_image=None, vae=None, opt_image_size=None, opt_image_encode=True):
 
         if image_size != "custom": # decode standard image size if any
-            match = re.search(r'([\d]+)x([\d]+)', image_size)
-            if match == None:
-                width = 512
-                height = 512
-            else:
-                width = int(match[1])
-                height = int(match[2])            
+            width, height = extract_image_size(image_size)
 
-        if opt_image != None:
+        if opt_image is not None:
             if opt_image_size == "crop to input size":
                 opt_image = comfy.utils.common_upscale(opt_image.movedim(-1, 1), width, height, "lanczos", "center").movedim(1, -1)
             elif opt_image_size == "resize and use new size":
                 image_w = opt_image.shape[2]
                 image_h = opt_image.shape[1]
-                
+
                 ratio_w = width / image_w
                 ratio_h = height / image_h
                 if ratio_w < ratio_h:
@@ -640,7 +566,7 @@ class CreateImageLatent:
                 else:
                     final_width = round(image_w * ratio_h)
                     final_height = height
-                
+
                 opt_image = comfy.utils.common_upscale(opt_image.movedim(-1, 1), final_width, final_height, "lanczos", "disabled").movedim(1, -1)
                 width = opt_image.shape[2]
                 height = opt_image.shape[1]
@@ -648,7 +574,7 @@ class CreateImageLatent:
                 width = opt_image.shape[2]
                 height = opt_image.shape[1]
 
-        if (opt_image == None) or (opt_image_encode == False):
+        if (opt_image is None) or (opt_image_encode == False):
             latent_width = width // 8
             latent_height = height // 8
             samples = torch.zeros([batch_size, 4, latent_height, latent_width], device=comfy.model_management.intermediate_device())
@@ -662,40 +588,34 @@ class CreateImageLatent:
                 from nodes import RepeatLatentBatch # the nodes module can be referenced, because its path is added to sys.path in __init__
                 (latent, ) = RepeatLatentBatch().repeat(latent, batch_size, )
 
-        return (width, height, batch_size, latent, opt_image, )
+        return io.NodeOutput(width, height, batch_size, latent, opt_image)
 
-class CollectModelNtxdata:
-    def __init__(self):
-        pass
-    
+
+class CollectModelNtxdata(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-            },
-            "optional": {
-                "ckpt_name"  :(ANY_TYPE, ),
-                "lora_stack" :("LORA_STACK", ),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}CollectModelNtxdata",
+            display_name=f"{ADDON_PREFIX}Collect Model Ntxdata",
+            description="",
+            category=f"{ADDON_CATEGORY}/utils",
+            is_output_node=True,
+            inputs=[
+                io.AnyType.Input("ckpt_name", optional=True),
+                LORA_STACK_TYPE.Input("lora_stack", optional=True),
+            ],
+            outputs=[],
+        )
 
-    RETURN_TYPES = ()
-    RETURN_NAMES = () 
-
-    FUNCTION = "execute"
-    CATEGORY = "utils"
-    DESCRIPTION = ""
-
-    OUTPUT_NODE = True
-
-    def execute(self, ckpt_name=None, lora_stack=None, ):        
+    @classmethod
+    def execute(cls, ckpt_name=None, lora_stack=None):
 
         models_list = []
 
-        if ckpt_name != None:
+        if ckpt_name is not None:
             models_list.append(folder_paths.get_full_path_or_raise("checkpoints", ckpt_name))
 
-        if lora_stack != None:
+        if lora_stack is not None:
             for (lora_name, _, _) in lora_stack:
                 models_list.append(folder_paths.get_full_path_or_raise("loras", lora_name))
 
@@ -712,83 +632,107 @@ class CollectModelNtxdata:
             else:
                 log_warning(f"- not found! {model_name}")
 
-        return ()
+        return io.NodeOutput()
 
-class PromptChainer:
-    def __init__(self):
-        pass
-    
+
+class PromptChainer(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "prompt": ("STRING", {
-                    "multiline": True, #True if you want the field to look like the one on the ClipTextEncode node
-                    "dynamicPrompts": True,
-                    "default": ""
-                }),
-            },
-            "optional": {
-                "prev_prompt": ("STRING", {
-                    "multiline": True, #True if you want the field to look like the one on the ClipTextEncode node
-                    "dynamicPrompts": True,
-                    "default": "", 
-                    "forceInput": True
-                }),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}PromptChainer",
+            display_name=f"{ADDON_PREFIX}Prompt Chainer",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.String.Input("prompt", multiline=True, dynamic_prompts=True, default=""),
+                io.String.Input("prev_prompt", multiline=True, dynamic_prompts=True, default="",
+                                optional=True, force_input=True),
+            ],
+            outputs=[
+                io.String.Output("prompt"),
+            ],
+        )
 
-    RETURN_TYPES = ("STRING", )
-    RETURN_NAMES = ("prompt", )
-
-    FUNCTION = "execute"
-
-    #OUTPUT_NODE = False
-
-    CATEGORY = "utils"
-
-    def execute(self, prompt, prev_prompt = ""):        
-        return (prev_prompt + prompt, )
-
-class Test:
-    def __init__(self):
-        pass
-    
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "lora_stack" :("LORA_STACK", ),
-            },
-            "optional": {
-            },
-        }
+    def execute(cls, prompt, prev_prompt=None):
+        if prev_prompt is None:
+            return io.NodeOutput(prompt)
+        else:
+            return io.NodeOutput(prev_prompt + "\n" + prompt)
 
-    RETURN_TYPES = ("LORA_STACK", )
-    RETURN_NAMES = ("lora_stack", ) 
 
-    FUNCTION = "execute"
-    CATEGORY = "utils"
-    DESCRIPTION = ""
+class CLIPTextEncodeWithCutoff(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}CLIPTextEncodeWithCutoff",
+            display_name=f"{ADDON_PREFIX}CLIPTextEncodeWithCutoff",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.Clip.Input("clip"),
+                io.String.Input("prompt",
+                    default="",
+                    multiline=True
+                ),
+            ],
+            outputs=[
+                io.Conditioning.Output("conditioning")
+            ]
+        )
 
-    OUTPUT_NODE = False
+    @classmethod
+    def execute(cls, clip, prompt) -> io.NodeOutput:
+        from nodes import CLIPTextEncode, ConditioningConcat
 
-    def execute(self, lora_stack, ):        
+        if "BREAK" in prompt:
+            prompts = prompt.split("BREAK")
+            print(f"Conditioning 0 : {prompts[0]}")
+            (conditioning,) = CLIPTextEncode().encode(clip=clip, text=prompts[0])
+            for i in range(1,len(prompts)):
+                print(f"Conditioning {i} : {prompts[i]}")
+                (conditioning_to,) = CLIPTextEncode().encode(clip=clip, text=prompts[i])
+                (conditioning,) = ConditioningConcat().concat(conditioning_to=conditioning_to, conditioning_from=conditioning)
+            return io.NodeOutput(conditioning)
+        else:
+            print(f"Conditioning all : {prompt}")
+            (conditioning,) = CLIPTextEncode().encode(clip=clip, text=prompt)
+            return io.NodeOutput(conditioning)
 
-        return (lora_stack, )
+
+class Test(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}Test",
+            display_name=f"{ADDON_PREFIX}Test",
+            description="",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                LORA_STACK_TYPE.Input("lora_stack"),
+            ],
+            outputs=[
+                LORA_STACK_TYPE.Output("lora_stack"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, lora_stack):
+        return io.NodeOutput(lora_stack)
+
 
 # ===== INITIALIZATION =====================================================================================================================
 
-NODE_LIST = {
-    "ReplaceTextParameters": ReplaceTextParameters,
-    "SwitchAny": SwitchAny,
-    "LoadCustomVae": LoadCustomVae,
-    "ConvertLoraStackToString": ConvertLoraStackToString,
-    "ConvertLoraStringToStack": ConvertLoraStringToStack,
-    "ApplyLoraStack": ApplyLoraStack,
-    "MergeLoraStacks": MergeLoraStacks,
-    "CreateImageLatent": CreateImageLatent,
-    "CollectModelNtxdata": [CollectModelNtxdata, "CollectModelNtxdata (do not use)"],
-    "PromptChainer": PromptChainer,
-    #"Test": Test,
-}
+def get_nodes_list() -> list[type[io.ComfyNode]]:
+    return [
+        ReplaceTextParameters,
+        SwitchAny,
+        LoadCustomVae,
+        ConvertLoraStackToString,
+        ConvertLoraStringToStack,
+        ApplyLoraStack,
+        MergeLoraStacks,
+        CreateImageLatent,
+        CollectModelNtxdata,
+        PromptChainer,
+        #CLIPTextEncodeWithCutoff,
+        #Test,
+    ]
