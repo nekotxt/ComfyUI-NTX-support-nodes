@@ -23,6 +23,8 @@ class DictSetMulti(io.ComfyNode):
 
         node_id = f"{ADDON_PREFIX}{cls.__name__ if cls.NODE_NAME == "" else cls.NODE_NAME}"
 
+        display_name = f"{ADDON_PREFIX} {cls.__name__ if cls.NODE_NAME == "" else cls.NODE_NAME}"
+
         inputs = [DICT_TYPE.Input("pipe", optional=True)]
         if cls.NUMBER_OF_PARAMETERS == 1:
             inputs.append(io.String.Input("key", default=""))
@@ -34,7 +36,7 @@ class DictSetMulti(io.ComfyNode):
 
         return io.Schema(
             node_id=node_id,
-            display_name=node_id,
+            display_name=display_name,
             description="Dictionary set",
             category=f"{ADDON_CATEGORY}/pipe",
             inputs=inputs,
@@ -95,9 +97,11 @@ class DictSet(io.ComfyNode):
     def define_schema(cls):
         node_id = f"{ADDON_PREFIX}{cls.__name__ if cls.NODE_NAME == "" else cls.NODE_NAME}"
 
+        display_name = f"{ADDON_PREFIX} {cls.__name__ if cls.NODE_NAME == "" else cls.NODE_NAME}"
+
         return io.Schema(
             node_id=node_id,
-            display_name=node_id,
+            display_name=display_name,
             description="Dictionary set",
             category=f"{ADDON_CATEGORY}/pipe",
             inputs=[
@@ -139,9 +143,11 @@ class DictGet(io.ComfyNode):
     def define_schema(cls):
         node_id = f"{ADDON_PREFIX}{cls.__name__ if cls.NODE_NAME == "" else cls.NODE_NAME}"
 
+        display_name = f"{ADDON_PREFIX} {cls.__name__ if cls.NODE_NAME == "" else cls.NODE_NAME}"
+
         return io.Schema(
             node_id=node_id,
-            display_name=node_id,
+            display_name=display_name,
             description="Dictionary get",
             category=f"{ADDON_CATEGORY}/pipe",
             inputs=[
@@ -298,7 +304,7 @@ class ListSet(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}ListSet",
-            display_name=f"{ADDON_PREFIX}List Set",
+            display_name=f"{ADDON_PREFIX} List Set",
             description="List set",
             category=f"{ADDON_CATEGORY}/pipe",
             inputs=[
@@ -321,7 +327,7 @@ class ListCount(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}ListCount",
-            display_name=f"{ADDON_PREFIX}List Count",
+            display_name=f"{ADDON_PREFIX} List Count",
             description="List count",
             category=f"{ADDON_CATEGORY}/pipe",
             inputs=[
@@ -342,7 +348,7 @@ class ListGet(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}ListGet",
-            display_name=f"{ADDON_PREFIX}List Get",
+            display_name=f"{ADDON_PREFIX} List Get",
             description="List get",
             category=f"{ADDON_CATEGORY}/pipe",
             inputs=[

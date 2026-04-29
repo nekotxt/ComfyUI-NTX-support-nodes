@@ -18,6 +18,8 @@ class PipeBase(io.ComfyNode):
     def define_schema(cls):
         node_id = f"{ADDON_PREFIX}{cls.__name__ if cls.NODE_NAME == "" else cls.NODE_NAME}"
 
+        display_name = f"{ADDON_PREFIX} {cls.__name__ if cls.NODE_NAME == "" else cls.NODE_NAME}"
+
         description = cls.__name__ if cls.NODE_DESCRIPTION == "" else cls.NODE_DESCRIPTION
 
         inputs = [DICT_TYPE.Input("pipe", optional=True)]
@@ -34,7 +36,7 @@ class PipeBase(io.ComfyNode):
 
         return io.Schema(
             node_id=node_id,
-            display_name=node_id,
+            display_name=display_name,
             description=description,
             category=f"{ADDON_CATEGORY}/context",
             inputs=inputs,
@@ -122,7 +124,7 @@ class GenerationDataSet(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}GenerationDataSet",
-            display_name=f"{ADDON_PREFIX}GenerationDataSet",
+            display_name=f"{ADDON_PREFIX} GenerationDataSet",
             description="Set data for image generation",
             category=f"{ADDON_CATEGORY}/context",
             inputs=[
@@ -168,7 +170,7 @@ class GenerationDataGet(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}GenerationDataGet",
-            display_name=f"{ADDON_PREFIX}GenerationDataGet",
+            display_name=f"{ADDON_PREFIX} GenerationDataGet",
             description="Get data for image generation",
             category=f"{ADDON_CATEGORY}/context",
             inputs=[
@@ -205,7 +207,7 @@ class GenerationDataMaxSize(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}GenerationDataMaxSize",
-            display_name=f"{ADDON_PREFIX}GenerationDataMaxSize",
+            display_name=f"{ADDON_PREFIX} GenerationDataMaxSize",
             description="Get max image size in the set of image generation data",
             category=f"{ADDON_CATEGORY}/context",
             inputs=[

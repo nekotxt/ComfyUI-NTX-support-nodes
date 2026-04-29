@@ -10,7 +10,7 @@ class SwitchNode(io.ComfyNode):
         template = io.MatchType.Template("switch", allowed_types=[io.Image, io.Mask, io.Latent])
         return io.Schema(
             node_id=f"{ADDON_PREFIX}SwitchNode",
-            display_name=f"{ADDON_PREFIX}SwitchNode",
+            display_name=f"{ADDON_PREFIX} SwitchNode",
             category=f"{ADDON_CATEGORY}/test",
             inputs=[
                 io.Boolean.Input("switch"),
@@ -38,7 +38,7 @@ class AutogrowNode(io.ComfyNode):
         )
         return io.Schema(
             node_id=f"{ADDON_PREFIX}BatchImagesNode",
-            display_name=f"{ADDON_PREFIX}Batch Images",
+            display_name=f"{ADDON_PREFIX} Batch Images",
             category=f"{ADDON_CATEGORY}/test",
             inputs=[io.Autogrow.Input("images", template=autogrow_template)],
             outputs=[io.Image.Output()],
@@ -55,7 +55,7 @@ class DynamicComboNode(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}ResizeNode",
-            display_name=f"{ADDON_PREFIX}Resize",
+            display_name=f"{ADDON_PREFIX} Resize",
             category=f"{ADDON_CATEGORY}/test",
             inputs=[
                 io.Image.Input("image"),
@@ -101,7 +101,7 @@ class DynamicTwinNode(io.ComfyNode):
 
         return io.Schema(
             node_id=f"{ADDON_PREFIX}DynamicTwinNode",
-            display_name=f"{ADDON_PREFIX}DynamicTwinNode",
+            display_name=f"{ADDON_PREFIX} DynamicTwinNode",
             category=f"{ADDON_CATEGORY}/test",
             inputs=[
                 DICT_TYPE.Input("dict_in"),

@@ -18,11 +18,13 @@ class RerouteBase(io.ComfyNode):
     def define_schema(cls):
         node_id = f"{ADDON_PREFIX}{cls.__name__ if cls.NODE_NAME == "" else cls.NODE_NAME}"
 
-        description = f"Reroute node for {cls.DATA_NAME} data type"
+        display_name = f"{ADDON_PREFIX} {cls.__name__ if cls.NODE_NAME == "" else cls.NODE_NAME}"
+
+        description = f"{ADDON_PREFIX} Reroute node for {cls.DATA_NAME} data type"
 
         return io.Schema(
             node_id=node_id,
-            display_name=node_id,
+            display_name=display_name,
             description=description,
             category=f"{ADDON_CATEGORY}/reroute",
             inputs=[

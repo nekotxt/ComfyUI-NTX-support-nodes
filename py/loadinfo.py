@@ -117,7 +117,7 @@ class LoadCheckpointInfo(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}LoadCheckpointInfo",
-            display_name=f"{ADDON_PREFIX}Load Checkpoint Info",
+            display_name=f"{ADDON_PREFIX} Load Checkpoint Info",
             category=f"{ADDON_CATEGORY}/loadinfo",
             inputs=[
                 io.Combo.Input("ckpt_name", options=g_models_manager.get_models_list("checkpoints")),
@@ -195,7 +195,7 @@ class LoadCharInfo(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}LoadCharInfo",
-            display_name=f"{ADDON_PREFIX}Load Char Info",
+            display_name=f"{ADDON_PREFIX} Load Char Info",
             category=f"{ADDON_CATEGORY}/loadinfo",
             inputs=[
                 io.Combo.Input("name", options=g_characters_manager.get_char_names()),
@@ -223,7 +223,7 @@ class LoadCharacterInfo(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}LoadCharacterInfo",
-            display_name=f"{ADDON_PREFIX}Load Character Info",
+            display_name=f"{ADDON_PREFIX} Load Character Info",
             category=f"{ADDON_CATEGORY}/loadinfo",
             inputs=[
                 io.Combo.Input("name", options=g_characters_manager.get_char_names()),

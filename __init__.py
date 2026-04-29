@@ -1,35 +1,14 @@
 from comfy_api.latest import ComfyExtension, io, ui
 
 import json
-# import sys
 
 from pathlib import Path
 
 from .config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, COMFY_DIR, SETTINGS_DIR, CONFIGURATION
 from .py.logging import log_setup, log_info, log_warning
-from .py.utils import is_string_empty, clone_data, load_list_vaes, load_list_samplers, load_list_schedulers
-
-#SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
-#SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+from .py.utils import is_string_empty, clone_data, load_list_loras, load_list_vaes, load_list_samplers, load_list_schedulers
 
 # ===== INITIALIZATION =====================================================================================================================
-
-# # get a reference to the custom_nodes dir
-# COMFY_DIR = Path.cwd()
-# COMFY_DIR_str = str(COMFY_DIR)
-# if not COMFY_DIR_str in sys.path:
-#     sys.path.append(COMFY_DIR_str)
-# COMFY_EXTRAS_DIR = COMFY_DIR / "comfy_extras"
-# COMFY_EXTRAS_DIR_str = str(COMFY_EXTRAS_DIR)
-# if not COMFY_EXTRAS_DIR_str in sys.path:
-#     sys.path.append(COMFY_EXTRAS_DIR_str)
-
-# # configuration file
-# CONFIGURATION = {}
-# configuration_file = SETTINGS_DIR / "config.json"
-# if configuration_file.is_file():
-#     with open(configuration_file,'r', encoding='utf-8') as f:
-#         CONFIGURATION = json.load(f)
 
 # logging
 log_setup(show_info=True, show_info_node_name=True, show_info_load_model=True, show_info_apply_model=True, show_warning=True)
@@ -146,6 +125,12 @@ async def get_prompt_for_char_option(request):
     prompt_data = g_characters_manager.get_prompt_for_char_option(char_name=char_name, option_name=option_name)
 
     return web.json_response(prompt_data)
+
+# Support routes for lora loader
+
+@PromptServer.instance.routes.get(f"/{API_PREFIX}/get_loras_list")
+async def _get_lora_list(request):
+    return web.json_response(load_list_loras())
 
 # Support routes for downloading of models (using module scripts/download_ntxdata.py)
 

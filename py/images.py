@@ -74,7 +74,7 @@ class SaveMultipleImages(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}SaveMultipleImages",
-            display_name=f"{ADDON_PREFIX}Save Multiple Images",
+            display_name=f"{ADDON_PREFIX} Save Multiple Images",
             category=f"{ADDON_CATEGORY}/utils",
             is_output_node=True,
             inputs=[

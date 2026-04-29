@@ -82,7 +82,7 @@ function writeStringToWidget(node, widget_name, data, data_name, default_value =
 }
 
 app.registerExtension({ 
-	name: API_PREFIX + ".nodes.extension",
+	name: API_PREFIX + ".script",
 
     async nodeCreated(node) {
 

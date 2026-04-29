@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import torch
+import json
 from pathlib import Path
 from typing_extensions import override
 
@@ -226,7 +227,7 @@ class ReplaceTextParameters(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}ReplaceTextParameters",
-            display_name=f"{ADDON_PREFIX}Replace Text Parameters",
+            display_name=f"{ADDON_PREFIX} Replace Text Parameters",
             description="""
     Replace text parameters.
     The parameters must be in the form '%%name%%'
@@ -264,7 +265,7 @@ class SwitchAny(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}SwitchAny",
-            display_name=f"{ADDON_PREFIX}Switch Any",
+            display_name=f"{ADDON_PREFIX} Switch Any",
             description="Return the first non-null input, or None if all inputs are missing",
             category=f"{ADDON_CATEGORY}/utils",
             inputs=[
@@ -297,7 +298,7 @@ class LoadCustomVae(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}LoadCustomVae",
-            display_name=f"{ADDON_PREFIX}Load Custom Vae",
+            display_name=f"{ADDON_PREFIX} Load Custom Vae",
             description="If the flag is set to True, load the specified vae",
             category=f"{ADDON_CATEGORY}/utils",
             inputs=[
@@ -324,68 +325,84 @@ class LoadCustomVae(io.ComfyNode):
         return io.NodeOutput(vae, vae_name)
 
 
-class ConvertLoraStackToString(io.ComfyNode):
+class LoraStack(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id=f"{ADDON_PREFIX}ConvertLoraStackToString",
-            display_name=f"{ADDON_PREFIX}Convert Lora Stack To String",
-            description="Convert a list of LoRAs into a string",
-            category=f"{ADDON_CATEGORY}/utils",
+            node_id=f"{ADDON_PREFIX}LoraStack",
+            display_name=f"{ADDON_PREFIX} Lora Stack",
+            description="",
+            category=f"{ADDON_CATEGORY}/loras",
             inputs=[
-                LORA_STACK_TYPE.Input("lora_stack", optional=True),
+                io.String.Input("loras_data", default="[]"),
             ],
             outputs=[
-                io.String.Output("stack_text"),
+                LORA_STACK_TYPE.Output("lora_stack"),
             ],
         )
 
     @classmethod
-    def execute(cls, lora_stack=None):
+    def execute(cls, loras_data):
+        try:
+            data = json.loads(loras_data)
+            if isinstance(data, list):
+                # backward-compat: old format was a bare array
+                loras, common_strength = data, False
+            elif isinstance(data, dict):
+                loras = data.get("loras", [])
+                common_strength = bool(data.get("commonStrength", False))
+            else:
+                loras, common_strength = [], False
+        except (json.JSONDecodeError, TypeError):
+            loras, common_strength = [], False
 
-        text = ""
+        stack = []
+        for entry in loras:
+            if not isinstance(entry, dict):
+                continue
+            if not entry.get("enabled", True):
+                continue
+            name = entry.get("name", "")
+            if not name or name == "none":
+                continue
+            model_str = float(entry.get("modelStrength", 1.0))
+            clip_str  = model_str if common_strength else float(entry.get("clipStrength", 1.0))
+            stack.append((name, model_str, clip_str))
 
-        if lora_stack is not None:
-            for lora_def in lora_stack:
-                if len(lora_def) >= 3:
-                    text += format_lora_as_string(lora_def[0], lora_def[1], lora_def[2]) + "\n"
-                elif len(lora_def) >= 2:
-                    text += format_lora_as_string(lora_def[0], lora_def[1], lora_def[1]) + "\n"
-                elif len(lora_def) >= 1:
-                    text += format_lora_as_string(lora_def[0], 1.0, 1.0) + "\n"
-
-        return io.NodeOutput(text)
+        return io.NodeOutput(stack)
 
 
-class ConvertLoraStringToStack(io.ComfyNode):
+class MergeLoraStacks(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id=f"{ADDON_PREFIX}ConvertLoraStringToStack",
-            display_name=f"{ADDON_PREFIX}Convert Lora String To Stack",
-            description="Parse a text prompt and convert the LoRA references to a stack",
-            category=f"{ADDON_CATEGORY}/utils",
+            node_id=f"{ADDON_PREFIX}MergeLoraStacks",
+            display_name=f"{ADDON_PREFIX} Merge Lora Stacks",
+            description="Merge two lora stacks",
+            category=f"{ADDON_CATEGORY}/loras",
             inputs=[
-                io.String.Input("prompt", multiline=False, dynamic_prompts=False, default=""),
-                LORA_STACK_TYPE.Input("initial_lora_stack", optional=True),
+                LORA_STACK_TYPE.Input("lora_stack_1", optional=True),
+                LORA_STACK_TYPE.Input("lora_stack_2", optional=True),
             ],
             outputs=[
-                io.String.Output("clean_prompt"),
-                LORA_STACK_TYPE.Output("final_lora_stack"),
+                LORA_STACK_TYPE.Output("lora_stack"),
             ],
         )
 
     @classmethod
-    def execute(cls, prompt, initial_lora_stack=None):
+    def execute(cls, lora_stack_1=None, lora_stack_2=None):
 
-        if initial_lora_stack is None:
-            initial_lora_stack = []
+        merged_lora_stack = []
 
-        final_lora_stack = initial_lora_stack + extract_lora_strings(prompt)
+        if lora_stack_1 is not None:
+            for (name, s1, s2) in lora_stack_1:
+                merged_lora_stack.append((name, s1, s2))
 
-        clean_prompt = remove_text_between_angle_brackets(prompt)
+        if lora_stack_2 is not None:
+            for (name, s1, s2) in lora_stack_2:
+                merged_lora_stack.append((name, s1, s2))
 
-        return io.NodeOutput(clean_prompt, final_lora_stack)
+        return io.NodeOutput(merged_lora_stack)
 
 
 class ApplyLoraStack(io.ComfyNode):
@@ -393,9 +410,9 @@ class ApplyLoraStack(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}ApplyLoraStack",
-            display_name=f"{ADDON_PREFIX}Apply Lora Stack",
+            display_name=f"{ADDON_PREFIX} Apply Lora Stack",
             description="Apply lora stack to model and (optionally) clip",
-            category=f"{ADDON_CATEGORY}/utils",
+            category=f"{ADDON_CATEGORY}/loras",
             inputs=[
                 LORA_STACK_TYPE.Input("lora_stack"),
                 io.Model.Input("model"),
@@ -483,37 +500,68 @@ class ApplyLoraStack(io.ComfyNode):
         return io.NodeOutput(applied_lora_stack, model, clip)
 
 
-class MergeLoraStacks(io.ComfyNode):
+class ConvertLoraStackToString(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id=f"{ADDON_PREFIX}MergeLoraStacks",
-            display_name=f"{ADDON_PREFIX}Merge Lora Stacks",
-            description="Merge two lora stacks",
-            category=f"{ADDON_CATEGORY}/utils",
+            node_id=f"{ADDON_PREFIX}ConvertLoraStackToString",
+            display_name=f"{ADDON_PREFIX} Convert Lora Stack To String",
+            description="Convert a list of LoRAs into a string",
+            category=f"{ADDON_CATEGORY}/loras",
             inputs=[
-                LORA_STACK_TYPE.Input("lora_stack_1", optional=True),
-                LORA_STACK_TYPE.Input("lora_stack_2", optional=True),
+                LORA_STACK_TYPE.Input("lora_stack", optional=True),
             ],
             outputs=[
-                LORA_STACK_TYPE.Output("lora_stack"),
+                io.String.Output("stack_text"),
             ],
         )
 
     @classmethod
-    def execute(cls, lora_stack_1=None, lora_stack_2=None):
+    def execute(cls, lora_stack=None):
 
-        merged_lora_stack = []
+        text = ""
 
-        if lora_stack_1 is not None:
-            for (name, s1, s2) in lora_stack_1:
-                merged_lora_stack.append((name, s1, s2))
+        if lora_stack is not None:
+            for lora_def in lora_stack:
+                if len(lora_def) >= 3:
+                    text += format_lora_as_string(lora_def[0], lora_def[1], lora_def[2]) + "\n"
+                elif len(lora_def) >= 2:
+                    text += format_lora_as_string(lora_def[0], lora_def[1], lora_def[1]) + "\n"
+                elif len(lora_def) >= 1:
+                    text += format_lora_as_string(lora_def[0], 1.0, 1.0) + "\n"
 
-        if lora_stack_2 is not None:
-            for (name, s1, s2) in lora_stack_2:
-                merged_lora_stack.append((name, s1, s2))
+        return io.NodeOutput(text)
 
-        return io.NodeOutput(merged_lora_stack)
+
+class ConvertLoraStringToStack(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}ConvertLoraStringToStack",
+            display_name=f"{ADDON_PREFIX} Convert Lora String To Stack",
+            description="Parse a text prompt and convert the LoRA references to a stack",
+            category=f"{ADDON_CATEGORY}/loras",
+            inputs=[
+                io.String.Input("prompt", multiline=False, dynamic_prompts=False, default=""),
+                LORA_STACK_TYPE.Input("initial_lora_stack", optional=True),
+            ],
+            outputs=[
+                io.String.Output("clean_prompt"),
+                LORA_STACK_TYPE.Output("final_lora_stack"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, prompt, initial_lora_stack=None):
+
+        if initial_lora_stack is None:
+            initial_lora_stack = []
+
+        final_lora_stack = initial_lora_stack + extract_lora_strings(prompt)
+
+        clean_prompt = remove_text_between_angle_brackets(prompt)
+
+        return io.NodeOutput(clean_prompt, final_lora_stack)
 
 
 class CreateImageLatent(io.ComfyNode):
@@ -521,7 +569,7 @@ class CreateImageLatent(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}CreateImageLatent",
-            display_name=f"{ADDON_PREFIX}Create Image Latent",
+            display_name=f"{ADDON_PREFIX} Create Image Latent",
             description="""Build the latents from the specified image size. If an image is provided, its size will be used.
                     To customize the list of image sizes, create a file /input/ntx_data/image_sizes.txt
                     and write the sizes, one for each row, int the form WIDTHxHEIGHT""",
@@ -596,7 +644,7 @@ class CollectModelNtxdata(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}CollectModelNtxdata",
-            display_name=f"{ADDON_PREFIX}Collect Model Ntxdata",
+            display_name=f"{ADDON_PREFIX} Collect Model Ntxdata",
             description="",
             category=f"{ADDON_CATEGORY}/utils",
             is_output_node=True,
@@ -640,7 +688,7 @@ class PromptChainer(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}PromptChainer",
-            display_name=f"{ADDON_PREFIX}Prompt Chainer",
+            display_name=f"{ADDON_PREFIX} Prompt Chainer",
             category=f"{ADDON_CATEGORY}/utils",
             inputs=[
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True, default=""),
@@ -665,7 +713,7 @@ class CLIPTextEncodeWithCutoff(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id=f"{ADDON_PREFIX}CLIPTextEncodeWithCutoff",
-            display_name=f"{ADDON_PREFIX}CLIPTextEncodeWithCutoff",
+            display_name=f"{ADDON_PREFIX} CLIPTextEncodeWithCutoff",
             category=f"{ADDON_CATEGORY}/utils",
             inputs=[
                 io.Clip.Input("clip"),
@@ -703,7 +751,7 @@ class Test(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}Test",
-            display_name=f"{ADDON_PREFIX}Test",
+            display_name=f"{ADDON_PREFIX} Test",
             description="",
             category=f"{ADDON_CATEGORY}/utils",
             inputs=[
@@ -726,10 +774,11 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         ReplaceTextParameters,
         SwitchAny,
         LoadCustomVae,
+        LoraStack,
+        MergeLoraStacks,
+        ApplyLoraStack,
         ConvertLoraStackToString,
         ConvertLoraStringToStack,
-        ApplyLoraStack,
-        MergeLoraStacks,
         CreateImageLatent,
         CollectModelNtxdata,
         PromptChainer,
