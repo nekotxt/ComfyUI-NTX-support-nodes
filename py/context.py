@@ -24,10 +24,14 @@ class PipeBase(io.ComfyNode):
 
         inputs = [DICT_TYPE.Input("pipe", optional=True)]
         for name, (type_name, options, _) in cls.LIST_OF_PARAMETERS.items():
+            # if no options are specified for the parameter, just start with an empty dict
             options = {} if options is None else options
+            # always include the "optional" flag for these parameters
             options = options | {"optional": True}
+            # for primitive types, force the input to be slot-only (no widget), unless the options explicitely require it
             if type_name in [io.Boolean, io.Float, io.Int, io.String]:
-                options = options | {"force_input": True}
+                if options.get("force_input", None) is None:
+                    options = options | {"force_input": True}
             inputs.append(type_name.Input(name, **options))
 
         outputs = [DICT_TYPE.Output("pipe")]
@@ -44,8 +48,14 @@ class PipeBase(io.ComfyNode):
         )
 
     @classmethod
-    def preprocess_arguments(cls, pipe, kwargs):
-        print("PipeBase:preprocess_arguments")
+    def preprocess_inputs(cls, pipe, kwargs):
+        # optional call to be overridden in derived classes, to manipulate the input data before processing
+        pass
+
+    @classmethod
+    def postprocess_results(cls, pipe, return_values):
+        # optional call to be overridden in derived classes, to manipulate the output data after processing
+        pass
 
     @classmethod
     def execute(cls, **kwargs):
@@ -53,7 +63,7 @@ class PipeBase(io.ComfyNode):
         pipe = kwargs.get("pipe", None)
         pipe = {} if pipe is None else clone_data(pipe)
 
-        cls.preprocess_arguments(pipe, kwargs)
+        cls.preprocess_inputs(pipe, kwargs)
 
         return_values = [pipe]
 
@@ -66,6 +76,8 @@ class PipeBase(io.ComfyNode):
         for name, (_, _, default_return_value) in cls.LIST_OF_PARAMETERS.items():
             retrieved_value = pipe.get(name, default_return_value)
             return_values.append(retrieved_value)
+
+        cls.postprocess_results(pipe, return_values)
 
         return io.NodeOutput(*return_values)
 

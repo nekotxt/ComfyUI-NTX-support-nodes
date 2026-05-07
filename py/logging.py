@@ -1,10 +1,6 @@
-from ..config_variables import ADDON_NAME, LOG_INFO, LOG_INFO_NODE_NAME, LOG_INFO_LOAD_MODEL, LOG_INFO_APPLY_MODEL, LOG_WARNING
+import logging
 
-# LOG_INFO = True
-# LOG_INFO_NODE_NAME = True
-# LOG_INFO_LOAD_MODEL = True
-# LOG_INFO_APPLY_MODEL = True
-# LOG_WARNING = True
+from ..config_variables import ADDON_NAME#, LOG_INFO, LOG_INFO_NODE_NAME, LOG_INFO_LOAD_MODEL, LOG_INFO_APPLY_MODEL, LOG_WARNING
 
 # https://stackoverflow.com/questions/4842424/list-of-ansi-color-escape-sequences
 # https://en.wikipedia.org/wiki/ANSI_escape_code#3-bit_and_4-bit
@@ -53,60 +49,127 @@ COLORS = {
   'BG_BRIGHT_WHITE': '\33[107m',
 }
 
-def log_setup(show_info:bool, show_info_node_name:bool, show_info_load_model:bool, show_info_apply_model:bool, show_warning:bool):
-  global LOG_INFO, LOG_INFO_NODE_NAME, LOG_INFO_LOAD_MODEL, LOG_INFO_APPLY_MODEL, LOG_WARNING
+# Configure logging
 
-  LOG_INFO = show_info
-  log_info(f"LOG_INFO = {LOG_INFO}")
+SUCCESS = 21  # between INFO (20) and WARNING (30)
+logging.addLevelName(SUCCESS, "SUCCESS")
+def success(self, message, *args, **kwargs):
+    if self.isEnabledFor(SUCCESS):
+        self._log(SUCCESS, message, args, **kwargs)
+logging.Logger.success = success # Add the method to the Logger class
 
-  LOG_INFO_NODE_NAME = show_info_node_name
-  log_info(f"LOG_INFO_NODE_NAME = {LOG_INFO_NODE_NAME}")
+MODEL_DOWNLOADED = 22  # between INFO (20) and WARNING (30)
+logging.addLevelName(MODEL_DOWNLOADED, "MODEL_DOWNLOADED")
+def model_downloaded(self, message, *args, **kwargs):
+    if self.isEnabledFor(MODEL_DOWNLOADED):
+        self._log(MODEL_DOWNLOADED, message, args, **kwargs)
+logging.Logger.model_downloaded = model_downloaded # Add the method to the Logger class
 
-  LOG_INFO_LOAD_MODEL = show_info_load_model
-  log_info(f"LOG_INFO_LOAD_MODEL = {LOG_INFO_LOAD_MODEL}")
+MODEL_LOADED = 23  # between INFO (20) and WARNING (30)
+logging.addLevelName(MODEL_LOADED, "MODEL_LOADED")
+def model_loaded(self, message, *args, **kwargs):
+    if self.isEnabledFor(MODEL_LOADED):
+        self._log(MODEL_LOADED, message, args, **kwargs)
+logging.Logger.model_loaded = model_loaded # Add the method to the Logger class
 
-  LOG_INFO_APPLY_MODEL = show_info_apply_model
-  log_info(f"LOG_INFO_APPLY_MODEL = {LOG_INFO_APPLY_MODEL}")
+MODEL_APPLIED = 24  # between INFO (20) and WARNING (30)
+logging.addLevelName(MODEL_APPLIED, "MODEL_APPLIED")
+def model_applied(self, message, *args, **kwargs):
+    if self.isEnabledFor(MODEL_APPLIED):
+        self._log(MODEL_APPLIED, message, args, **kwargs)
+logging.Logger.model_applied = model_applied # Add the method to the Logger class
 
-  LOG_WARNING = show_warning
-  log_info(f"LOG_WARNING = {LOG_WARNING}")
+NODE_NAME = 25  # between INFO (20) and WARNING (30)
+logging.addLevelName(NODE_NAME, "NODE_NAME")
+def node_name(self, message, *args, **kwargs):
+    if self.isEnabledFor(NODE_NAME):
+        totalLenght = 100
+        message = f"=== {message} {'=' * (totalLenght - 3 - 1 - len(message) - 1)}"
+        self._log(NODE_NAME, message, args, **kwargs)
+logging.Logger.node_name = node_name # Add the method to the Logger class
 
-def log(message, color=None, msg_color=None, prefix=None):
-  """Basic logging."""
-  color = COLORS[color] if color is not None and color in COLORS else COLORS["BRIGHT_GREEN"]
-  msg_color = COLORS[msg_color] if msg_color is not None and msg_color in COLORS else ''
-  prefix = f'[{prefix}]' if prefix is not None else ''
-  msg = f'{color}[{ADDON_NAME}]{prefix}{msg_color} {message}{COLORS["RESET"]}'
-  print(msg)
+class LevelFormatter(logging.Formatter):
+    FORMATS = {
+        logging.DEBUG:    f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["RED"]         }[DEBUG] %(message)s{COLORS["RESET"]}",
+        logging.INFO:     f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["CYAN"]        }[INFO] %(message)s{COLORS["RESET"]}",
+        SUCCESS:          f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["BRIGHT_GREEN"]}[SUCCESS] %(message)s{COLORS["RESET"]}",
+        MODEL_DOWNLOADED: f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["BRIGHT_BLUE"] }[DOWNLOAD] %(message)s{COLORS["RESET"]}",
+        MODEL_LOADED:     f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["MAGENTA"]     }[LOAD] %(message)s{COLORS["RESET"]}",
+        MODEL_APPLIED:    f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["YELLOW"]      }[APPLY] %(message)s{COLORS["RESET"]}",
+        NODE_NAME:        f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["CYAN"]        }[INFO] %(message)s{COLORS["RESET"]}",
+        logging.WARNING:  f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["RED"]         }[WARN] %(message)s{COLORS["RESET"]}",
+        logging.ERROR:    f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["BRIGHT_RED"]  }[ERROR] %(filename)s:%(lineno)d - %(message)s{COLORS["RESET"]}",
+        logging.CRITICAL: f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["BRIGHT_RED"]  }[CRIT] %(filename)s:%(lineno)d - %(message)s{COLORS["RESET"]}",
+    }
+
+    def format(self, record):
+        fmt = self.FORMATS.get(record.levelno, self.FORMATS[logging.DEBUG])
+        formatter = logging.Formatter(fmt, datefmt="%H:%M:%S")
+        return formatter.format(record)
+
+logging_handler = logging.StreamHandler()
+logging_handler.setFormatter(LevelFormatter())
+
+logger = logging.getLogger(ADDON_NAME)
+logger.setLevel(logging.DEBUG)
+logger.addHandler(logging_handler)
+logger.propagate = False
 
 
-def log_success(message):
-  """Logs a success message."""
-  if LOG_INFO:
-    log(message, color="BRIGHT_GREEN", msg_color='RESET')
+# def log_setup(show_info:bool, show_info_node_name:bool, show_info_load_model:bool, show_info_apply_model:bool, show_warning:bool):
+#   global LOG_INFO, LOG_INFO_NODE_NAME, LOG_INFO_LOAD_MODEL, LOG_INFO_APPLY_MODEL, LOG_WARNING
 
-def log_info(message):
-  """Logs an info message."""
-  if LOG_INFO:
-    log(message, color="CYAN", msg_color='RESET')
+#   LOG_INFO = show_info
+#   log_info(f"LOG_INFO = {LOG_INFO}")
 
-def log_info_loadmodel(message):
-  """Logs an info message."""
-  if LOG_INFO_LOAD_MODEL:
-    log(message, color="BRIGHT_BLUE", msg_color='RESET')
+#   LOG_INFO_NODE_NAME = show_info_node_name
+#   log_info(f"LOG_INFO_NODE_NAME = {LOG_INFO_NODE_NAME}")
 
-def log_info_applymodel(message):
-  """Logs an info message."""
-  if LOG_INFO_APPLY_MODEL:
-    log(message, color="YELLOW", msg_color='RESET')
+#   LOG_INFO_LOAD_MODEL = show_info_load_model
+#   log_info(f"LOG_INFO_LOAD_MODEL = {LOG_INFO_LOAD_MODEL}")
 
-def log_node_name(name, totalLenght = 100):
-  if LOG_INFO_NODE_NAME:
-    #print("=" * totalLenght)
-    log(f"=== {name} {'=' * (totalLenght - 3 - 1 - len(name) - 1)}", color="CYAN", msg_color='RESET')
-    #print("=" * totalLenght)
+#   LOG_INFO_APPLY_MODEL = show_info_apply_model
+#   log_info(f"LOG_INFO_APPLY_MODEL = {LOG_INFO_APPLY_MODEL}")
 
-def log_warning(message, msg_color='RESET'):
-  """Logs a warning message."""
-  if LOG_WARNING:
-    log(message, color="BRIGHT_RED", msg_color='RESET')
+#   LOG_WARNING = show_warning
+#   log_info(f"LOG_WARNING = {LOG_WARNING}")
+
+# def log(message, color=None, msg_color=None, prefix=None):
+#   """Basic logging."""
+#   color = COLORS[color] if color is not None and color in COLORS else COLORS["BRIGHT_GREEN"]
+#   msg_color = COLORS[msg_color] if msg_color is not None and msg_color in COLORS else ''
+#   prefix = f'[{prefix}]' if prefix is not None else ''
+#   msg = f'{color}[{ADDON_NAME}]{prefix}{msg_color} {message}{COLORS["RESET"]}'
+#   print(msg)
+
+
+# def log_success(message):
+#   """Logs a success message."""
+#   if LOG_INFO:
+#     log(message, color="BRIGHT_GREEN", msg_color='RESET')
+
+# def log_info(message):
+#   """Logs an info message."""
+#   if LOG_INFO:
+#     log(message, color="CYAN", msg_color='RESET')
+
+# def log_info_loadmodel(message):
+#   """Logs an info message."""
+#   if LOG_INFO_LOAD_MODEL:
+#     log(message, color="BRIGHT_BLUE", msg_color='RESET')
+
+# def log_info_applymodel(message):
+#   """Logs an info message."""
+#   if LOG_INFO_APPLY_MODEL:
+#     log(message, color="YELLOW", msg_color='RESET')
+
+# def log_node_name(name, totalLenght = 100):
+#   if LOG_INFO_NODE_NAME:
+#     #print("=" * totalLenght)
+#     log(f"=== {name} {'=' * (totalLenght - 3 - 1 - len(name) - 1)}", color="CYAN", msg_color='RESET')
+#     #print("=" * totalLenght)
+
+# def log_warning(message, msg_color='RESET'):
+#   """Logs a warning message."""
+#   if LOG_WARNING:
+#     log(message, color="BRIGHT_RED", msg_color='RESET')

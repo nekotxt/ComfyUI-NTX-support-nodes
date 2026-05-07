@@ -15,7 +15,7 @@ from torchvision.transforms import InterpolationMode
 from typing_extensions import override
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY
-from .logging import log_info, log_node_name
+from .logging import logger #log_info, log_node_name
 
 # ===== Custom types ===========================================================================================================================
 
@@ -100,11 +100,11 @@ class SaveMultipleImages(io.ComfyNode):
     @classmethod
     def execute(cls, images, date_in_name: bool, save_prefix: str, save_individual: bool, save_grid: bool, grid_gap: int, grid_color: str, save_workflow: bool, model_name=None, sampler_name=None, scheduler=None):
 
-        log_node_name("SaveMultipleImages")
+        logger.node_name("SaveMultipleImages")
 
         # exit if there are no images
         if images is None:
-            log_info("no input images, exit")
+            logger.info("no input images, exit")
             return io.NodeOutput(None, [])
 
         # calculate file save name
@@ -152,7 +152,7 @@ class SaveMultipleImages(io.ComfyNode):
 
         # if requested save the single grid image
         if save_grid:
-            log_info("Save grid image :")
+            logger.info("Save grid image :")
             image_grid_path = output_dir / f"{file_name}.png"
             img_grid.save(image_grid_path, pnginfo=metadata, compress_level=4)
             list_saved_images.append(str(image_grid_path))
@@ -162,7 +162,7 @@ class SaveMultipleImages(io.ComfyNode):
             save_individual = False
 
         if save_individual:
-            log_info("Save single images :")
+            logger.info("Save single images :")
             counter = 1
             for img in img_list:
                 image_file_path = output_dir / f"{file_name}_{counter:05}.png"
@@ -171,7 +171,7 @@ class SaveMultipleImages(io.ComfyNode):
                 counter += 1
 
         for s in list_saved_images:
-            log_info(f"Saved file : {s}")
+            logger.info(f"Saved file : {s}")
 
         return io.NodeOutput(pillow_to_tensor(img_grid), list_saved_images)
 

@@ -10,7 +10,7 @@ import ruamel.yaml
 from pathlib import Path
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, SETTINGS_DIR, MODEL_TYPES
-from .logging import log_info, log_warning
+from .logging import logger#log_info, log_warning
 from .utils import clone_data, clean_path, load_list_vaes, load_list_samplers, load_list_schedulers, DICT_TYPE
 
 #SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
@@ -60,12 +60,12 @@ class ModelsManager():
                     for identifier in [model_id, model_id_path.name, model_id_path.stem]:
                         full_model_id = _get_full_model_id(model_type, identifier)
                         if full_model_id in models_by_ID:
-                            log_warning(f"- [{full_model_id}] duplicated (existing: [{models_by_ID[full_model_id]['id']}], new: [{model_data['id']}])")
+                            logger.warning(f"- [{full_model_id}] duplicated (existing: [{models_by_ID[full_model_id]['id']}], new: [{model_data['id']}])")
                             duplicates = duplicates + 1
                         else:
                             models_by_ID[full_model_id] = model_data
         if duplicates > 0:
-            log_warning(f"{duplicates} duplicates found")
+            logger.warning(f"{duplicates} duplicates found")
         self.models_by_ID = models_by_ID
 
         categories_list = []
@@ -110,7 +110,7 @@ class ModelsManager():
 
 g_models_manager = ModelsManager()
 g_models_manager.load()
-log_info(f"Create g_models_manager from {g_models_manager.models_file}")
+logger.info(f"Create g_models_manager from {g_models_manager.models_file}")
 
 class LoadCheckpointInfo(io.ComfyNode):
     @classmethod
@@ -188,7 +188,7 @@ class CharactersManager():
 
 g_characters_manager = CharactersManager()
 g_characters_manager.load()
-log_info(f"Create g_characters_manager from {g_characters_manager.characters_file}")
+logger.info(f"Create g_characters_manager from {g_characters_manager.characters_file}")
 
 class LoadCharInfo(io.ComfyNode):
     @classmethod

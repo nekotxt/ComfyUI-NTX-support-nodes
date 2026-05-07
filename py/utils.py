@@ -14,9 +14,7 @@ from pathlib import Path
 from typing_extensions import override
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, SETTINGS_DIR
-from .logging import log_info, log_warning
-
-#SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
+from .logging import logger#log_info, log_warning
 
 # used by ApplyLoraStack
 CACHED_LORAS = []
@@ -26,7 +24,7 @@ def util_setup(max_cached_loras:int):
     global MAX_CACHED_LORAS
 
     MAX_CACHED_LORAS = max_cached_loras
-    log_info(f"MAX_CACHED_LORAS = {MAX_CACHED_LORAS}")
+    logger.info(f"MAX_CACHED_LORAS = {MAX_CACHED_LORAS}")
 
 # ===== Custom types ===========================================================================================================================
 
@@ -185,20 +183,20 @@ def format_lora_as_string(lora_name, strength_model, strength_clip, compact_form
 
 LIST_OF_LORA_DIRS = None
 def solve_lora_name(lora_name:str):
-    # log_info(f"Solve lora name [{lora_name}]")
+    # logger.info(f"Solve lora name [{lora_name}]")
 
     lora_path = ""
     try:
         lora_path = folder_paths.get_full_path_or_raise("loras", lora_name)
-        # log_info(f"- found [{lora_name}] => {lora_path}")
+        # logger.info(f"- found [{lora_name}] => {lora_path}")
         return (lora_name, lora_path)
     except Exception as e:
-        log_info(f"- {e}")
+        logger.info(f"- {e}")
 
     # generate the list of candidate dirs, if needed
     global LIST_OF_LORA_DIRS
     if LIST_OF_LORA_DIRS is None:
-        log_info("RETRIEVE LIST OF LORA DIRS")
+        logger.info("RETRIEVE LIST OF LORA DIRS")
         LIST_OF_LORA_DIRS = []
         for lora_dir in folder_paths.folder_names_and_paths.get("loras", ([], []))[0]:
             lora_dir_path = Path(lora_dir)
@@ -209,12 +207,12 @@ def solve_lora_name(lora_name:str):
     # try with file name only
     lora_name_short = Path(lora_name).name
     for (lora_dir, subdir) in LIST_OF_LORA_DIRS:
-        # log_info(f"- try with dir:{subdir}")
+        # logger.info(f"- try with dir:{subdir}")
         lora_path = subdir / lora_name_short
         if lora_path.exists():
             lora_path = str(lora_path)
             lora_name_updated = lora_path[len(lora_dir)+1:]
-            log_info(f"- found [{lora_name}] => [{lora_name_updated}] => {lora_path}")
+            logger.info(f"- found [{lora_name}] => [{lora_name_updated}] => {lora_path}")
             return (lora_name_updated, lora_path)
 
     # it could not find the model
@@ -437,11 +435,11 @@ class ApplyLoraStack(io.ComfyNode):
         if len(lora_stack) == 0:
             return io.NodeOutput(lora_stack, model, clip)
 
-        log_info("ApplyLoraStack :")
+        logger.info("ApplyLoraStack :")
         applied_lora_stack = []
         for (lora_name, strength_model, strength_clip) in lora_stack:
             if strength_model == 0 and strength_clip == 0:
-                log_info(f"- SKIP [{lora_name}] - strength=0")
+                logger.info(f"- SKIP [{lora_name}] - strength=0")
                 continue
 
             duplicated = False
@@ -450,12 +448,12 @@ class ApplyLoraStack(io.ComfyNode):
                     duplicated = True
                     break
             if duplicated:
-                log_info(f"- SKIP [{lora_name}] - already applied")
+                logger.info(f"- SKIP [{lora_name}] - already applied")
                 continue
 
             (lora_name, lora_path) = solve_lora_name(lora_name)
             if lora_path is None:
-                log_info(f"- ERROR [{lora_name}] model file not found")
+                logger.info(f"- ERROR [{lora_name}] model file not found")
                 continue
 
             try:
@@ -476,26 +474,26 @@ class ApplyLoraStack(io.ComfyNode):
 
                 applied_lora_stack.append([lora_name, strength_model, strength_clip])
 
-                log_info(f"- OK [{lora_name}] - {msg}")
+                logger.info(f"- OK [{lora_name}] - {msg}")
             except Exception as e:
-                log_info(f"- ERROR [{lora_name}] - {e}")
+                logger.info(f"- ERROR [{lora_name}] - {e}")
 
-        log_info("Final stack :")
+        logger.info("Final stack :")
         for (lora_name, strength_model, strength_clip) in applied_lora_stack:
-            log_info(f"- {lora_name} {strength_model} {strength_clip}")
+            logger.info(f"- {lora_name} {strength_model} {strength_clip}")
 
-        log_info("Current cache :")
+        logger.info("Current cache :")
         for (cached_lora_path, _) in CACHED_LORAS:
-            log_info(f"- {cached_lora_path}")
+            logger.info(f"- {cached_lora_path}")
 
         if len(CACHED_LORAS) > MAX_CACHED_LORAS:
-            log_info(f"Pruning cache (max={MAX_CACHED_LORAS}):")
+            logger.info(f"Pruning cache (max={MAX_CACHED_LORAS}):")
             while len(CACHED_LORAS) > MAX_CACHED_LORAS:
                 (cached_lora_path, cached_lora) = CACHED_LORAS.pop(0)
-                log_info(f"- remove {cached_lora_path}")
-            log_info("Final cache :")
+                logger.info(f"- remove {cached_lora_path}")
+            logger.info("Final cache :")
             for (cached_lora_path, _) in CACHED_LORAS:
-                log_info(f"- {cached_lora_path}")
+                logger.info(f"- {cached_lora_path}")
 
         return io.NodeOutput(applied_lora_stack, model, clip)
 
@@ -669,16 +667,16 @@ class CollectModelNtxdata(io.ComfyNode):
 
         download_dir = SETTINGS_DIR / "downloads"
         download_dir.mkdir(parents=True, exist_ok=True)
-        log_info(f"Copy to {download_dir}")
+        logger.info(f"Copy to {download_dir}")
 
         for model_name in models_list:
             model_path = Path(model_name)
             datafile_path = model_path.with_suffix('.ntxdata')
             if datafile_path.is_file():
                 shutil.copy(datafile_path, download_dir / datafile_path.name)
-                log_info(f"- copied {datafile_path}")
+                logger.info(f"- copied {datafile_path}")
             else:
-                log_warning(f"- not found! {model_name}")
+                logger.warning(f"- not found! {model_name}")
 
         return io.NodeOutput()
 

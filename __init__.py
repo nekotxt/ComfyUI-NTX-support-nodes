@@ -5,13 +5,9 @@ import json
 from pathlib import Path
 
 from .config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, COMFY_DIR, SETTINGS_DIR, CONFIGURATION
-from .py.logging import log_setup, log_info, log_warning
+from .py.logging import logger#log_setup, log_info, log_warning
+logger.info("Initialization ...")
 from .py.utils import is_string_empty, clone_data, load_list_loras, load_list_vaes, load_list_samplers, load_list_schedulers
-
-# ===== INITIALIZATION =====================================================================================================================
-
-# logging
-log_setup(show_info=True, show_info_node_name=True, show_info_load_model=True, show_info_apply_model=True, show_warning=True)
 
 # ===== NODES INITIALIZATION =====================================================================================================================
 
@@ -21,28 +17,18 @@ class NTX_SE_Extension(ComfyExtension):
     # must be declared as async
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
         list_of_nodes = []
-        
-        from .py.context import get_nodes_list as context_get_nodes_list
-        list_of_nodes.extend(context_get_nodes_list())
-        
-        from .py.images import get_nodes_list as images_get_nodes_list
-        list_of_nodes.extend(images_get_nodes_list())
-        
-        from .py.loadinfo import get_nodes_list as loadinfo_get_nodes_list
-        list_of_nodes.extend(loadinfo_get_nodes_list())
-        
-        from .py.pipe import get_nodes_list as pipe_get_nodes_list
-        list_of_nodes.extend(pipe_get_nodes_list())
-        
-        from .py.reroutes import get_nodes_list as reroutes_get_nodes_list
-        list_of_nodes.extend(reroutes_get_nodes_list())
-        
-        from .py.test import get_nodes_list as test_get_nodes_list
-        list_of_nodes.extend(test_get_nodes_list())
-        
-        from .py.utils import get_nodes_list as utils_get_nodes_list
-        list_of_nodes.extend(utils_get_nodes_list())
-        
+
+        # scan the py subdir, and for each .py file try to call the get_nodes_list function
+        import importlib
+        import pkgutil
+        from . import py as py_package
+        for importer, module_name, is_pkg in pkgutil.iter_modules(py_package.__path__):
+            module = importlib.import_module(f".py.{module_name}", package=__package__)
+            if hasattr(module, "get_nodes_list"):
+                module_nodes = module.get_nodes_list()
+                list_of_nodes.extend(module_nodes)
+                logger.info(f"Loaded {len(module_nodes)} nodes from module {module_name}")
+
         return list_of_nodes
 
 # can be declared async or not, both will work
@@ -58,7 +44,7 @@ WEB_DIRECTORY = "./web"
 from aiohttp import web
 from server import PromptServer
 
-# Support routes for node LoadCheckpointInfo
+# Support routes for node .py.loadinfo.LoadCheckpointInfo
 
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/get_checkpoint_info")
 async def get_checkpoint_info(request):
@@ -103,7 +89,7 @@ async def get_checkpoint_info(request):
 
     return web.json_response(ckpt_info.get("model"))
 
-# Support routes for node LoadCharInfo
+# Support routes for node .py.loadinfo.LoadCharInfo
 
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/get_options_for_char")
 async def get_options_for_char(request):
@@ -131,75 +117,3 @@ async def get_prompt_for_char_option(request):
 @PromptServer.instance.routes.get(f"/{API_PREFIX}/get_loras_list")
 async def _get_lora_list(request):
     return web.json_response(load_list_loras())
-
-# Support routes for downloading of models (using module scripts/download_ntxdata.py)
-
-log_info(f"To download the models defined in {SETTINGS_DIR / 'downloads'} go to : /{API_PREFIX}/download_models")
-
-@PromptServer.instance.routes.get(f"/{API_PREFIX}/download_models")
-async def download_models(request):
-    global COMFY_DIR
-    global CONFIGURATION
-    global SETTINGS_DIR
-
-    cloud_storage_id = CONFIGURATION.get("cloud_storage_id", "pcloud")
-
-    from .scripts.download_ntxdata import main_execution
-    result = main_execution(downloads_dir=SETTINGS_DIR / "downloads", models_dir=COMFY_DIR / "models", tokens=CONFIGURATION.get("tokens", {}), simulation_only=False, cloud_storage_id=cloud_storage_id)
-
-    return web.json_response(result)
-
-# Support routes for rescan of models (using module scripts/scan_models.py)
-
-log_info(f"To rescan the models contained in {COMFY_DIR / 'models'} go to : /{API_PREFIX}/rescan_models")
-
-@PromptServer.instance.routes.get(f"/{API_PREFIX}/rescan_models")
-async def rescan_models(request):
-    global COMFY_DIR
-    global CONFIGURATION
-
-    # accept force_rescan from query string
-    force_rescan = bool(request.query.get("force_rescan", False))
-
-    # the location of the models dir is retrieved from the configuration file, or defaults to 'models' subdir
-    models_dir = Path(CONFIGURATION.get("models_dir_local", ""))
-    if models_dir == "":
-        # defaults to standard comfy dir
-        models_dir = COMFY_DIR / "models"
-        # branches to scan (the key and value is the standard comfy name)
-        model_types_mapping = {
-            "vae": "vae", 
-            "checkpoints": "checkpoints",
-            "diffusion_models": "diffusion_models",
-            "loras": "loras",
-        }
-    else:
-        # branches to scan (the key is the standard comfy name, the value is the actual name of the directory to scan on disk)
-        model_types_mapping = {
-            "vae": "VAE", 
-            "checkpoints": "Checkpoints",
-            "diffusion_models": "diffusion_models",
-            "loras": "Lora",
-        }
-    if models_dir.exists():
-        log_info(f"Processing {models_dir}")
-    else:
-        return web.json_response(f"Models dir not found: {models_dir}")
-
-    from .scripts.scan_models import generate_models_catalogue
-    result_models = generate_models_catalogue(models_dir=models_dir, model_types_mapping=model_types_mapping, force_rescan=force_rescan)
-    log_info(result_models)
-
-    from .scripts.scan_models import generate_chars_catalogue
-    result_chars = generate_chars_catalogue()
-    log_info(result_chars)
-
-    from .py.loadinfo import g_models_manager
-    g_models_manager.load()
-    log_info(f"Updated g_models_manager from {g_models_manager.models_file}")
-
-    from .py.loadinfo import g_characters_manager
-    g_characters_manager.load()
-    log_info(f"Updated g_characters_manager from {g_characters_manager.characters_file}")
-
-    return web.json_response(f"force_rescan={force_rescan}" + "\n" + result_models + "\n" + result_chars)

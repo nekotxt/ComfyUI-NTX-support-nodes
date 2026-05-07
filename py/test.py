@@ -129,5 +129,5 @@ class DynamicTwinNode(io.ComfyNode):
 
         return io.NodeOutput(pipe)
 
-def get_nodes_list() -> list[type[io.ComfyNode]]:
-    return [SwitchNode, AutogrowNode, DynamicComboNode, DynamicTwinNode]
+# def get_nodes_list() -> list[type[io.ComfyNode]]:
+#     return [SwitchNode, AutogrowNode, DynamicComboNode, DynamicTwinNode]

@@ -1,3 +1,7 @@
+# Collection of support nodes to create a pipeline of data
+# through the workflow. Basically allowing to manipulate
+# dictionaries and lists in a convenient way
+
 from comfy_api.latest import ComfyExtension, io
 
 from typing_extensions import override
