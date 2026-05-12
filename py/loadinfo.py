@@ -5,6 +5,7 @@ from typing_extensions import override
 import folder_paths
 
 import json
+import os
 import ruamel.yaml
 
 from pathlib import Path
@@ -28,6 +29,7 @@ class ModelsManager():
         self.catalogue = {}
         self.models_by_ID = {}
         self.categories_list = []
+        self.list_cache = {}
 
     def load(self):
         global MODEL_TYPES
@@ -89,12 +91,29 @@ class ModelsManager():
         return self.models_by_ID.get(full_model_id, None)
 
     def get_models_list(self, model_type:str):
-        models_list = []
+        if model_type in self.list_cache:
+            return self.list_cache[model_type]
+
+        models_list_from_disk = folder_paths.get_filename_list(model_type)
+
+        models_list_from_catalogue = []
         if model_type in self.catalogue:
             for model_data in self.catalogue[model_type]:
-                models_list.append(model_data.get("id", ""))
-            models_list.sort()
-        models_list = folder_paths.get_filename_list(model_type) + ["----- models from data file ----"] + models_list
+                model_id = model_data.get("id", "").replace("\\", os.path.sep).replace("/", os.path.sep)
+                if model_id in models_list_from_disk:
+                    continue
+                if model_id in models_list_from_catalogue:
+                    continue
+                models_list_from_catalogue.append(model_id)
+            models_list_from_catalogue.sort()
+
+        if len(models_list_from_catalogue) > 0:
+            logger.info(f"ModelsManager: adding models from catalogue to the list of {model_type}")
+            models_list = models_list_from_disk+ ["----- models from data file ----"] + models_list_from_catalogue
+        else:
+            models_list = models_list_from_disk
+
+        self.list_cache[model_type] = models_list
         return models_list
         
     def get_model_categories_list(self):

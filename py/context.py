@@ -84,37 +84,37 @@ class PipeBase(io.ComfyNode):
 class PipeImageEdit(PipeBase):
     NODE_DESCRIPTION = "Pipe for image generation"
     LIST_OF_PARAMETERS = {
-        "model_name"        : (io.AnyType            , None                                                                , None),
-        "clip_name"         : (io.AnyType            , None                                                                , None),
-        "vae_name"          : (io.AnyType            , None                                                                , None),
+        "model_name"        : (io.AnyType            , None                                                                 , None),
+        "clip_name"         : (io.AnyType            , None                                                                 , None),
+        "vae_name"          : (io.AnyType            , None                                                                 , None),
         
-        "shift"             : (io.Float              , {"default": 3.0, "min": 0.0, "max": 20.0, "step":0.1, "round": 0.1,}, 3.0),
-        "clip_skip"         : (io.Int                , {"default": -1, "min": -100, "max": 0, "step": 1,}                  , -1),
+        "shift"             : (io.Float              , {"default": 3.0, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.1,}, 3.0),
+        "clip_skip"         : (io.Int                , {"default": -1, "min": -100, "max": 0, "step": 1,}                   , -1),
 
-        "model"             : (io.Model              , None                                                                , None),
-        "clip"              : (io.Clip               , None                                                                , None),
-        "vae"               : (io.Vae                , None                                                                , None),
+        "model"             : (io.Model              , None                                                                 , None),
+        "clip"              : (io.Clip               , None                                                                 , None),
+        "vae"               : (io.Vae                , None                                                                 , None),
 
-        "prompt_positive"   : (io.String             , {"default": "" }                                                    , ""),
-        "prompt_negative"   : (io.String             , {"default": "" }                                                    , ""),
-        "text_parameters"   : (DICT_TYPE             , None                                                                , {}),
-        "positive"          : (io.Conditioning       , None                                                                , None),
-        "negative"          : (io.Conditioning       , None                                                                , None),
+        "prompt_positive"   : (io.String             , {"default": "" }                                                     , ""),
+        "prompt_negative"   : (io.String             , {"default": "" }                                                     , ""),
+        "text_parameters"   : (DICT_TYPE             , None                                                                 , {}),
+        "positive"          : (io.Conditioning       , None                                                                 , None),
+        "negative"          : (io.Conditioning       , None                                                                 , None),
 
-        "width"             : (io.Int                , {"default": 0, "min": 128, "max": 4096, "step": 2,}                 , 0),
-        "height"            : (io.Int                , {"default": 0, "min": 128, "max": 4096, "step": 2,}                 , 0),
-        "batch_size"        : (io.Int                , {"default": 1, "min": 1, "max": 100, "step": 1,}                    , 1),
-        "latent"            : (io.Latent             , None                                                                , None),
-        "images"            : (io.Image              , None                                                                , None),
+        "width"             : (io.Int                , {"default": 0, "min": 128, "max": 4096, "step": 2,}                  , 0),
+        "height"            : (io.Int                , {"default": 0, "min": 128, "max": 4096, "step": 2,}                  , 0),
+        "batch_size"        : (io.Int                , {"default": 1, "min": 1, "max": 100, "step": 1,}                     , 1),
+        "latent"            : (io.Latent             , None                                                                 , None),
+        "images"            : (io.Image              , None                                                                 , None),
 
-        "seed"              : (io.Int                , {"default": 0, "min": -1, "max": 10000000000, "step": 1,}           , 0),
-        "steps"             : (io.Int                , {"default": 20, "min": 1, "max": 100, "step": 1,}                   , 20),
-        "cfg"               : (io.Float              , {"default": 1.0, "min": 0.0, "max": 20.0, "step":0.1, "round": 0.1,}, 1.0),
-        "sampler_name"      : (io.AnyType            , None                                                                , "euler_ancestral"),
-        "scheduler"         : (io.AnyType            , None                                                                , "simple"),
+        "seed"              : (io.Int                , {"default": 0, "min": -1, "max": 10000000000, "step": 1,}            , 0),
+        "steps"             : (io.Int                , {"default": 20, "min": 1, "max": 100, "step": 1,}                    , 20),
+        "cfg"               : (io.Float              , {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.1,}, 1.0),
+        "sampler_name"      : (io.AnyType            , None                                                                 , "euler_ancestral"),
+        "scheduler"         : (io.AnyType            , None                                                                 , "simple"),
 
-        "lora_stack"        : (LORA_STACK_TYPE       , None                                                                , []),
-        "control_net_stack" : (CONTROL_NET_STACK_TYPE, None                                                                , []),
+        "lora_stack"        : (LORA_STACK_TYPE       , None                                                                 , []),
+        "control_net_stack" : (CONTROL_NET_STACK_TYPE, None                                                                 , []),
     }
     
     @classmethod
