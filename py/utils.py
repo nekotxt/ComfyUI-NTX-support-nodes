@@ -221,6 +221,55 @@ def solve_lora_name(lora_name:str):
 
 # ===== NODES : UTILITIES ==================================================================================================================
 
+JS_TO_PY_DATETIME = {
+    # Years
+    "YYYY": "%Y",
+    "yyyy": "%Y",
+    "YY": "%y",
+    "yy": "%y",
+    # Months
+    "MMMM": "%B",   # full month name
+    "MMM": "%b",    # short month name
+    "MM": "%m",     # zero-padded month
+    # Days
+    "DDDD": "%j",   # day of year (if used)
+    "dddd": "%j",   # day of year (if used)
+    "DD": "%d",     # zero-padded day of month
+    "dd": "%d",     # zero-padded day of month
+    # Hours
+    "HH": "%H",     # 24-hour, zero-padded
+    "hh": "%H",     # 12-hour, zero-padded => converted to 24-hour
+    # Minutes / seconds / subseconds
+    "mm": "%M",
+    "ss": "%S",
+}
+def _format_js_datetime(datetime_format:str):
+    global JS_TO_PY_DATETIME
+    for k,v in JS_TO_PY_DATETIME.items():
+        datetime_format = datetime_format.replace(k,v)
+    return datetime.datetime.now().strftime(datetime_format)
+
+def _replace_parameters(text:str, parameters:dict):
+    # replace double % first
+    pattern = r'%%([^%]+)%%'
+    matches = re.findall(pattern, text)
+    for match in matches:
+        if match.startswith("date:"):
+            text = text.replace(f"%%{match}%%", _format_js_datetime(match[5:]))
+        else:
+            text = text.replace(f"%%{match}%%", parameters.get(match, ""))
+
+    # replace single % next
+    pattern = r'%([^%]+)%'
+    matches = re.findall(pattern, text)
+    for match in matches:
+        if match.startswith("date:"):
+            text = text.replace(f"%{match}%", _format_js_datetime(match[5:]))
+        else:
+            text = text.replace(f"%{match}%", parameters.get(match, ""))
+    
+    return text
+
 class ReplaceTextParameters(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -229,7 +278,7 @@ class ReplaceTextParameters(io.ComfyNode):
             display_name=f"{ADDON_PREFIX} Replace Text Parameters",
             description="""
     Replace text parameters.
-    The parameters must be in the form '%%name%%'
+    The parameters must be in the form '%%name%%' or '%name%'
     For instance, if text='in the style of %%artist%%'
     and parameters contains an entry 'artist': 'anime'
     then the returned text will be 'in the style of anime'
@@ -251,13 +300,46 @@ class ReplaceTextParameters(io.ComfyNode):
         if parameters is None:
             parameters = {}
 
-        pattern = r'%%([^%]+)%%'
-        matches = re.findall(pattern, text)
-        for match in matches:
-            text = text.replace(f"%%{match}%%", parameters.get(match, ""))
+        return io.NodeOutput(_replace_parameters(text, parameters))
 
-        return io.NodeOutput(text)
 
+class FileNameTemplate(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        autogrow_template = io.Autogrow.TemplatePrefix(
+            input=io.AnyType.Input("param"),  # template for each input
+            prefix="param",                   # prefix for generated input names
+            min=1,                            # minimum number of inputs shown
+            max=10,                           # maximum number of inputs allowed
+        )
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}FileNameTemplate",
+            display_name=f"{ADDON_PREFIX} File Name From Template",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.String.Input("template", default=""),
+                io.Autogrow.Input("params", template=autogrow_template),
+                DICT_TYPE.Input("opt_textparams", optional=True)
+            ],
+            outputs=[io.String.Output("filename")],
+        )
+
+    @classmethod
+    def execute(cls, template, params: io.Autogrow.Type, opt_textparams=None) -> io.NodeOutput:
+        param_list = list(params.values())
+
+        opt_textparams = {} if opt_textparams is None else clone_data(opt_textparams)
+
+        for i in range(0, len(param_list)):
+            opt_textparams[f"param{i}"] = param_list[i]
+
+        filename = _replace_parameters(template, opt_textparams)
+
+        # remove doubles
+        filename = filename.replace("\\\\", "\\")
+        filename = filename.replace("//", "/")
+
+        return io.NodeOutput(filename)
 
 class SwitchAny(io.ComfyNode):
     @classmethod
@@ -745,77 +827,6 @@ class CLIPTextEncodeWithCutoff(io.ComfyNode):
             return io.NodeOutput(conditioning)
 
 
-JS_TO_PY_DATETIME = {
-    # Years
-    "YYYY": "%Y",
-    "yyyy": "%Y",
-    "YY": "%y",
-    "yy": "%y",
-    # Months
-    "MMMM": "%B",   # full month name
-    "MMM": "%b",    # short month name
-    "MM": "%m",     # zero-padded month
-    # Days
-    "DDDD": "%j",   # day of year (if used)
-    "dddd": "%j",   # day of year (if used)
-    "DD": "%d",     # zero-padded day of month
-    "dd": "%d",     # zero-padded day of month
-    # Hours
-    "HH": "%H",     # 24-hour, zero-padded
-    "hh": "%H",     # 12-hour, zero-padded => converted to 24-hour
-    # Minutes / seconds / subseconds
-    "mm": "%M",
-    "ss": "%S",
-}
-class FileNameTemplate(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        autogrow_template = io.Autogrow.TemplatePrefix(
-            input=io.AnyType.Input("param"),  # template for each input
-            prefix="param",                   # prefix for generated input names
-            min=1,                            # minimum number of inputs shown
-            max=10,                           # maximum number of inputs allowed
-        )
-        return io.Schema(
-            node_id=f"{ADDON_PREFIX}FileNameTemplate",
-            display_name=f"{ADDON_PREFIX} File Name From Template",
-            category=f"{ADDON_CATEGORY}/utils",
-            inputs=[
-                io.String.Input("template", default=""),
-                io.Autogrow.Input("params", template=autogrow_template),
-                DICT_TYPE.Input("opt_textparams", optional=True)
-            ],
-            outputs=[io.String.Output("filename")],
-        )
-
-    @classmethod
-    def execute(cls, template, params: io.Autogrow.Type, opt_textparams=None) -> io.NodeOutput:
-        param_list = list(params.values())
-
-        opt_textparams = {} if opt_textparams is None else clone_data(opt_textparams)
-
-        for i in range(0, len(param_list)):
-            opt_textparams[f"param{i}"] = param_list[i]
-
-        # Regular expression pattern to match %name% format
-        pattern = r'%([^%]+)%'
-        matches = re.findall(pattern, template)
-        filename = template
-        for match in matches:
-            param_name = match
-            if param_name.startswith("date:"):
-                date_format = param_name[5:]
-                global JS_TO_PY_DATETIME
-                for k,v in JS_TO_PY_DATETIME.items():
-                    date_format = date_format.replace(k,v)
-                filename = filename.replace(f"%{param_name}%", datetime.datetime.now().strftime(date_format))
-            else:
-                param_value = opt_textparams.get(param_name, "")
-                filename = filename.replace(f"%{param_name}%", param_value)
-
-        return io.NodeOutput(filename)
-
-
 class Test(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -842,6 +853,7 @@ class Test(io.ComfyNode):
 def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         ReplaceTextParameters,
+        FileNameTemplate,
         SwitchAny,
         LoadCustomVae,
         LoraStack,
@@ -853,6 +865,5 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         CollectModelNtxdata,
         PromptChainer,
         #CLIPTextEncodeWithCutoff,
-        FileNameTemplate,
         #Test,
     ]
