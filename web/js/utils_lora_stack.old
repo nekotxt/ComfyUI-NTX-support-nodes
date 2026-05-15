@@ -231,28 +231,23 @@ const CSS = `
     margin: 3px 0;
 }
 
-/* Filterable LoRA name dropdown — pill style matching the number widget */
+/* Filterable LoRA name dropdown */
 .cll-dd-wrap {
     flex: 1 1 0;
     min-width: 0;
     width: 0;
-    display: flex;
-    align-items: center;
-    height: 22px;
-    background: #2b2b2b;
-    border-radius: 11px;
-    overflow: hidden;
+    position: relative;
 }
 
 .cll-dd-display {
-    flex: 1 1 0;
-    min-width: 0;
-    height: 100%;
+    display: block;
+    height: 22px;
     line-height: 22px;
-    background: transparent;
+    background: var(--comfy-input-bg, #1a1a1a);
     color: var(--input-text, #ccc);
-    border: none;
-    padding: 0 2px;
+    border: 1px solid #444;
+    border-radius: 3px;
+    padding: 0 18px 0 4px;
     font-size: 11px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -260,25 +255,19 @@ const CSS = `
     cursor: pointer;
     user-select: none;
     box-sizing: border-box;
-    text-align: left;
+    width: 100%;
+    position: relative;
 }
 
-.cll-dd-arr {
-    flex: 0 0 22px;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 9px;
+.cll-dd-display::after {
+    content: "▾";
+    position: absolute;
+    right: 4px;
+    top: 0;
+    line-height: 22px;
     color: #666;
-    cursor: pointer;
-    user-select: none;
-    transition: color 0.1s, background 0.1s;
-}
-
-.cll-dd-arr:hover {
-    color: #ddd;
-    background: rgba(255, 255, 255, 0.08);
+    font-size: 10px;
+    pointer-events: none;
 }
 
 .cll-dd-panel {
@@ -508,21 +497,11 @@ function makeNameCombo(currentName, loraNames, onChange) {
     const wrap = document.createElement("div");
     wrap.className = "cll-dd-wrap";
 
-    const arrPrev = document.createElement("span");
-    arrPrev.className = "cll-dd-arr";
-    arrPrev.textContent = "◀";
-    wrap.appendChild(arrPrev);
-
     const display = document.createElement("div");
     display.className = "cll-dd-display";
     display.textContent = currentName || "none";
     display.title = currentName || "none";
     wrap.appendChild(display);
-
-    const arrNext = document.createElement("span");
-    arrNext.className = "cll-dd-arr";
-    arrNext.textContent = "▶";
-    wrap.appendChild(arrNext);
 
     let panel = null;
     let dismissListener = null;
@@ -535,23 +514,6 @@ function makeNameCombo(currentName, loraNames, onChange) {
             dismissListener = null;
         }
     }
-
-    function selectValue(name) {
-        display.textContent = name;
-        display.title = name;
-        onChange(name);
-        closePanel();
-    }
-
-    function selectAdjacent(delta) {
-        const idx = loraNames.indexOf(display.textContent);
-        if (idx === -1) return;
-        const next = loraNames[idx + delta];
-        if (next !== undefined) selectValue(next);
-    }
-
-    arrPrev.addEventListener("click", e => { e.stopPropagation(); selectAdjacent(-1); });
-    arrNext.addEventListener("click", e => { e.stopPropagation(); selectAdjacent(+1); });
 
     function openPanel() {
         if (panel) { closePanel(); return; }
@@ -570,6 +532,13 @@ function makeNameCombo(currentName, loraNames, onChange) {
         list.className = "cll-dd-list";
         panel.appendChild(list);
 
+        function select(name) {
+            display.textContent = name;
+            display.title = name;
+            onChange(name);
+            closePanel();
+        }
+
         function renderList(term) {
             list.innerHTML = "";
             const lower = term.toLowerCase();
@@ -583,9 +552,9 @@ function makeNameCombo(currentName, loraNames, onChange) {
                 item.textContent = name;
                 item.tabIndex = -1;
 
-                item.addEventListener("mousedown", e => { e.preventDefault(); selectValue(name); });
+                item.addEventListener("mousedown", e => { e.preventDefault(); select(name); });
                 item.addEventListener("keydown", e => {
-                    if (e.key === "Enter")     { e.preventDefault(); selectValue(name); }
+                    if (e.key === "Enter")     { e.preventDefault(); select(name); }
                     if (e.key === "Escape")    { closePanel(); }
                     if (e.key === "ArrowDown") { e.preventDefault(); (item.nextElementSibling ?? list.firstElementChild)?.focus(); }
                     if (e.key === "ArrowUp")   { e.preventDefault(); item.previousElementSibling ? item.previousElementSibling.focus() : filterInput.focus(); }
@@ -608,7 +577,7 @@ function makeNameCombo(currentName, loraNames, onChange) {
         renderList("");
         document.body.appendChild(panel);
         list.querySelector(".selected")?.scrollIntoView({ block: "center" });
-
+        
         const rect = display.getBoundingClientRect();
         panel.style.left  = rect.left + "px";
         panel.style.top   = rect.bottom + "px";
