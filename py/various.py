@@ -125,26 +125,6 @@ class CLIPTextEncodeWithCutoff(io.ComfyNode):
             (conditioning,) = CLIPTextEncode().encode(clip=clip, text=prompt)
             return io.NodeOutput(conditioning)
 
-class Test(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id=f"{ADDON_PREFIX}Test",
-            display_name=f"{ADDON_PREFIX} Test",
-            description="",
-            category=f"{ADDON_CATEGORY}/utils",
-            inputs=[
-                LORA_STACK_TYPE.Input("lora_stack"),
-            ],
-            outputs=[
-                LORA_STACK_TYPE.Output("lora_stack"),
-            ],
-        )
-
-    @classmethod
-    def execute(cls, lora_stack):
-        return io.NodeOutput(lora_stack)
-
 # ===== INITIALIZATION =====================================================================================================================
 
 def get_nodes_list() -> list[type[io.ComfyNode]]:
@@ -152,5 +132,4 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         SwitchAny,
         CollectModelNtxdata,
         #CLIPTextEncodeWithCutoff,
-        #Test,
     ]

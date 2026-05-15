@@ -1,7 +1,9 @@
 from comfy_api.latest import ComfyExtension, io, ui
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY
-from .utils import clone_data, DICT_TYPE
+from .utils import clone_data, DICT_TYPE, LORA_STACK_TYPE
+
+# ===== NODES ==============================================================================================================================
 
 class SwitchNode(io.ComfyNode):
     @classmethod
@@ -129,5 +131,33 @@ class DynamicTwinNode(io.ComfyNode):
 
         return io.NodeOutput(pipe)
 
-# def get_nodes_list() -> list[type[io.ComfyNode]]:
-#     return [SwitchNode, AutogrowNode, DynamicComboNode, DynamicTwinNode]
+class Test(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}Test",
+            display_name=f"{ADDON_PREFIX} Test",
+            description="",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                LORA_STACK_TYPE.Input("lora_stack"),
+            ],
+            outputs=[
+                LORA_STACK_TYPE.Output("lora_stack"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, lora_stack):
+        return io.NodeOutput(lora_stack)
+
+# ===== INITIALIZATION =====================================================================================================================
+
+def get_nodes_list() -> list[type[io.ComfyNode]]:
+    return [
+        # SwitchNode,
+        # AutogrowNode,
+        # DynamicComboNode,
+        # DynamicTwinNode,
+        # Test,
+    ]
