@@ -4,7 +4,7 @@ import json
 
 from pathlib import Path
 
-from .config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, COMFY_DIR, SETTINGS_DIR, CONFIGURATION
+from .config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, COMFY_DIR, SETTINGS_DIR
 from .py.logging import logger#log_setup, log_info, log_warning
 logger.info("Initialization ...")
 from .py.utils import is_string_empty, clone_data, load_list_loras, load_list_vaes, load_list_samplers, load_list_schedulers

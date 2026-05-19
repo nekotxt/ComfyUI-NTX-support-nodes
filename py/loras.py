@@ -7,11 +7,10 @@ import folder_paths
 import json
 import os
 import re
-import sys
 from pathlib import Path
 from typing_extensions import override
 
-from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, CONFIGURATION, MODELS_DIR
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, MODELS_DIR, MAX_CACHED_LORAS, DOWNLOAD_MISSING_LORAS, CLOUD_STORAGE_ID
 from .logging import logger
 from .utils import clone_data, download_file_from_cloud, LORA_STACK_TYPE
 
@@ -19,9 +18,6 @@ from .utils import clone_data, download_file_from_cloud, LORA_STACK_TYPE
 
 # used by ApplyLoraStack
 CACHED_LORAS = []
-MAX_CACHED_LORAS = CONFIGURATION.get("cache", {}).get("max_loras", 5)
-DOWNLOAD_MISSING_LORAS = CONFIGURATION.get("download_missing_loras", False) and sys.platform.lower().startswith("linux") # only download for linux (pods)
-CLOUD_STORAGE_ID = CONFIGURATION.get("cloud_storage_id", "")
 
 logger.info(f"MAX_CACHED_LORAS = {MAX_CACHED_LORAS}")
 # def lora_cache_setup(max_cached_loras:int):
