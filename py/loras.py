@@ -7,18 +7,22 @@ import folder_paths
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from typing_extensions import override
 
-from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, CONFIGURATION
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, CONFIGURATION, MODELS_DIR
 from .logging import logger
-from .utils import clone_data, LORA_STACK_TYPE
+from .utils import clone_data, download_file_from_cloud, LORA_STACK_TYPE
 
 # ===== LoRA utilities =================================================================================================================
 
 # used by ApplyLoraStack
 CACHED_LORAS = []
 MAX_CACHED_LORAS = CONFIGURATION.get("cache", {}).get("max_loras", 5)
+DOWNLOAD_MISSING_LORAS = CONFIGURATION.get("download_missing_loras", False) and sys.platform.lower().startswith("linux") # only download for linux (pods)
+CLOUD_STORAGE_ID = CONFIGURATION.get("cloud_storage_id", "")
+
 logger.info(f"MAX_CACHED_LORAS = {MAX_CACHED_LORAS}")
 # def lora_cache_setup(max_cached_loras:int):
 #     global MAX_CACHED_LORAS
@@ -228,6 +232,9 @@ class ApplyLoraStack(io.ComfyNode):
 
         global CACHED_LORAS
         global MAX_CACHED_LORAS
+        global DOWNLOAD_MISSING_LORAS
+        global CLOUD_STORAGE_ID
+        global MODELS_DIR
 
         if lora_stack is None:
             return io.NodeOutput(lora_stack, model, clip)
@@ -253,8 +260,28 @@ class ApplyLoraStack(io.ComfyNode):
 
             (lora_name, lora_path) = solve_lora_name(lora_name)
             if lora_path is None:
-                logger.info(f"- ERROR [{lora_name}] model file not found")
-                continue
+                # lora file not present, try to get it from cloud or raise an error
+                if (CLOUD_STORAGE_ID == "") or (DOWNLOAD_MISSING_LORAS == False):  
+                    # download from cloud is not required or not possible: just notify the error              
+                    logger.warning(f"- ERROR [{lora_name}] model file not found")
+                    continue
+                else:
+                    # try to download from cloud
+                    logger.warning(f"- [{lora_name}] model file not found, attempting to download from {CLOUD_STORAGE_ID} ...")
+                    save_path = MODELS_DIR / "loras" / Path(lora_name)
+                    (dw_result, dw_message) = download_file_from_cloud(
+                            cloud_storage_id=CLOUD_STORAGE_ID, 
+                            model_subpath="loras" / Path(lora_name), 
+                            save_path=save_path
+                        )
+                    if dw_result:
+                        # success: proceed with next steps
+                        logger.info(f"- {dw_message}")
+                        lora_path = str(save_path)
+                    else:
+                        # failure: stop
+                        logger.warning(f"- ERROR {dw_message}")
+                        continue
 
             try:
                 lora = None

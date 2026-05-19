@@ -28,6 +28,7 @@ SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
 SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
 
 MODEL_TYPES = ["vae", "checkpoints", "loras"]
+MODELS_DIR = Path.cwd() / "models"
 
 # user configuration file
 CONFIGURATION = {}

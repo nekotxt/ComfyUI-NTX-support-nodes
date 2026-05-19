@@ -5,6 +5,7 @@ import folder_paths
 
 import os
 import re
+import subprocess
 from pathlib import Path
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, SETTINGS_DIR
@@ -63,6 +64,30 @@ def dict_merge(base:dict, overwrite:dict):
 # utility for cleaning path names
 def clean_path(path:str):
     return path.replace("\\", os.path.sep).replace("/", os.path.sep)
+
+# ===== FILE DOWNLOAD =========================================================================================================================
+
+def download_file_from_cloud(cloud_storage_id:str, model_subpath: Path, save_path: Path) -> (bool, str):
+    """Download from cloud storage using rclone"""
+    cloud_path = f"{cloud_storage_id}:models/{model_subpath}"
+    try:
+        result = subprocess.run(
+            ["rclone", "copy", cloud_path, str(save_path.parent), "-P"],
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minutes
+        )
+        # Check return code, not just stderr
+        if result.returncode == 0 and save_path.exists():
+            return (True, "Downloaded from cloud storage successfully")
+        else:
+            return (False, f"Cloud download failed: {result.stderr}")
+    except subprocess.TimeoutExpired:
+        return (False, "Cloud download timed out")
+    except FileNotFoundError:
+        return (False, "rclone not found in PATH")
+    except Exception as e:
+        return (False, f"Cloud download error: {e}")
 
 # ===== UTILITY FUNCTIONS TO RETRIEVE INFORMATION ========================================================================================
 
