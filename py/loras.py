@@ -18,12 +18,15 @@ from .utils import clone_data, download_file_from_cloud, LORA_STACK_TYPE
 
 # used by ApplyLoraStack
 CACHED_LORAS = []
-
 logger.info(f"MAX_CACHED_LORAS = {MAX_CACHED_LORAS}")
-# def lora_cache_setup(max_cached_loras:int):
-#     global MAX_CACHED_LORAS
-#     MAX_CACHED_LORAS = max_cached_loras
-#     logger.info(f"MAX_CACHED_LORAS = {MAX_CACHED_LORAS}")
+
+def format_lora_string(lora_name:str):
+    if lora_name.endswith(".safetensors") == False:
+        lora_name += ".safetensors"
+
+    lora_name = lora_name.replace("\\", os.path.sep).replace("/", os.path.sep)
+
+    return lora_name
 
 def extract_lora_strings(text):
     """
@@ -46,10 +49,7 @@ def extract_lora_strings(text):
     for match in matches:
         lora_name, strength_model, strength_clip = match
 
-        if lora_name.endswith(".safetensors") == False:
-            lora_name += ".safetensors"
-
-        lora_name = lora_name.replace("\\", os.path.sep).replace("/", os.path.sep)
+        lora_name = format_lora_string(lora_name)
 
         if strength_clip:
             loras_stack.append((lora_name, float(strength_model), float(strength_clip)), )
@@ -264,19 +264,22 @@ class ApplyLoraStack(io.ComfyNode):
                 else:
                     # try to download from cloud
                     logger.warning(f"- [{lora_name}] model file not found, attempting to download from {CLOUD_STORAGE_ID} ...")
+                    lora_name = format_lora_string(lora_name)
+                    if not lora_name.endswith(".safetensors"):
+                        lora_name = lora_name + ".safetensors"
                     save_path = MODELS_DIR / "loras" / Path(lora_name)
-                    (dw_result, dw_message) = download_file_from_cloud(
+                    (dl_result, dl_message) = download_file_from_cloud(
                             cloud_storage_id=CLOUD_STORAGE_ID, 
                             model_subpath="loras" / Path(lora_name), 
                             save_path=save_path
                         )
-                    if dw_result:
+                    if dl_result:
                         # success: proceed with next steps
-                        logger.info(f"- {dw_message}")
+                        logger.info(f"- {dl_message}")
                         lora_path = str(save_path)
                     else:
                         # failure: stop
-                        logger.warning(f"- ERROR {dw_message}")
+                        logger.warning(f"- ERROR {dl_message}")
                         continue
 
             try:
