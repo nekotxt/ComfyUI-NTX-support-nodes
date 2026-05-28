@@ -6,9 +6,10 @@ import shutil
 from pathlib import Path
 from typing_extensions import override
 
-from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, SETTINGS_DIR
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, SETTINGS_DIR, MODELS_DIR
 from .logging import logger
 from .utils import LORA_STACK_TYPE
+from ..scripts.download_models import download_models_from_text_list
 
 # ===== NODES ==============================================================================================================================
 
@@ -125,6 +126,36 @@ class CLIPTextEncodeWithCutoff(io.ComfyNode):
             (conditioning,) = CLIPTextEncode().encode(clip=clip, text=prompt)
             return io.NodeOutput(conditioning)
 
+class DownloadModelsList(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}DownloadModelsList",
+            display_name=f"{ADDON_PREFIX} DownloadModelsList",
+            description="",
+            category=f"{ADDON_CATEGORY}/utils",
+            is_output_node=True,
+            inputs=[
+                io.String.Input("models_list", multiline=True, dynamic_prompts=False, default=""),
+                io.String.Input("civitai_api_key", multiline=False, dynamic_prompts=False, default=""),
+            ],
+            outputs=[
+                io.String.Output("result")
+            ],
+        )
+
+    @classmethod
+    def execute(cls, models_list="", civitai_api_key=""):
+        global MODELS_DIR
+
+        logger.info("Attempt to download models:")
+        logger.info(f"- models dir: {MODELS_DIR}")
+        logger.info(f"- civitai api key: {str(len(civitai_api_key)*'*')}")
+
+        result = download_models_from_text_list(text=models_list, models_dir=str(MODELS_DIR), tokens={"civitai": civitai_api_key})
+
+        return io.NodeOutput(result)
+
 # ===== INITIALIZATION =====================================================================================================================
 
 def get_nodes_list() -> list[type[io.ComfyNode]]:
@@ -132,4 +163,5 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         SwitchAny,
         CollectModelNtxdata,
         #CLIPTextEncodeWithCutoff,
+        DownloadModelsList,
     ]

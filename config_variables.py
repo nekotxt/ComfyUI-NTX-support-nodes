@@ -37,6 +37,7 @@ if configuration_file.is_file():
     with open(configuration_file,'r', encoding='utf-8') as f:
         CONFIGURATION = json.load(f)
 
+INCLUDE_MODELS_FROM_CATALOGUE = CONFIGURATION.get("include_models_from_catalogue", False)
 MAX_CACHED_LORAS = CONFIGURATION.get("cache", {}).get("max_loras", 5)
 DOWNLOAD_MISSING_LORAS = CONFIGURATION.get("download_missing_loras", False) and sys.platform.lower().startswith("linux") # only download for linux (pods)
 CLOUD_STORAGE_ID = CONFIGURATION.get("cloud_storage_id", "")

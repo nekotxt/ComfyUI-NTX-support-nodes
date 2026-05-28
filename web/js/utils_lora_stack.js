@@ -2,8 +2,7 @@
 
 import { app } from "../../../scripts/app.js";
 
-const ADDON_PREFIX = "NTX"
-const API_PREFIX = "ntx-sn"
+import { ADDON_PREFIX, API_PREFIX } from './config.js';
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 

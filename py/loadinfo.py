@@ -10,7 +10,7 @@ import ruamel.yaml
 
 from pathlib import Path
 
-from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, SETTINGS_DIR, MODEL_TYPES
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, SETTINGS_DIR, MODEL_TYPES, INCLUDE_MODELS_FROM_CATALOGUE
 from .logging import logger#log_info, log_warning
 from .utils import clone_data, clean_path, load_list_vaes, load_list_samplers, load_list_schedulers, DICT_TYPE
 
@@ -91,13 +91,15 @@ class ModelsManager():
         return self.models_by_ID.get(full_model_id, None)
 
     def get_models_list(self, model_type:str):
+        global INCLUDE_MODELS_FROM_CATALOGUE
+
         if model_type in self.list_cache:
             return self.list_cache[model_type]
 
         models_list_from_disk = folder_paths.get_filename_list(model_type)
 
         models_list_from_catalogue = []
-        if model_type in self.catalogue:
+        if INCLUDE_MODELS_FROM_CATALOGUE and (model_type in self.catalogue):
             for model_data in self.catalogue[model_type]:
                 model_id = model_data.get("id", "").replace("\\", os.path.sep).replace("/", os.path.sep)
                 if model_id in models_list_from_disk:

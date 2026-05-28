@@ -1,9 +1,7 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
-const ADDON_PREFIX = "NTX"
-const API_PREFIX = "ntx-sn"
-
+import { ADDON_PREFIX, API_PREFIX } from './config.js';
 
 function isClassInList(name, list){
     var list2 = list.map(s=>ADDON_PREFIX+s);

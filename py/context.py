@@ -115,10 +115,12 @@ class PipeImageEdit(PipeBase):
 
         "lora_stack"        : (LORA_STACK_TYPE       , None                                                                 , []),
         "control_net_stack" : (CONTROL_NET_STACK_TYPE, None                                                                 , []),
+
+        "guidance"          : (io.Float              , {"default": 0.0, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.1,}, 0.0),
     }
     
     @classmethod
-    def preprocess_arguments(cls, pipe, kwargs):
+    def preprocess_inputs(cls, pipe, kwargs):
         print("PipeImageEdit:preprocess_arguments")
 
 
