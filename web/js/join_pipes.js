@@ -1,3 +1,5 @@
+// CREATED WITH CLAUDE OPUS 4.8
+
 import { app } from "../../../scripts/app.js";
 import { ADDON_PREFIX, API_PREFIX } from "./config.js";
 
