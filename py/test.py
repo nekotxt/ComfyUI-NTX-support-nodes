@@ -131,12 +131,12 @@ class DynamicTwinNode(io.ComfyNode):
 
         return io.NodeOutput(pipe)
 
-class Test(io.ComfyNode):
+class TestNode(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id=f"{ADDON_PREFIX}Test",
-            display_name=f"{ADDON_PREFIX} Test",
+            node_id=f"{ADDON_PREFIX}TestNode",
+            display_name=f"{ADDON_PREFIX} TestNode",
             description="",
             category=f"{ADDON_CATEGORY}/utils",
             inputs=[
@@ -149,6 +149,13 @@ class Test(io.ComfyNode):
 
     @classmethod
     def execute(cls, lora_stack):
+
+        from pathlib import Path
+        from ..scripts.download_models import get_model_file_path
+        from ..config_variables import MODELS_DIR
+
+        print(get_model_file_path(MODELS_DIR, "loras/ILL/chars/BasdiaCnn.safetensors"))
+        
         return io.NodeOutput(lora_stack)
 
 # ===== INITIALIZATION =====================================================================================================================
@@ -159,5 +166,5 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         # AutogrowNode,
         # DynamicComboNode,
         # DynamicTwinNode,
-        # Test,
+        # TestNode,
     ]

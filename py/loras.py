@@ -20,7 +20,7 @@ from .utils import clone_data, download_file_from_cloud, LORA_STACK_TYPE
 CACHED_LORAS = []
 logger.info(f"MAX_CACHED_LORAS = {MAX_CACHED_LORAS}")
 
-def format_lora_string(lora_name:str):
+def normalize_lora_name(lora_name:str):
     if lora_name.endswith(".safetensors") == False:
         lora_name += ".safetensors"
 
@@ -49,7 +49,7 @@ def extract_lora_strings(text):
     for match in matches:
         lora_name, strength_model, strength_clip = match
 
-        lora_name = format_lora_string(lora_name)
+        lora_name = normalize_lora_name(lora_name)
 
         if strength_clip:
             loras_stack.append((lora_name, float(strength_model), float(strength_clip)), )
@@ -264,9 +264,7 @@ class ApplyLoraStack(io.ComfyNode):
                 else:
                     # try to download from cloud
                     logger.warning(f"- [{lora_name}] model file not found, attempting to download from {CLOUD_STORAGE_ID} ...")
-                    lora_name = format_lora_string(lora_name)
-                    if not lora_name.endswith(".safetensors"):
-                        lora_name = lora_name + ".safetensors"
+                    lora_name = normalize_lora_name(lora_name)
                     save_path = MODELS_DIR / "loras" / Path(lora_name)
                     (dl_result, dl_message) = download_file_from_cloud(
                             cloud_storage_id=CLOUD_STORAGE_ID, 

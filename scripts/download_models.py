@@ -2,10 +2,16 @@
 import hashlib
 import json
 import logging
+import os
 import requests
 import shutil
 import subprocess
 import sys
+
+try:
+    import folder_paths
+except:
+    pass
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -22,6 +28,33 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# ---[Check if a model file exists]---
+
+# utility for cleaning path names
+def clean_path(path:str):
+    return path.replace("\\", os.path.sep).replace("/", os.path.sep)
+
+def get_model_file_path(models_dir:Path, subpath:str) -> (bool, Path):
+    """Return the absolute file Path of a model:
+    - models_dir : the target default models dir (e.g. /workspace/ComfyUI/models)
+    - subpath (e.g. loras/ILL/styles/fantasy.safetensors)
+    Return a tuple with flag (True if model exists already) and full path (if model found, otherwise default path = models_dir/subpath)
+    The routine tries to use Comfy folder_paths if available, otherwise just checks models_dir/subpath
+    """
+    # default path if the model does not exist
+    save_path = models_dir / subpath
+    try:
+        # try to use the comfy folder_paths, if available
+        (folder_name, filename) = clean_path(subpath).split(os.path.sep, 1)
+        file_path = folder_paths.get_full_path(folder_name, filename)
+        if file_path == None:
+            return (False, save_path)
+        else:
+            return (True, Path(file_path))
+    except:
+        # otherwise just check the standard path
+        return (save_path.is_file(), save_path)
 
 # ---[Utilities to recover the model data]---
 
@@ -652,13 +685,14 @@ def process_single_model(
     """
     try:
         name = model_data.subpath        
-        save_path = models_dir / model_data.subpath
+        #save_path = models_dir / model_data.subpath
         expected_hash = None if model_data.file_hash == None else model_data.file_hash.lower()
 
         logger.info(f"Processing {name}")
 
         # Check if file exists
-        file_exists = save_path.is_file()
+        #file_exists = save_path.is_file()
+        (file_exists, save_path) = get_model_file_path(models_dir, model_data.subpath)
         
         if file_exists:
             logger.info(f"  File already exists: {save_path}")
