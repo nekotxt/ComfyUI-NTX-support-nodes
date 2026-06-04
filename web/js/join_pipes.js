@@ -93,9 +93,73 @@ function findPipePair(graph, nodes) {
     return null;
 }
 
+// Origin nodes feeding any input of `node`.
+function upstreamNeighbors(graph, node) {
+    const result = [];
+    if (!node.inputs) return result;
+    for (const inp of node.inputs) {
+        if (!inp || inp.link === null || inp.link === undefined) continue;
+        const link = getLink(graph, inp.link);
+        if (!link) continue;
+        const origin = graph.getNodeById(link.origin_id);
+        if (origin) result.push(origin);
+    }
+    return result;
+}
+
+// Shift nodes connected to `source` by (dx, dy):
+//  - every node reachable downstream (via outputs), and
+//  - the upstream neighbors of those moved nodes, unless they feed source
+//    directly or sit to the left of source (X <= source.X).
+function moveConnectedNodes(graph, source, dx, dy) {
+    if (!dx && !dy) return;
+    const visited = new Set([source.id]);
+    const toMove = [];
+
+    // downstream: every node reachable by following outputs
+    const stack = [source];
+    while (stack.length) {
+        const node = stack.pop();
+        if (!node.outputs) continue;
+        for (const out of node.outputs) {
+            if (!out || !out.links) continue;
+            for (const lid of out.links) {
+                const link = getLink(graph, lid);
+                if (!link) continue;
+                const next = graph.getNodeById(link.target_id);
+                if (!next || visited.has(next.id)) continue;
+                visited.add(next.id);
+                toMove.push(next);
+                stack.push(next);
+            }
+        }
+    }
+
+    // upstream neighbors of the moved nodes that should follow them
+    const sourceInputIds = new Set(upstreamNeighbors(graph, source).map((n) => n.id));
+    for (const node of [...toMove]) {
+        for (const prev of upstreamNeighbors(graph, node)) {
+            if (visited.has(prev.id)) continue;       // source or already moving
+            if (sourceInputIds.has(prev.id)) continue; // feeds source directly
+            if (prev.pos[0] <= source.pos[0]) continue; // on the left of source
+            visited.add(prev.id);
+            toMove.push(prev);
+        }
+    }
+
+    for (const n of toMove) {
+        n.pos[0] += dx;
+        n.pos[1] += dy;
+    }
+}
+
 // Merge `target` into `source`: move every outgoing link of target onto the
 // matching (same-named) output of source, then remove target.
 function mergePair(graph, source, target) {
+    // capture the source->target offset before target is removed
+    const dx = source.pos[0] - target.pos[0];
+    const dy = source.pos[1] - target.pos[1];
+
     const moves = [];
 
     if (target.outputs) {
@@ -125,6 +189,9 @@ function mergePair(graph, source, target) {
     }
 
     graph.remove(target);
+
+    // now that target's downstream links hang off source, shift the connected nodes clear of source
+    moveConnectedNodes(graph, source, dx, dy);
 }
 
 function joinPipes() {
