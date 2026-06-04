@@ -10,6 +10,7 @@ from .utils import clone_data, load_list_image_sizes, extract_image_size, DICT_T
 
 # The context nodes are derived from PipeBase and all share the same structure:
 # - they all have a pipe input and output (DICT type)
+# - inputs and outputs are the same
 # - LIST_OF_PARAMETERS defines the additional inputs/outputs specific of the pipe
 # - each parameter is defined by name, type, optional parameters, default value
 # - the optional parameters are used when the input is created
