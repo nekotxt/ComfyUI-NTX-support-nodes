@@ -8,6 +8,14 @@ from .utils import clone_data, load_list_image_sizes, extract_image_size, DICT_T
 
 # ===== NODES : CONTEXT ==================================================================================================================
 
+# The context nodes are derived from PipeBase and all share the same structure:
+# - they all have a pipe input and output (DICT type)
+# - LIST_OF_PARAMETERS defines the additional inputs/outputs specific of the pipe
+# - each parameter is defined by name, type, optional parameters, default value
+# - the optional parameters are used when the input is created
+# - the default value is returned as output, if the parameter is not present in the pipe
+# - all parameters are optional and forced to be input only (no widgets)
+
 class PipeBase(io.ComfyNode):
 
     NODE_NAME = ""
@@ -118,15 +126,38 @@ class PipeImageEdit(PipeBase):
 
         "guidance"          : (io.Float              , {"default": 0.0, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.1,}, 0.0),
     }
-    
-    @classmethod
-    def preprocess_inputs(cls, pipe, kwargs):
-        print("PipeImageEdit:preprocess_arguments")
 
+class PipeVideoWan(PipeBase):
+    NODE_DESCRIPTION = "Pipe for Wan video generation"
+    LIST_OF_PARAMETERS = {
+        "images"            : (io.Image              , None                                                                 , None),
 
-# ===== NODES : IMAGE CREATION PIPELINE ==================================================================================================
+        "ref_image"         : (io.Image              , None                                                                 , None),
 
+        "latent"            : (io.Latent             , None                                                                 , None),
 
+        "prompt_positive"   : (io.String             , {"default": "" }                                                     , ""),
+        "prompt_negative"   : (io.String             , {"default": "" }                                                     , ""),
+
+        "width"             : (io.Int                , {"default": 480, "min": 128, "max": 4096, "step": 2,}                , 480),
+        "height"            : (io.Int                , {"default": 720, "min": 128, "max": 4096, "step": 2,}                , 720),
+
+        "duration"          : (io.Int                , {"default": 5, "min": 1, "max": 100, "step": 1,}                     , 5),
+        "frame_rate"        : (io.Float              , {"default": 16.0, "min": 1.0, "max": 60.0, "step":1.0, "round": 0.1,}, 16.0),
+        "shift"             : (io.Float              , {"default": 5.0, "min": 1.0, "max": 100.0, "step":0.1, "round": 0.1,}, 5.0),
+
+        "cfg_high"          : (io.Float              , {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.1,}, 1.0),
+        "cfg_low"           : (io.Float              , {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.1,}, 1.0),
+        "sampler_name"      : (io.AnyType            , None                                                                 , "euler"),
+        "scheduler"         : (io.AnyType            , None                                                                 , "simple"),
+        "steps_total"       : (io.Int                , {"default": 4, "min": 1, "max": 100, "step": 1,}                     , 4),
+        "steps_split"       : (io.Int                , {"default": 2, "min": 1, "max": 100, "step": 1,}                     , 2),
+
+        "seed"              : (io.Int                , {"default": 42, "min": -1, "max": 10000000000, "step": 1,}           , 42),
+
+        "lora_stack_1"      : (LORA_STACK_TYPE       , None                                                                 , []),
+        "lora_stack_2"      : (LORA_STACK_TYPE       , None                                                                 , []),
+    }
 
 # ===== NODES : GENERATION DATA ==========================================================================================================
 
@@ -151,6 +182,7 @@ class GenerationDataSet(io.ComfyNode):
                 LIST_TYPE.Input("items", optional=True),
                 LORA_STACK_TYPE.Input("opt_lora_stack", optional=True),
                 io.Image.Input("opt_image", optional=True),
+                DICT_TYPE.Input("opt_extra", optional=True),
             ],
             outputs=[
                 LIST_TYPE.Output("items"),
@@ -158,20 +190,21 @@ class GenerationDataSet(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, tag, image_size, width, height, prompt, items=None, opt_lora_stack=None, opt_image=None):
+    def execute(cls, tag, image_size, width, height, prompt, items=None, opt_lora_stack=None, opt_image=None, opt_extra=None):
         items = [] if items is None else clone_data(items)
 
         if image_size != "custom": # decode standard image size if any
             width, height = extract_image_size(image_size)
 
-        data = {}
+        data = {} if opt_extra is None else opt_extra
+        
         data["tag"] = tag
         data["width"] = width
         data["height"] = height
         if cls.NEGATIVE_DIVIDER in prompt:
-            data["prompt_positive"], data["prompt_negative"] = [v.strip() for v in prompt.split(cls.NEGATIVE_DIVIDER)]
+            data["prompt_positive"], data["prompt_negative"] = [v.strip() for v in prompt.split(cls.NEGATIVE_DIVIDER, 1)]
         else:
-            data["prompt_positive"], data["prompt_negative"] = prompt, ""
+            data["prompt_positive"], data["prompt_negative"] = prompt.strip(), ""
         data["opt_lora_stack"] = [] if opt_lora_stack is None else opt_lora_stack
         data["opt_image"] = opt_image
 
@@ -200,6 +233,7 @@ class GenerationDataGet(io.ComfyNode):
                 io.String.Output("prompt_negative"),
                 LORA_STACK_TYPE.Output("opt_lora_stack"),
                 io.Image.Output("opt_image"),
+                DICT_TYPE.Output("opt_extra"),
             ],
         )
 
@@ -213,7 +247,8 @@ class GenerationDataGet(io.ComfyNode):
             data.get("prompt_positive", ""), 
             data.get("prompt_negative", ""), 
             data.get("opt_lora_stack", []), 
-            data.get("opt_image", None)
+            data.get("opt_image", None),
+            data
         )
 
 class GenerationDataMaxSize(io.ComfyNode):
@@ -255,6 +290,7 @@ class GenerationDataMaxSize(io.ComfyNode):
 def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         PipeImageEdit,
+        PipeVideoWan,
 
         GenerationDataSet,
         GenerationDataGet,

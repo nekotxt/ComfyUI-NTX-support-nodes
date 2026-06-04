@@ -4,14 +4,14 @@ import { app } from "../../../scripts/app.js";
 import { ADDON_PREFIX, API_PREFIX } from "./config.js";
 
 // node_id built backend-side as f"{ADDON_PREFIX}{cls.__name__}" -> e.g. "TESTPipeImageEdit"
-const PIPE_NODE_TYPE = `${ADDON_PREFIX}PipeImageEdit`;
+const PIPE_NODE_TYPE = [`${ADDON_PREFIX}PipeImageEdit`, `${ADDON_PREFIX}PipeVideoWan`];
 // name of the slot that chains the pipe nodes together (both input and output)
 const PIPE_SLOT_NAME = "pipe";
 
 // --- small helpers ------------------------------------------------------------
 
 function isPipeNode(node) {
-    return !!node && (node.type === PIPE_NODE_TYPE || node.comfyClass === PIPE_NODE_TYPE);
+    return !!node && (PIPE_NODE_TYPE.includes(node.type) || PIPE_NODE_TYPE.includes(node.comfyClass));
 }
 
 // graph.links is a plain object in old litegraph and a Map in the newer one
@@ -72,6 +72,10 @@ function findPipePair(graph, nodes) {
 
         const source = graph.getNodeById(link.origin_id);
         if (!isPipeNode(source) || source === target) continue;
+
+        // both nodes must be of the same type
+        if (!source.type===target.type) continue;
+        if (!source.comfyClass===target.comfyClass) continue;
 
         // the incoming pipe link must come from the source's "pipe" output
         const srcPipeOut = findOutputSlot(source, PIPE_SLOT_NAME);
@@ -168,7 +172,7 @@ app.registerExtension({
     getCanvasMenuItems() {
         return [
             {
-                content: ADDON_PREFIX + " Join PipeImageEdit",
+                content: ADDON_PREFIX + " Join Pipe Nodes",
                 callback: () => joinPipes(),
             },
         ];

@@ -27,7 +27,10 @@ class NTX_SE_Extension(ComfyExtension):
             if hasattr(module, "get_nodes_list"):
                 module_nodes = module.get_nodes_list()
                 list_of_nodes.extend(module_nodes)
-                logger.info(f"Loaded {len(module_nodes)} nodes from module {module_name}")
+                nodes_text = ""
+                for node in module_nodes:
+                    nodes_text += " " + node.__name__
+                logger.info(f"Loaded {len(module_nodes)} nodes from module {module_name} : {nodes_text}")
 
         return list_of_nodes
 
