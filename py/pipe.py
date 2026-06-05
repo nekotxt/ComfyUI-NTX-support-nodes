@@ -300,6 +300,37 @@ class DictGetDict(DictGet):
     DATA_TYPE = DICT_TYPE
     DEFAULT_VALUE_IF_DISCONNECTED = {}
 
+class DictSetMultipleStrings(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}DictSetMultipleStrings",
+            display_name=f"{ADDON_PREFIX} Dict SetMultipleStrings",
+            description="Dict SetMultipleStrings",
+            category=f"{ADDON_CATEGORY}/pipe",
+            inputs=[
+                io.String.Input("pairs", multiline=True, default="key1:value1\nkey2:value2"),
+                DICT_TYPE.Input("pipe", optional=True),
+            ],
+            outputs=[
+                DICT_TYPE.Output("pipe"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, pairs, pipe=None):
+        pipe = {} if pipe is None else clone_data(pipe)
+        
+        for pair in pairs.split("\n"):
+            if not ":" in pair: 
+                continue
+            k,v = pair.split(":", 1)
+            k = k.strip()
+            if k == "":
+                continue
+            pipe[k] = v.strip()
+
+        return io.NodeOutput(pipe)
 
 # ===== NODES : LIST =====================================================================================================================
 
@@ -394,6 +425,8 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         DictSetControlNetStack, DictGetControlNetStack,
         DictSetList, DictGetList,
         DictSetDict, DictGetDict,
+
+        DictSetMultipleStrings,
 
         ListSet,
         ListCount,
