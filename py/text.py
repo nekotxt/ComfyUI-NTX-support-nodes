@@ -7,7 +7,8 @@ from typing_extensions import override
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY
 from .logging import logger
-from .utils import clone_data, DICT_TYPE
+from .utils import clone_data, DICT_TYPE, LORA_STACK_TYPE
+from .loras import ConvertLoraStringToStack
 
 # ===== NODES ==============================================================================================================================
 
@@ -154,6 +155,51 @@ class PromptChainer(io.ComfyNode):
         else:
             return io.NodeOutput(prev_prompt + "\n" + prompt)
 
+class ComplexPrompt(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}ComplexPrompt",
+            display_name=f"{ADDON_PREFIX} Complex Prompt",
+            description="""
+    Performs a series of actions:
+    - concatenate the prompts
+    - replace text parameters
+    - extract loras from positive prompt and add them to the lora stack
+    - return final clean prompts and lora stack
+    """,
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.String.Input("prompt_positive_1", default=""),
+                io.String.Input("prompt_positive_2", default=""),
+                io.String.Input("prompt_negative_1", default=""),
+                io.String.Input("prompt_negative_2", default=""),
+                LORA_STACK_TYPE.Input("lora_stack", optional=True),
+                DICT_TYPE.Input("text_params", optional=True),
+            ],
+            outputs=[
+                LORA_STACK_TYPE.Output("lora_stack"),
+                DICT_TYPE.Output("text_params"),
+                io.String.Output("prompt_positive"),
+                io.String.Output("prompt_negative"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, prompt_positive_1, prompt_positive_2, prompt_negative_1, prompt_negative_2, lora_stack=None, text_params=None):
+
+        lora_stack = [] if lora_stack is None else clone_data(lora_stack)
+        text_params = {} if text_params is None else clone_data(text_params)
+
+        # join the prompts and replace parameters
+        prompt_positive = _replace_parameters(f"{prompt_positive_1}\n{prompt_positive_2}", text_params).strip()
+        prompt_negative = _replace_parameters(f"{prompt_negative_1}\n{prompt_negative_2}", text_params).strip()
+
+        # extract loras from positive prompt and add them to the stack
+        (clean_prompt_positive, final_lora_stack) = ConvertLoraStringToStack.execute(prompt_positive, lora_stack).result
+
+        return io.NodeOutput(final_lora_stack, text_params, clean_prompt_positive, prompt_negative)
+
 
 # ===== INITIALIZATION =====================================================================================================================
 
@@ -162,4 +208,5 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         ReplaceTextParameters,
         FileNameTemplate,
         PromptChainer,
+        ComplexPrompt,
     ]
