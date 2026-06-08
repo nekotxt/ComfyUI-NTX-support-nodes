@@ -170,35 +170,55 @@ class ComplexPrompt(io.ComfyNode):
     """,
             category=f"{ADDON_CATEGORY}/utils",
             inputs=[
-                io.String.Input("prompt_positive_1", default=""),
-                io.String.Input("prompt_positive_2", default=""),
-                io.String.Input("prompt_negative_1", default=""),
-                io.String.Input("prompt_negative_2", default=""),
+                io.Autogrow.Input("prompt_positives", optional=True, template=io.Autogrow.TemplatePrefix(
+                    input=io.String.Input("prompt"),
+                    prefix="prompt_positive_",      
+                    min=0,                          
+                    max=10,                         
+                )),
+                io.Autogrow.Input("prompt_negatives", optional=True, template=io.Autogrow.TemplatePrefix(
+                    input=io.String.Input("prompt"),
+                    prefix="prompt_negative_",      
+                    min=0,                          
+                    max=10,                         
+                )),
                 LORA_STACK_TYPE.Input("lora_stack", optional=True),
                 DICT_TYPE.Input("text_params", optional=True),
             ],
             outputs=[
-                LORA_STACK_TYPE.Output("lora_stack"),
-                DICT_TYPE.Output("text_params"),
                 io.String.Output("prompt_positive"),
                 io.String.Output("prompt_negative"),
+                LORA_STACK_TYPE.Output("lora_stack"),
+                DICT_TYPE.Output("text_params"),
             ],
         )
 
     @classmethod
-    def execute(cls, prompt_positive_1, prompt_positive_2, prompt_negative_1, prompt_negative_2, lora_stack=None, text_params=None):
+    def execute(cls, prompt_positives: io.Autogrow.Type=None, prompt_negatives: io.Autogrow.Type=None, lora_stack=None, text_params=None):
 
         lora_stack = [] if lora_stack is None else clone_data(lora_stack)
         text_params = {} if text_params is None else clone_data(text_params)
 
-        # join the prompts and replace parameters
-        prompt_positive = _replace_parameters(f"{prompt_positive_1}\n{prompt_positive_2}", text_params).strip()
-        prompt_negative = _replace_parameters(f"{prompt_negative_1}\n{prompt_negative_2}", text_params).strip()
+        # join the positive prompts and replace parameters
+        prompt_positive = ""
+        if prompt_positives is not None:
+            for prompt in list(prompt_positives.values()):
+                if prompt != "":
+                    prompt_positive += prompt + "\n"
+            prompt_positive = _replace_parameters(prompt_positive, text_params).strip()
+
+        # join the negative prompts and replace parameters
+        prompt_negative = ""
+        if prompt_negatives is not None:
+            for prompt in list(prompt_negatives.values()):
+                if prompt != "":
+                    prompt_negative += prompt + "\n"
+            prompt_negative = _replace_parameters(prompt_negative, text_params).strip()
 
         # extract loras from positive prompt and add them to the stack
         (clean_prompt_positive, final_lora_stack) = ConvertLoraStringToStack.execute(prompt_positive, lora_stack).result
 
-        return io.NodeOutput(final_lora_stack, text_params, clean_prompt_positive, prompt_negative)
+        return io.NodeOutput(clean_prompt_positive, prompt_negative, final_lora_stack, text_params)
 
 
 # ===== INITIALIZATION =====================================================================================================================

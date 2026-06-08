@@ -147,9 +147,35 @@ function moveConnectedNodes(graph, source, dx, dy) {
         }
     }
 
-    for (const n of toMove) {
-        n.pos[0] += dx;
-        n.pos[1] += dy;
+    // compute all groups containing at least a node to be moved
+    const nodes_to_move = new Set();
+    for (const node of toMove) {
+        nodes_to_move.add(node.id);
+    }
+    const toMoveGroups = [];
+    for (const group of graph.groups) {
+        group.recomputeInsideNodes()
+        for (const node of group.nodes){
+            if(nodes_to_move.has(node.id)){
+                toMoveGroups.push(group)
+                break
+            }
+        }
+    }
+
+    // move the nodes
+    for (const node of toMove) {
+        node.pos[0] += dx;
+        node.pos[1] += dy;
+    }
+
+    // move the groups
+    for (const group of toMoveGroups) {
+        group.pos[0] += dx;
+        group.pos[1] += dy;
+    }
+    for (const group of toMoveGroups) {
+        group.recomputeInsideNodes()
     }
 }
 

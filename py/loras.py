@@ -69,8 +69,8 @@ def remove_text_between_angle_brackets(text):
     # Use regex to remove text between < and >
     cleaned_text = re.sub(r'<[^>]*>', '', text)
 
-    # Optional: Remove multiple consecutive whitespaces created by removal
-    cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+    # Optional: Remove multiple consecutive whitespaces created by removal (but preserve newlines)
+    cleaned_text = re.sub(r'[^\S\n]', ' ', cleaned_text).strip()
 
     return cleaned_text
 
