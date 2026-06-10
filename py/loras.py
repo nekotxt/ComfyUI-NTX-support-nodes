@@ -10,9 +10,9 @@ import re
 from pathlib import Path
 from typing_extensions import override
 
-from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, MODELS_DIR, MAX_CACHED_LORAS, DOWNLOAD_MISSING_LORAS, CLOUD_STORAGE_ID
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, MODELS_DIR, MAX_CACHED_LORAS, DOWNLOAD_MISSING_LORAS, CLOUD_STORAGE_ID
 from .logging import logger
-from .utils import clone_data, download_file_from_cloud, LORA_STACK_TYPE
+from .utils import clone_data, download_file_from_cloud, load_list_loras, LORA_STACK_TYPE
 
 # ===== LoRA utilities =================================================================================================================
 
@@ -393,3 +393,15 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         ConvertLoraStackToString,
         ConvertLoraStringToStack,
     ]
+
+# ===== JAVASCRIPT API =====================================================================================================================
+
+# Add custom API routes, using router
+from aiohttp import web
+from server import PromptServer
+
+# Support routes for lora loader
+
+@PromptServer.instance.routes.get(f"/{API_PREFIX}/get_loras_list")
+async def get_loras_list(request):
+    return web.json_response(load_list_loras())
