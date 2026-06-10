@@ -107,6 +107,26 @@ function upstreamNeighbors(graph, node) {
     return result;
 }
 
+function groupIncludesNode(group, nodes){
+    var x1 = group.pos[0]
+    var y1 = group.pos[1]
+    var x2 = x1 + group.size[0]
+    var y2 = y1 + group.size[1]
+    var resultNode = null
+    for (const node of nodes) {
+        var x = node.pos[0] + node.size[0] / 2
+        var y = node.pos[1] + node.size[1] / 2
+        if (x1<=x && x<=x2 && y1<=y && y<=y2){
+            //console.log("  > " + node.id)
+            //resultNode = node
+            return node
+        }else{
+            //console.log("  . " + node.id)
+        }
+    }
+    return resultNode
+}
+
 // Shift nodes connected to `source` by (dx, dy):
 //  - every node reachable downstream (via outputs), and
 //  - the upstream neighbors of those moved nodes, unless they feed source
@@ -148,20 +168,25 @@ function moveConnectedNodes(graph, source, dx, dy) {
     }
 
     // compute all groups containing at least a node to be moved
-    const nodes_to_move = new Set();
+    const nodes_to_move = [];
+    //console.log("nodes to move:")
     for (const node of toMove) {
-        nodes_to_move.add(node.id);
+        nodes_to_move.push(node);
+        //console.log("+ " + node.id)
     }
+    //console.log("scan groups:")
     const toMoveGroups = [];
     for (const group of graph.groups) {
-        group.recomputeInsideNodes()
-        for (const node of group.nodes){
-            if(nodes_to_move.has(node.id)){
-                toMoveGroups.push(group)
-                break
-            }
+        //console.log("  " + group.title)
+        const node = groupIncludesNode(group, nodes_to_move)
+        if(node != null){
+            toMoveGroups.push(group)
         }
     }
+    //console.log("groups to move:")
+    //for (const group of toMoveGroups) {
+        //console.log("+ " + group.title)
+    //}
 
     // move the nodes
     for (const node of toMove) {
@@ -182,10 +207,6 @@ function moveConnectedNodes(graph, source, dx, dy) {
 // Merge `target` into `source`: move every outgoing link of target onto the
 // matching (same-named) output of source, then remove target.
 function mergePair(graph, source, target) {
-    // capture the source->target offset before target is removed
-    const dx = source.pos[0] - target.pos[0];
-    const dy = source.pos[1] - target.pos[1];
-
     const moves = [];
 
     if (target.outputs) {
@@ -215,9 +236,6 @@ function mergePair(graph, source, target) {
     }
 
     graph.remove(target);
-
-    // now that target's downstream links hang off source, shift the connected nodes clear of source
-    moveConnectedNodes(graph, source, dx, dy);
 }
 
 function joinPipes() {
@@ -230,6 +248,7 @@ function joinPipes() {
     const MAX_ITERATIONS = 1000;
 
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+        console.log("joinPipes() - ITERATION " + iteration)
         // rebuild the live selection each pass, dropping nodes already removed
         const selected = Object.values(canvas.selected_nodes || {}).filter(
             (n) => graph.getNodeById(n.id) === n
@@ -238,12 +257,20 @@ function joinPipes() {
         const pair = findPipePair(graph, selected);
         if (!pair) break;
 
+        // capture the source->target offset before target is removed
+        const dx = pair.source.pos[0] - pair.target.pos[0];
+        const dy = pair.source.pos[1] - pair.target.pos[1];
+        // remove the target (merge it with source)
+        console.log("MERGE : " + pair.target.id + " => " + pair.source.id)
         mergePair(graph, pair.source, pair.target);
         merged++;
+        // now that target's downstream links hang off source, shift the connected nodes clear of source
+        moveConnectedNodes(graph, pair.source, dx, dy);
+        graph.setDirtyCanvas(true, true);
     }
 
     if (merged > 0) {
-        graph.setDirtyCanvas(true, true);
+        //graph.setDirtyCanvas(true, true);
     }
 
     app.extensionManager?.toast?.add({
