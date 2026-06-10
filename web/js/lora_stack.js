@@ -330,6 +330,127 @@ const CSS = `
 .cll-dd-item.selected {
     color: #4a90d9;
 }
+
+/* ── Tree selector dialog (SHIFT+click on the lora field) ─────────────────── */
+.cll-tree-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.cll-tree-dlg {
+    background: #1e1e1e;
+    border: 1px solid #555;
+    border-radius: 6px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.8);
+    width: 440px;
+    max-width: 90vw;
+    height: 60vh;
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    font-family: sans-serif;
+    font-size: 12px;
+    color: #ccc;
+}
+
+.cll-tree-title {
+    padding: 8px 12px;
+    border-bottom: 1px solid #444;
+    color: #ddd;
+    user-select: none;
+    flex: 0 0 auto;
+}
+
+.cll-tree-filter {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 6px 12px;
+    background: #252525;
+    border: none;
+    border-bottom: 1px solid #444;
+    color: #ccc;
+    font-size: 11px;
+    outline: none;
+}
+
+.cll-tree-body {
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: 4px 0;
+}
+
+.cll-tree-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.cll-tree-row:hover {
+    background: #333;
+}
+
+.cll-tree-row.selected {
+    background: #2a4a6a;
+    color: #fff;
+}
+
+.cll-tree-caret {
+    flex: 0 0 12px;
+    font-size: 9px;
+    color: #888;
+    text-align: center;
+}
+
+.cll-tree-folder-lbl {
+    color: #d9b44a;
+}
+
+.cll-tree-btns {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 8px 12px;
+    border-top: 1px solid #444;
+    flex: 0 0 auto;
+}
+
+.cll-tree-btn {
+    padding: 4px 16px;
+    background: #2a2a2a;
+    color: #ccc;
+    border: 1px solid #444;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.cll-tree-btn:hover:not(:disabled) {
+    background: #3a3a3a;
+    color: #fff;
+}
+
+.cll-tree-btn.primary {
+    background: #2a5a8a;
+    border-color: #4a90d9;
+}
+
+.cll-tree-btn.primary:hover:not(:disabled) {
+    background: #3a6a9a;
+}
+
+.cll-tree-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
 `;
 
 let _stylesInjected = false;
@@ -393,9 +514,17 @@ function fetchLoraList() {
     if (_loraCache) return Promise.resolve(_loraCache);
     if (_loraFetch) return _loraFetch;
     _loraFetch = fetch(`/${API_PREFIX}/get_loras_list`)
-        .then(r => r.json())
+        .then(r => {
+            if (!r.ok) throw new Error(`get_loras_list HTTP ${r.status}`);
+            return r.json();
+        })
         .then(list => { _loraCache = ["none", ...list]; return _loraCache; })
-        .catch(() => { _loraCache = ["none"]; return _loraCache; });
+        .catch(err => {
+            // Don't cache failures — a later render() retries the fetch.
+            console.warn("[LoraStack] failed to fetch LoRA list:", err);
+            _loraFetch = null;
+            return ["none"];
+        });
     return _loraFetch;
 }
 
@@ -497,6 +626,214 @@ function makeNumPill(initVal, step, onChange) {
     pill.setValue = v => { value = v; disp.textContent = value.toFixed(2); };
 
     return pill;
+}
+
+// ── Tree selector ─────────────────────────────────────────────────────────────
+// SHIFT+click on the lora field opens a modal tree organised by subdirectory
+// (e.g. "ILL\\aaa\\bbb.safetensors" → ILL > aaa > bbb.safetensors). Confirm
+// with OK or double-click on a lora; dismiss with Cancel / Escape / backdrop.
+
+function buildLoraTree(loraNames) {
+    const root = { folders: new Map(), files: [] };
+    for (const name of loraNames) {
+        if (typeof name !== "string" || !name) continue;
+        const parts = name.split(/[\\/]/).filter(p => p !== "");
+        if (!parts.length) continue;
+        let node = root;
+        for (let i = 0; i < parts.length - 1; i++) {
+            let child = node.folders.get(parts[i]);
+            if (!child) {
+                child = { folders: new Map(), files: [] };
+                node.folders.set(parts[i], child);
+            }
+            node = child;
+        }
+        node.files.push({ label: parts[parts.length - 1], full: name });
+    }
+    return root;
+}
+
+function openTreeSelector(currentName, loraNames, onConfirm) {
+    document.querySelector(".cll-tree-overlay")?.remove();
+
+    const overlay = document.createElement("div");
+    overlay.className = "cll-tree-overlay";
+
+    const dlg = document.createElement("div");
+    dlg.className = "cll-tree-dlg";
+    overlay.appendChild(dlg);
+
+    const title = document.createElement("div");
+    title.className = "cll-tree-title";
+    title.textContent = "Select LoRA";
+    dlg.appendChild(title);
+
+    const filterInput = document.createElement("input");
+    filterInput.className = "cll-tree-filter";
+    filterInput.type = "text";
+    filterInput.placeholder = "Search…";
+    filterInput.setAttribute("autocomplete", "off");
+    dlg.appendChild(filterInput);
+
+    const body = document.createElement("div");
+    body.className = "cll-tree-body";
+    dlg.appendChild(body);
+
+    const btns = document.createElement("div");
+    btns.className = "cll-tree-btns";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "cll-tree-btn";
+    cancelBtn.textContent = "Cancel";
+
+    const okBtn = document.createElement("button");
+    okBtn.className = "cll-tree-btn primary";
+    okBtn.textContent = "OK";
+    okBtn.disabled = true;
+
+    btns.appendChild(cancelBtn);
+    btns.appendChild(okBtn);
+    dlg.appendChild(btns);
+
+    let selectedName = null;
+    let selectedRow = null;
+
+    function setSelected(row, name) {
+        selectedRow?.classList.remove("selected");
+        selectedRow = row;
+        selectedName = name;
+        row.classList.add("selected");
+        okBtn.disabled = false;
+    }
+
+    function close() {
+        overlay.remove();
+        document.removeEventListener("keydown", onKey, true);
+    }
+
+    function confirm() {
+        if (!selectedName) return;
+        const name = selectedName;
+        close();
+        try { onConfirm(name); }
+        catch (err) { console.warn("[LoraStack] tree selection failed:", err); }
+    }
+
+    const onKey = e => {
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+        if (e.key === "Enter")  { e.preventDefault(); e.stopPropagation(); confirm(); }
+    };
+
+    const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+
+    // preselectRow / preselectExpand are captured while rendering so the
+    // current lora (if still present in the list) starts selected and visible.
+    let preselectRow = null;
+    let preselectExpand = null;
+
+    function renderLevel(treeNode, container, depth, ancestors, expandAll, target) {
+        const indent = 8 + depth * 14;
+
+        for (const fname of [...treeNode.folders.keys()].sort(collator.compare)) {
+            const row = document.createElement("div");
+            row.className = "cll-tree-row";
+            row.style.paddingLeft = indent + "px";
+
+            const caret = document.createElement("span");
+            caret.className = "cll-tree-caret";
+            caret.textContent = expandAll ? "▼" : "▶";
+            row.appendChild(caret);
+
+            const lbl = document.createElement("span");
+            lbl.className = "cll-tree-folder-lbl";
+            lbl.textContent = fname;
+            row.appendChild(lbl);
+            container.appendChild(row);
+
+            const kids = document.createElement("div");
+            kids.style.display = expandAll ? "" : "none";
+            container.appendChild(kids);
+
+            const expand = () => { kids.style.display = ""; caret.textContent = "▼"; };
+            row.addEventListener("click", () => {
+                const open = kids.style.display !== "none";
+                kids.style.display = open ? "none" : "";
+                caret.textContent = open ? "▶" : "▼";
+            });
+
+            renderLevel(treeNode.folders.get(fname), kids, depth + 1, [...ancestors, expand], expandAll, target);
+        }
+
+        for (const file of [...treeNode.files].sort((a, b) => collator.compare(a.label, b.label))) {
+            const row = document.createElement("div");
+            row.className = "cll-tree-row";
+            row.style.paddingLeft = indent + "px";
+            row.title = file.full;
+
+            const caret = document.createElement("span");
+            caret.className = "cll-tree-caret";
+            row.appendChild(caret);
+
+            const lbl = document.createElement("span");
+            lbl.textContent = file.label;
+            row.appendChild(lbl);
+            container.appendChild(row);
+
+            row.addEventListener("click", () => setSelected(row, file.full));
+            row.addEventListener("dblclick", () => { setSelected(row, file.full); confirm(); });
+
+            if (file.full === target && !preselectRow) {
+                preselectRow = row;
+                preselectExpand = () => ancestors.forEach(fn => fn());
+            }
+        }
+    }
+
+    function rebuild(term) {
+        body.innerHTML = "";
+        preselectRow = null;
+        preselectExpand = null;
+        selectedRow = null;
+
+        const lower = term.trim().toLowerCase();
+        const names = lower
+            ? loraNames.filter(n => typeof n === "string" && n.toLowerCase().includes(lower))
+            : loraNames;
+
+        // While filtering, expand everything so matches are visible. Keep the
+        // user's pick highlighted if it survived the filter, else fall back to
+        // the current lora; if neither is visible, OK stays disabled.
+        const target = selectedName ?? currentName;
+        renderLevel(buildLoraTree(names), body, 0, [], !!lower, target);
+
+        if (preselectRow) {
+            // Guarded so a stale/missing name can't break the dialog — it just
+            // opens with nothing selected.
+            try {
+                preselectExpand?.();
+                setSelected(preselectRow, target);
+                preselectRow.scrollIntoView({ block: "center" });
+            } catch (err) {
+                console.warn("[LoraStack] tree preselect failed:", err);
+            }
+        } else {
+            selectedName = null;
+            okBtn.disabled = true;
+        }
+    }
+
+    rebuild("");
+    filterInput.addEventListener("input", () => rebuild(filterInput.value));
+
+    okBtn.addEventListener("click", confirm);
+    cancelBtn.addEventListener("click", close);
+    overlay.addEventListener("pointerdown", e => {
+        if (e.target === overlay) close();   // backdrop click cancels
+    });
+
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(overlay);
+    filterInput.focus();
 }
 
 // ── Filterable name combo ─────────────────────────────────────────────────────
@@ -627,7 +964,22 @@ function makeNameCombo(currentName, loraNames, onChange) {
         setTimeout(() => document.addEventListener("pointerdown", dismissListener, true), 0);
     }
 
-    display.addEventListener("click", openPanel);
+    display.addEventListener("click", e => {
+        if (e.shiftKey) {
+            e.preventDefault();
+            e.stopPropagation();
+            closePanel();
+            try {
+                openTreeSelector(display.textContent, loraNames, selectValue);
+            } catch (err) {
+                // Fall back to the flat dropdown rather than leaving the user stuck
+                console.warn("[LoraStack] tree selector failed, falling back:", err);
+                openPanel();
+            }
+            return;
+        }
+        openPanel();
+    });
 
     wrap.getValue = () => display.textContent;
     wrap.setValue = name => { display.textContent = name; display.title = name; };
@@ -853,34 +1205,103 @@ function makeLoraWidget(node, inputName, defaultValue) {
         return [width, h + 14];
     };
 
-    // Prevent manual resize from hiding content
-    const origOnResize = node.onResize?.bind(node);
-    node.onResize = function(size) {
-        origOnResize?.apply(this, arguments);
-        const minH = node.computeSize()[1];
-        if (size[1] < minH) {
-            size[1] = minH;   // size IS node.size by reference in LiteGraph
-        }
-    };
+    // Tag the widget so we can tell it apart from the plain STRING widget the
+    // frontend falls back to when the LORA_LIST def patch wasn't applied, and
+    // expose render() so the UI can be refreshed externally.
+    widget.__isLoraStackUI = true;
+    widget.cllRender = render;
 
-    // After paste/load, snap height to content — the node may arrive with an
-    // inflated size from the serialised data before the DOM is laid out.
-    const origOnConfigure = node.onConfigure?.bind(node);
-    node.onConfigure = function(info) {
-        origOnConfigure?.call(this, info);
-        requestAnimationFrame(() => {
-            const h = node.computeSize()[1];
-            if (h > 50 && node.size[1] !== h) {
-                node.size[1] = h;
-                app.graph?.setDirtyCanvas(true, true);
+    // Node-level hooks are installed once — rebuildLoraUI() may call
+    // makeLoraWidget() again on the same node, and re-wrapping would stack.
+    if (!node.__cllNodeHooksInstalled) {
+        node.__cllNodeHooksInstalled = true;
+
+        // Prevent manual resize from hiding content
+        const origOnResize = node.onResize?.bind(node);
+        node.onResize = function(size) {
+            origOnResize?.apply(this, arguments);
+            const minH = node.computeSize()[1];
+            if (size[1] < minH) {
+                size[1] = minH;   // size IS node.size by reference in LiteGraph
             }
-        });
-    };
+        };
+
+        // After paste/load, snap height to content — the node may arrive with an
+        // inflated size from the serialised data before the DOM is laid out.
+        const origOnConfigure = node.onConfigure?.bind(node);
+        node.onConfigure = function(info) {
+            origOnConfigure?.call(this, info);
+            requestAnimationFrame(() => {
+                const h = node.computeSize()[1];
+                if (h > 50 && node.size[1] !== h) {
+                    node.size[1] = h;
+                    app.graph?.setDirtyCanvas(true, true);
+                }
+            });
+        };
+    }
 
     render();
     fetchLoraList().then(names => { loraNames = names; render(); });
 
     return widget;
+}
+
+// ── UI rebuild ────────────────────────────────────────────────────────────────
+// When ComfyUI restores a workflow (e.g. switching back to another workflow
+// tab), the node can be re-created from the unpatched Python definition, where
+// loras_data is a plain STRING — the user then sees a raw-JSON text widget
+// instead of the LoRA list. rebuildLoraUI() replaces whatever widget currently
+// holds loras_data with a fresh custom widget, preserving the value.
+
+function rebuildLoraUI(node, force = false) {
+    if (!node.widgets) return;
+    const idx = node.widgets.findIndex(w => w.name === "loras_data");
+    if (idx === -1) return;
+
+    const old = node.widgets[idx];
+    if (!force && old.__isLoraStackUI) return;   // already the custom UI
+
+    let value = old.value ?? "[]";
+    if (typeof value !== "string") {
+        try { value = JSON.stringify(value); } catch { value = "[]"; }
+    }
+
+    // Remove the stale widget (and its DOM element, if any)
+    try { old.onRemove?.(); } catch { /* ignore */ }
+    old.element?.remove?.();
+    node.widgets.splice(idx, 1);
+
+    // addDOMWidget appends at the end — move the new widget back to the
+    // original slot so widgets_values serialisation order is preserved.
+    const widget = makeLoraWidget(node, "loras_data", value);
+    const newIdx = node.widgets.indexOf(widget);
+    if (newIdx !== -1 && newIdx !== idx) {
+        node.widgets.splice(newIdx, 1);
+        node.widgets.splice(idx, 0, widget);
+    }
+
+    requestAnimationFrame(() => {
+        const h = node.computeSize()[1];
+        if (h > node.size[1]) node.size[1] = h;
+        app.graph?.setDirtyCanvas(true, true);
+    });
+}
+
+// RMB menu entry to force a rebuild manually.
+function installRebuildMenu(node) {
+    if (node.__cllMenuInstalled) return;
+    node.__cllMenuInstalled = true;
+
+    const origGetExtraMenuOptions = node.getExtraMenuOptions;
+    node.getExtraMenuOptions = function(canvas, options) {
+        const r = origGetExtraMenuOptions?.apply(this, arguments);
+        options.push({
+            content: ADDON_PREFIX + " Rebuild LoraStack UI",
+            callback: () => rebuildLoraUI(this, true),
+        });
+        return r;
+    };
 }
 
 // ── Extension registration ────────────────────────────────────────────────────
@@ -916,5 +1337,27 @@ app.registerExtension({
         if (node.size[0] < 380) {
             node.setSize([380, node.size[1]]);
         }
+        installRebuildMenu(node);
+    },
+
+    // Called for every node each time a graph is (re)loaded — including when
+    // switching back to a workflow tab. Repair the UI if deserialisation
+    // produced the raw-JSON fallback widget, or if the custom widget's DOM
+    // element never got (re)attached to the document.
+    loadedGraphNode(node) {
+        if (node.comfyClass !== LORA_STACK_NODE_ID) return;
+        rebuildLoraUI(node);
+        // DOM widgets mount asynchronously after load; verify shortly after
+        // and force a rebuild if the element never attached.
+        setTimeout(() => {
+            if (node.graph !== app.graph) return;   // tab switched away again
+            const w = node.widgets?.find(x => x.name === "loras_data");
+            if (!w) return;
+            if (!w.__isLoraStackUI || (w.element && !w.element.isConnected)) {
+                rebuildLoraUI(node, true);
+            } else {
+                w.cllRender?.();
+            }
+        }, 300);
     },
 });
