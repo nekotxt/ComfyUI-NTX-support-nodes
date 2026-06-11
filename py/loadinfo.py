@@ -279,10 +279,23 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
 from aiohttp import web
 from server import PromptServer
 
+@PromptServer.instance.routes.get(f"/{API_PREFIX}/reload_models_list")
+async def reload_models_list(request):
+    global g_models_manager
+
+    g_models_manager.load()
+
+    msg = f"Reloaded data of g_models_manager from {g_models_manager.models_file}"
+    logger.info(msg)
+
+    return web.json_response(msg)
+
 # Support routes for node .py.loadinfo.LoadCheckpointInfo
 
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/get_checkpoint_info")
 async def get_checkpoint_info(request):
+    global g_models_manager
+
     data = await request.json()
     ckpt_name = data.get("ckpt_name", "")
     if ckpt_name == "":
@@ -327,6 +340,8 @@ async def get_checkpoint_info(request):
 
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/get_options_for_char")
 async def get_options_for_char(request):
+    global g_characters_manager
+
     data = await request.json()
     char_name = data.get("char_name", "")
     
@@ -336,6 +351,8 @@ async def get_options_for_char(request):
 
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/get_prompt_for_char_option")
 async def get_prompt_for_char_option(request):
+    global g_characters_manager
+    
     data = await request.json()
     char_name = data.get("char_name", "")
     option_name = data.get("option_name", "")

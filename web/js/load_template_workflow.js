@@ -511,12 +511,12 @@ async function showTemplatePicker(dropPos) {
 // ── Extension registration ────────────────────────────────────────────────────
 
 app.registerExtension({
-    name: API_PREFIX + ".load_wftemplate",
+    name: API_PREFIX + ".load_template_workflow",
 
     // Registered command: shows up in the command palette and in
     // Settings → Keybinding, where the default shortcut can be rebound.
     commands: [{
-        id: API_PREFIX + ".load_wftemplate.open",
+        id: API_PREFIX + ".load_template_workflow.open",
         label: ADDON_PREFIX + " Load template workflow",
         icon: "pi pi-folder-open",
         // graph_mouse holds the last known canvas mouse position, so the
@@ -525,7 +525,7 @@ app.registerExtension({
     }],
 
     keybindings: [{
-        commandId: API_PREFIX + ".load_wftemplate.open",
+        commandId: API_PREFIX + ".load_template_workflow.open",
         combo: { key: "w", alt: true },
     }],
 

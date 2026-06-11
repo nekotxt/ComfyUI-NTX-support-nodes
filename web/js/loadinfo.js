@@ -80,9 +80,9 @@ function writeStringToWidget(node, widget_name, data, data_name, default_value =
 }
 
 app.registerExtension({ 
-	name: API_PREFIX + ".script",
+	name: API_PREFIX + ".loadinfo",
 
-    async nodeCreated(node) {
+    nodeCreated(node) {
 
         if(getWidget(node, "ckpt_name") != null){
             // define the function to load the model data

@@ -1300,6 +1300,18 @@ function installRebuildMenu(node) {
             content: ADDON_PREFIX + " Rebuild LoraStack UI",
             callback: () => rebuildLoraUI(this, true),
         });
+        // options.push({
+        //     content: ADDON_PREFIX + " Reload Lora List from disk",
+        //     callback: () => {
+        //         fetch(`/${API_PREFIX}/reload_models_list`)
+        //         .then(response => response.json())
+        //         .then(message => alert(message))
+        //         .catch(error => {console.error('Error(Reload Lora List from disk):', error);} );                    
+                
+        //         _loraCache = null;                
+        //         rebuildLoraUI(this, true)
+        //     },
+        // });
         return r;
     };
 }
@@ -1308,7 +1320,22 @@ function installRebuildMenu(node) {
 
 const LORA_STACK_NODE_ID = ADDON_PREFIX + "LoraStack"
 app.registerExtension({
-	name: API_PREFIX + ".lora_stack",
+	name: API_PREFIX + ".loras",
+
+    getCanvasMenuItems() {
+        return [
+            {
+                content: ADDON_PREFIX + " Reload Lora List from disk",
+                callback: () => {
+                    fetch(`/${API_PREFIX}/reload_models_list`)
+                    .then(response => response.json())
+                    .then(message => alert(message))
+                    .catch(error => {console.error('Error(Reload Lora List from disk):', error);} );                    
+                    _loraCache = null;                
+                },
+            },
+        ];
+    },
 
     addCustomNodeDefs(defs) {
         if (defs[LORA_STACK_NODE_ID]) {
