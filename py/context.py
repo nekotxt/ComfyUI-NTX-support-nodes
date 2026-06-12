@@ -183,13 +183,9 @@ DEFAULT_PIPE_VALUES = {
 # input names that cannot be used for custom pipe entries
 RESERVED_PIPE_NAMES = ("pipe", "inputs_data")
 
-def parse_inputs_data(inputs_data):
-    """Parse the JSON produced by the frontend editor ([{"name":..., "type":...}, ...])
-    into an ordered list of valid custom input names, plus a name:type dictionary."""
-    try:
-        data = json.loads(inputs_data)
-    except (json.JSONDecodeError, TypeError):
-        data = []
+def parse_entry_list(data):
+    """Parse one editor entry list ([{"name":..., "type":...}, ...]) into an ordered
+    list of valid names, plus a name:type dictionary."""
     if not isinstance(data, list):
         data = []
 
@@ -207,13 +203,30 @@ def parse_inputs_data(inputs_data):
             break
     return (names, types)
 
+def parse_inputs_data(inputs_data):
+    """Parse the JSON produced by the frontend editor into (in_names, in_types,
+    out_names, out_types). Current format: {"inputs": [...], "outputs": [...]}.
+    Legacy format (a single list) is applied to both inputs and outputs."""
+    try:
+        data = json.loads(inputs_data)
+    except (json.JSONDecodeError, TypeError):
+        data = []
+
+    if isinstance(data, dict):
+        (in_names, in_types) = parse_entry_list(data.get("inputs"))
+        (out_names, out_types) = parse_entry_list(data.get("outputs"))
+    else:
+        (in_names, in_types) = parse_entry_list(data)
+        (out_names, out_types) = (in_names, in_types)
+    return (in_names, in_types, out_names, out_types)
+
 class PipeCustom(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}PipeCustom",
             display_name=f"{ADDON_PREFIX} Pipe Custom",
-            description="Pipe with user-defined inputs mirrored as outputs; connected values are merged into the pipe dictionary.",
+            description="Pipe with separately user-defined inputs and outputs; connected input values are merged into the pipe dictionary, outputs are read from it.",
             category=f"{ADDON_CATEGORY}/pipe",
             # the custom inputs are created by the frontend (web/js/pipe_custom.js) and are
             # not part of the schema: accept_all_inputs makes them reach execute() as kwargs
@@ -230,25 +243,25 @@ class PipeCustom(io.ComfyNode):
 
     @classmethod
     def execute(cls, inputs_data, pipe=None, **kwargs):
-        (names, types) = parse_inputs_data(inputs_data)
+        (in_names, in_types, out_names, out_types) = parse_inputs_data(inputs_data)
 
         new_pipe = clone_data(pipe) if pipe is not None else {}
         if not isinstance(new_pipe, dict):
             logger.warning("PipeCustom : input pipe is not a dictionary, starting from an empty pipe")
             new_pipe = {}
 
-        for name in names:
+        for name in in_names:
             value = kwargs.get(name)
             if value is not None:
                 new_pipe[name] = value
 
         # recover output from pipe. If not present, try to get a default if available
         outputs = []
-        for name in names:
+        for name in out_names:
             if name in new_pipe:
                 outputs.append(new_pipe[name])
             else:
-                outputs.append(DEFAULT_PIPE_VALUES.get(types[name], None))
+                outputs.append(DEFAULT_PIPE_VALUES.get(out_types[name], None))
 
         return io.NodeOutput(new_pipe, *outputs)
 

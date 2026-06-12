@@ -22,6 +22,7 @@ const CSS = `
 .cpp-wrap {
     display: flex;
     align-items: center;
+    gap: 6px;
     padding: 2px 6px 4px;
     box-sizing: border-box;
     width: 100%;
@@ -193,15 +194,14 @@ function injectCSS() {
 }
 
 // ── Entries (de)serialisation ─────────────────────────────────────────────────
-// inputs_data is a JSON string: [{"name": "width", "type": "INT"}, ...]
+// inputs_data is a JSON string: {"inputs": [{"name": "width", "type": "INT"}, ...],
+// "outputs": [...]}. The legacy format (a single list) is applied to both sides.
 
-function parseEntries(value) {
-    let data;
-    try { data = JSON.parse(value); } catch { data = []; }
-    if (!Array.isArray(data)) data = [];
+function parseEntries(list) {
+    if (!Array.isArray(list)) list = [];
 
     const entries = [];
-    for (const e of data) {
+    for (const e of list) {
         if (!e || typeof e !== "object") continue;
         const name = String(e.name ?? "").trim();
         const type = String(e.type ?? "*");
@@ -213,11 +213,24 @@ function parseEntries(value) {
     return entries;
 }
 
+function parseData(value) {
+    let data;
+    try { data = JSON.parse(value); } catch { data = []; }
+
+    if (Array.isArray(data)) {
+        // legacy single-list format: same entries for inputs and outputs
+        return { inputs: parseEntries(data), outputs: parseEntries(data) };
+    }
+    if (!data || typeof data !== "object") data = {};
+    return { inputs: parseEntries(data.inputs), outputs: parseEntries(data.outputs) };
+}
+
 // ── Slot synchronisation ──────────────────────────────────────────────────────
 // Slot layout: input 0 = "pipe" (+ the hidden inputs_data widget slot), output 0
-// = "pipe"; the custom entries follow, mirrored on both sides. The backend node
-// declares PIPE_MAX_SLOTS wildcard outputs — only the configured ones are kept
-// visible here, and link indices stay aligned with the execute() return tuple.
+// = "pipe"; the custom entries follow, each side driven by its own list. The
+// backend node declares PIPE_MAX_SLOTS wildcard outputs — only the configured
+// ones are kept visible here, and link indices stay aligned with the execute()
+// return tuple.
 
 function customInputIndices(node) {
     const idxs = [];
@@ -247,14 +260,14 @@ function renameSlot(slot, name) {
     }
 }
 
-function syncSlots(node, entries) {
+function syncSlots(node, data) {
     // inputs: drop excess custom slots (from the end, so indices stay valid)
     let idxs = customInputIndices(node);
-    while (idxs.length > entries.length) {
+    while (idxs.length > data.inputs.length) {
         node.removeInput(idxs.pop());
     }
     idxs = customInputIndices(node);
-    entries.forEach((e, i) => {
+    data.inputs.forEach((e, i) => {
         if (i < idxs.length) {
             const slot = node.inputs[idxs[i]];
             if (slot.type !== e.type) {
@@ -267,13 +280,13 @@ function syncSlots(node, entries) {
         }
     });
 
-    // outputs: same, mirrored
+    // outputs: same logic, driven by their own entry list
     let odxs = customOutputIndices(node);
-    while (odxs.length > entries.length) {
+    while (odxs.length > data.outputs.length) {
         node.removeOutput(odxs.pop());
     }
     odxs = customOutputIndices(node);
-    entries.forEach((e, i) => {
+    data.outputs.forEach((e, i) => {
         if (i < odxs.length) {
             const slot = node.outputs[odxs[i]];
             if (slot.type !== e.type) {
@@ -294,25 +307,28 @@ function syncSlots(node, entries) {
     });
 }
 
-function slotsMatch(node, entries) {
+function slotsMatch(node, data) {
     const idxs = customInputIndices(node);
     const odxs = customOutputIndices(node);
-    if (idxs.length !== entries.length || odxs.length !== entries.length) return false;
-    return entries.every((e, i) => {
+    if (idxs.length !== data.inputs.length || odxs.length !== data.outputs.length) return false;
+    return data.inputs.every((e, i) => {
         const inp = node.inputs[idxs[i]];
+        return inp.name === e.name && inp.type === e.type;
+    }) && data.outputs.every((e, i) => {
         const out = node.outputs[odxs[i]];
-        return inp.name === e.name && inp.type === e.type
-            && out.name === e.name && out.type === e.type;
+        return out.name === e.name && out.type === e.type;
     });
 }
 
 // ── Edit dialog ───────────────────────────────────────────────────────────────
 
-function openEditDialog(node, widget) {
+function openEditDialog(node, widget, kind) {
     injectCSS();
 
+    const label = kind === "outputs" ? "output" : "input";
+
     // working copy edited in place by the rows
-    const work = widget.getEntries();
+    const work = widget.getData()[kind];
 
     const overlay = document.createElement("div");
     overlay.className = "cpp-overlay";
@@ -323,7 +339,7 @@ function openEditDialog(node, widget) {
 
     const title = document.createElement("div");
     title.className = "cpp-title";
-    title.textContent = `${node.title || NODE_ID} — custom inputs`;
+    title.textContent = `${node.title || NODE_ID} — custom ${kind}`;
     panel.appendChild(title);
 
     const rowsEl = document.createElement("div");
@@ -332,7 +348,7 @@ function openEditDialog(node, widget) {
 
     const addBtn = document.createElement("button");
     addBtn.className = "cpp-add";
-    addBtn.textContent = "+ Add input";
+    addBtn.textContent = `+ Add ${label}`;
     panel.appendChild(addBtn);
 
     const errEl = document.createElement("div");
@@ -357,7 +373,7 @@ function openEditDialog(node, widget) {
         const nameEl = document.createElement("input");
         nameEl.className = "cpp-name";
         nameEl.type = "text";
-        nameEl.placeholder = "input name";
+        nameEl.placeholder = `${label} name`;
         nameEl.value = entry.name;
         nameEl.addEventListener("input", () => { entry.name = nameEl.value; });
 
@@ -378,7 +394,7 @@ function openEditDialog(node, widget) {
         const delBtn = document.createElement("button");
         delBtn.className = "cpp-del";
         delBtn.textContent = "✕";
-        delBtn.title = "Remove input";
+        delBtn.title = `Remove ${label}`;
         delBtn.addEventListener("click", () => {
             work.splice(i, 1);
             renderRows();
@@ -392,7 +408,7 @@ function openEditDialog(node, widget) {
         rowsEl.innerHTML = "";
         work.forEach((entry, i) => rowsEl.appendChild(buildRow(entry, i)));
         addBtn.disabled = work.length >= PIPE_MAX_SLOTS;
-        addBtn.textContent = addBtn.disabled ? `Max ${PIPE_MAX_SLOTS} inputs` : "+ Add input";
+        addBtn.textContent = addBtn.disabled ? `Max ${PIPE_MAX_SLOTS} ${kind}` : `+ Add ${label}`;
         if (focusLast) rowsEl.querySelector(".cpp-row:last-child .cpp-name")?.focus();
     }
 
@@ -400,9 +416,9 @@ function openEditDialog(node, widget) {
         const seen = new Set();
         for (const entry of work) {
             const name = entry.name.trim();
-            if (!name) return "Input names cannot be empty.";
+            if (!name) return `${label[0].toUpperCase()}${label.slice(1)} names cannot be empty.`;
             if (RESERVED_NAMES.includes(name)) return `"${name}" is a reserved name.`;
-            if (seen.has(name)) return `Duplicate input name "${name}".`;
+            if (seen.has(name)) return `Duplicate ${label} name "${name}".`;
             seen.add(name);
         }
         return null;
@@ -420,8 +436,8 @@ function openEditDialog(node, widget) {
             return;
         }
         const entries = work.map(e => ({ name: e.name.trim(), type: e.type }));
-        widget.setEntries(entries);
-        syncSlots(node, entries);
+        widget.setEntries(kind, entries);
+        syncSlots(node, widget.getData());
         close();
     }
 
@@ -446,30 +462,39 @@ function openEditDialog(node, widget) {
 
 // ── inputs_data widget ────────────────────────────────────────────────────────
 // The raw JSON STRING widget is replaced by a compact DOM widget showing only
-// the "Edit inputs…" button; the JSON value is kept through getValue/setValue
-// so both workflow and prompt serialisation keep working.
+// the "Edit inputs…" / "Edit outputs…" buttons; the JSON value is kept through
+// getValue/setValue so both workflow and prompt serialisation keep working.
 
 function makePipeWidget(node, inputName, initialValue) {
     injectCSS();
 
-    let entries = parseEntries(initialValue);
+    let data = parseData(initialValue);
 
     const wrap = document.createElement("div");
     wrap.className = "cpp-wrap";
 
-    const btn = document.createElement("button");
-    btn.className = "cpp-edit-btn";
-    btn.textContent = "Edit inputs…";
-    wrap.appendChild(btn);
+    const inBtn = document.createElement("button");
+    inBtn.className = "cpp-edit-btn";
+    inBtn.textContent = "Edit inputs…";
+    wrap.appendChild(inBtn);
+
+    const outBtn = document.createElement("button");
+    outBtn.className = "cpp-edit-btn";
+    outBtn.textContent = "Edit outputs…";
+    wrap.appendChild(outBtn);
 
     const widget = node.addDOMWidget(inputName, "PIPE_INPUTS", wrap, {
-        getValue() { return JSON.stringify(entries); },
-        setValue(v) { entries = parseEntries(v); },
+        getValue() { return JSON.stringify(data); },
+        setValue(v) { data = parseData(v); },
     });
 
-    btn.addEventListener("click", (ev) => {
+    inBtn.addEventListener("click", (ev) => {
         ev.preventDefault();
-        openEditDialog(node, widget);
+        openEditDialog(node, widget, "inputs");
+    });
+    outBtn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        openEditDialog(node, widget, "outputs");
     });
 
     widget.computeSize = function (width) {
@@ -477,8 +502,11 @@ function makePipeWidget(node, inputName, initialValue) {
     };
 
     widget.__isPipeUI = true;
-    widget.getEntries = () => entries.map(e => ({ ...e }));
-    widget.setEntries = (list) => { entries = list.map(e => ({ ...e })); };
+    widget.getData = () => ({
+        inputs: data.inputs.map(e => ({ ...e })),
+        outputs: data.outputs.map(e => ({ ...e })),
+    });
+    widget.setEntries = (kind, list) => { data[kind] = list.map(e => ({ ...e })); };
 
     return widget;
 }
@@ -530,7 +558,14 @@ function installMenu(node) {
             content: ADDON_PREFIX + " Edit pipe inputs…",
             callback: () => {
                 const w = getPipeWidget(this);
-                if (w?.__isPipeUI) openEditDialog(this, w);
+                if (w?.__isPipeUI) openEditDialog(this, w, "inputs");
+            },
+        });
+        options.push({
+            content: ADDON_PREFIX + " Edit pipe outputs…",
+            callback: () => {
+                const w = getPipeWidget(this);
+                if (w?.__isPipeUI) openEditDialog(this, w, "outputs");
             },
         });
         return r;
@@ -583,7 +618,7 @@ app.registerExtension({
         // slot arrays shorter than the serialised ones, so the clone-over-restore
         // cannot leave stale wildcard slots behind.
         const w = getPipeWidget(node);
-        syncSlots(node, w?.getEntries?.() ?? []);
+        syncSlots(node, w?.getData?.() ?? { inputs: [], outputs: [] });
     },
 
     // Called for every node each time a graph is (re)loaded — repair the UI if
@@ -593,10 +628,10 @@ app.registerExtension({
         if (node.comfyClass !== NODE_ID) return;
         rebuildPipeUI(node);
         const w = getPipeWidget(node);
-        if (!w?.getEntries) return;
-        const entries = w.getEntries();
-        if (!slotsMatch(node, entries)) {
-            syncSlots(node, entries);
+        if (!w?.getData) return;
+        const data = w.getData();
+        if (!slotsMatch(node, data)) {
+            syncSlots(node, data);
         }
     },
 });
