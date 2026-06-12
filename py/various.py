@@ -137,6 +137,7 @@ class DownloadModelsList(io.ComfyNode):
             is_output_node=True,
             inputs=[
                 io.String.Input("models_list", multiline=True, dynamic_prompts=False, default=""),
+                io.String.Input("models_dir", multiline=False, dynamic_prompts=False, default=""),
                 io.String.Input("civitai_api_key", multiline=False, dynamic_prompts=False, default=""),
             ],
             outputs=[
@@ -145,14 +146,16 @@ class DownloadModelsList(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, models_list="", civitai_api_key=""):
-        global MODELS_DIR
+    def execute(cls, models_list="", models_dir="", civitai_api_key=""):
+        if models_dir == "":
+            global MODELS_DIR
+            models_dir = MODELS_DIR
 
         logger.info("Attempt to download models:")
-        logger.info(f"- models dir: {MODELS_DIR}")
+        logger.info(f"- models dir: {models_dir}")
         logger.info(f"- civitai api key: {str(len(civitai_api_key)*'*')}")
 
-        result = download_models_from_text_list(text=models_list, models_dir=str(MODELS_DIR), tokens={"civitai": civitai_api_key})
+        result = download_models_from_text_list(text=models_list, models_dir=str(models_dir), tokens={"civitai": civitai_api_key})
 
         return io.NodeOutput(result)
 

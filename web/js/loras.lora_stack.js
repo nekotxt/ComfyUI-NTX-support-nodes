@@ -1320,7 +1320,7 @@ function installRebuildMenu(node) {
 
 const LORA_STACK_NODE_ID = ADDON_PREFIX + "LoraStack"
 app.registerExtension({
-	name: API_PREFIX + ".loras",
+	name: API_PREFIX + ".loras.lora_stack",
 
     getCanvasMenuItems() {
         return [
@@ -1337,12 +1337,24 @@ app.registerExtension({
         ];
     },
 
-    addCustomNodeDefs(defs) {
-        if (defs[LORA_STACK_NODE_ID]) {
-            defs[LORA_STACK_NODE_ID].input.required["loras_data"] = [
-                "LORA_LIST",
-                { default: "[]" },
-            ];
+    // addCustomNodeDefs(defs) {
+    //     if (defs[LORA_STACK_NODE_ID]) {
+    //         defs[LORA_STACK_NODE_ID].input.required["loras_data"] = [
+    //             "LORA_LIST",
+    //             { default: "[]" },
+    //         ];
+    //     }
+    // },
+    // Patch the loras_data input to the custom widget type. Done here rather
+    // than in addCustomNodeDefs because beforeRegisterNodeDef also runs when the
+    // frontend re-fetches the definitions after a backend restart (reloadNodeDefs),
+    // while addCustomNodeDefs only runs on the initial page load.
+    beforeRegisterNodeDef(nodeType, nodeData) {
+        if (nodeData?.name !== LORA_STACK_NODE_ID || !nodeData.input) return;
+        for (const group of ["required", "optional"]) {
+            if (nodeData.input[group]?.["loras_data"]) {
+                nodeData.input[group]["loras_data"] = ["LORA_LIST", { default: "[]" }];
+            }
         }
     },
 

@@ -2,7 +2,10 @@ from comfy_api.latest import ComfyExtension, io
 
 from typing_extensions import override
 
+import json
+
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY
+from .logging import logger
 from .utils import clone_data, load_list_image_sizes, extract_image_size, DICT_TYPE, LIST_TYPE, LORA_STACK_TYPE, CONTROL_NET_STACK_TYPE
 
 
@@ -160,6 +163,95 @@ class PipeVideoWan(PipeBase):
         "lora_stack_2"      : (LORA_STACK_TYPE       , None                                                                 , []),
     }
 
+# ===== NODES : CUSTOM CONTEXT (MANAGED BY FRONT END) ====================================================================================
+
+PIPE_MAX_SLOTS = 30   # max custom inputs/outputs per PipeCustom node (mirrored in web/js/context.pipe_custom.js)
+
+# default output values per type, used when a name is not found in the pipe
+# (types without a default return None) — edit to customize
+DEFAULT_PIPE_VALUES = {
+    "INT": 0,
+    "FLOAT": 0.0,
+    "STRING": "",
+    "BOOLEAN": False,
+    "LORA_STACK": [],
+    "CONTROL_NET_STACK": [],
+    "DICT": {},
+    "LIST": [],
+}
+
+# input names that cannot be used for custom pipe entries
+RESERVED_PIPE_NAMES = ("pipe", "inputs_data")
+
+def parse_inputs_data(inputs_data):
+    """Parse the JSON produced by the frontend editor ([{"name":..., "type":...}, ...])
+    into an ordered list of valid custom input names, plus a name:type dictionary."""
+    try:
+        data = json.loads(inputs_data)
+    except (json.JSONDecodeError, TypeError):
+        data = []
+    if not isinstance(data, list):
+        data = []
+
+    names = []
+    types = {}
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name", "")).strip()
+        if not name or name in RESERVED_PIPE_NAMES or name in names:
+            continue
+        names.append(name)
+        types[name] = str(entry.get("type", "*"))
+        if len(names) >= PIPE_MAX_SLOTS:
+            break
+    return (names, types)
+
+class PipeCustom(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}PipeCustom",
+            display_name=f"{ADDON_PREFIX} Pipe Custom",
+            description="Pipe with user-defined inputs mirrored as outputs; connected values are merged into the pipe dictionary.",
+            category=f"{ADDON_CATEGORY}/pipe",
+            # the custom inputs are created by the frontend (web/js/pipe_custom.js) and are
+            # not part of the schema: accept_all_inputs makes them reach execute() as kwargs
+            accept_all_inputs=True,
+            inputs=[
+                DICT_TYPE.Input("pipe", optional=True),
+                io.String.Input("inputs_data", default="[]"),
+            ],
+            # links are validated by output index, so the maximum number of outputs must be
+            # declared here; the frontend shows/renames only the configured ones
+            outputs=[DICT_TYPE.Output("pipe")]
+                    + [io.AnyType.Output(f"out_{i}") for i in range(PIPE_MAX_SLOTS)],
+        )
+
+    @classmethod
+    def execute(cls, inputs_data, pipe=None, **kwargs):
+        (names, types) = parse_inputs_data(inputs_data)
+
+        new_pipe = clone_data(pipe) if pipe is not None else {}
+        if not isinstance(new_pipe, dict):
+            logger.warning("PipeCustom : input pipe is not a dictionary, starting from an empty pipe")
+            new_pipe = {}
+
+        for name in names:
+            value = kwargs.get(name)
+            if value is not None:
+                new_pipe[name] = value
+
+        # recover output from pipe. If not present, try to get a default if available
+        outputs = []
+        for name in names:
+            if name in new_pipe:
+                outputs.append(new_pipe[name])
+            else:
+                outputs.append(DEFAULT_PIPE_VALUES.get(types[name], None))
+
+        return io.NodeOutput(new_pipe, *outputs)
+
 # ===== NODES : GENERATION DATA ==========================================================================================================
 
 class GenerationDataSet(io.ComfyNode):
@@ -292,6 +384,8 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         PipeImageEdit,
         PipeVideoWan,
+
+        PipeCustom,
 
         GenerationDataSet,
         GenerationDataGet,

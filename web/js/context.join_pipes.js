@@ -287,7 +287,7 @@ function joinPipes() {
 // --- registration -------------------------------------------------------------
 
 app.registerExtension({
-    name: API_PREFIX + ".join_pipes",
+    name: API_PREFIX + ".context.join_pipes",
 
     getCanvasMenuItems() {
         return [

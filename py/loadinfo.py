@@ -86,6 +86,8 @@ class ModelsManager():
                     categories_list.append(category)
         self.categories_list = categories_list
 
+        self.list_cache = {}
+
     def get_model(self, model_type:str, model_id:str):
         full_model_id = _get_full_model_id(model_type, model_id)
         return self.models_by_ID.get(full_model_id, None)
