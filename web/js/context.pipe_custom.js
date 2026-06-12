@@ -351,6 +351,14 @@ function openEditDialog(node, widget, kind) {
     addBtn.textContent = `+ Add ${label}`;
     panel.appendChild(addBtn);
 
+    // replace the edited list with a copy of the current entries of the other
+    // side (takes effect only when the dialog is accepted with OK)
+    const otherKind = kind === "outputs" ? "inputs" : "outputs";
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "cpp-add";
+    copyBtn.textContent = `Copy from ${otherKind}`;
+    panel.appendChild(copyBtn);
+
     const errEl = document.createElement("div");
     errEl.className = "cpp-error";
     panel.appendChild(errEl);
@@ -429,6 +437,28 @@ function openEditDialog(node, widget, kind) {
         overlay.remove();
     }
 
+    // names present on both sides should carry the same type — accepted, but
+    // warn the user so unintended type changes do not go unnoticed
+    function warnTypeMismatches(entries) {
+        const otherTypes = new Map(widget.getData()[otherKind].map(e => [e.name, e.type]));
+        const mismatches = entries
+            .filter(e => otherTypes.has(e.name) && otherTypes.get(e.name) !== e.type)
+            .map(e => `"${e.name}" is ${e.type} in ${kind} but ${otherTypes.get(e.name)} in ${otherKind}`);
+        if (!mismatches.length) return;
+        const detail = mismatches.join("\n");
+        const toast = app.extensionManager?.toast;
+        if (toast?.add) {
+            toast.add({
+                severity: "warn",
+                summary: `${node.title || NODE_ID}: input/output type mismatch`,
+                detail,
+                life: 6000,
+            });
+        } else {
+            alert(`Warning — input/output type mismatch:\n${detail}`);
+        }
+    }
+
     function apply() {
         const error = validate();
         if (error) {
@@ -436,6 +466,7 @@ function openEditDialog(node, widget, kind) {
             return;
         }
         const entries = work.map(e => ({ name: e.name.trim(), type: e.type }));
+        warnTypeMismatches(entries);
         widget.setEntries(kind, entries);
         syncSlots(node, widget.getData());
         close();
@@ -450,6 +481,12 @@ function openEditDialog(node, widget, kind) {
         if (work.length >= PIPE_MAX_SLOTS) return;
         work.push({ name: "", type: PIPE_DATA_TYPES[0] ?? "*" });
         renderRows(true);
+    });
+    copyBtn.addEventListener("click", () => {
+        work.length = 0;
+        work.push(...widget.getData()[otherKind]);
+        errEl.textContent = "";
+        renderRows();
     });
     cancelBtn.addEventListener("click", close);
     okBtn.addEventListener("click", apply);
