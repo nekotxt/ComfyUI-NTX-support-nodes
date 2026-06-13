@@ -1,6 +1,7 @@
 // CREATED WITH CLAUDE
 
 import { app } from "../../../scripts/app.js";
+import { api } from "../../../scripts/api.js";
 
 import { ADDON_PREFIX, API_PREFIX } from "./config.js";
 
@@ -90,6 +91,40 @@ const CSS = `
     gap: 6px;
 }
 
+.cpp-row.cpp-dragging {
+    opacity: 0.4;
+}
+
+/* drop position indicators (set during a drag-over) */
+.cpp-row.cpp-drop-before {
+    box-shadow: 0 -2px 0 0 #4a90d9;
+}
+
+.cpp-row.cpp-drop-after {
+    box-shadow: 0 2px 0 0 #4a90d9;
+}
+
+.cpp-drag {
+    flex: 0 0 16px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #888;
+    cursor: grab;
+    font-size: 14px;
+    line-height: 1;
+    user-select: none;
+}
+
+.cpp-drag:hover {
+    color: #fff;
+}
+
+.cpp-drag:active {
+    cursor: grabbing;
+}
+
 .cpp-name {
     flex: 1 1 0;
     min-width: 0;
@@ -155,6 +190,44 @@ const CSS = `
     color: #e66;
     min-height: 16px;
     margin-top: 6px;
+}
+
+/* ── Template picker ── */
+.cpp-tpl-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow-y: auto;
+    max-height: 60vh;
+    min-height: 28px;
+}
+
+.cpp-tpl-btn {
+    text-align: left;
+    padding: 6px 8px;
+    background: var(--comfy-input-bg, #1a1a1a);
+    color: var(--input-text, #ccc);
+    border: 1px solid #444;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.cpp-tpl-btn:hover {
+    border-color: #4a90d9;
+    color: #fff;
+}
+
+.cpp-tpl-name {
+    font-weight: bold;
+}
+
+.cpp-tpl-props {
+    color: #888;
+    margin-top: 2px;
+    font-size: 11px;
+    white-space: normal;
+    word-break: break-word;
 }
 
 .cpp-footer {
@@ -251,53 +324,107 @@ function customOutputIndices(node) {
     return idxs;
 }
 
-function renameSlot(slot, name) {
-    if (slot.name !== name) {
-        slot.name = name;
-        // display name resolves as label || localized_name || name
-        slot.label = undefined;
-        slot.localized_name = undefined;
+// ── Link-preserving slot reorder ───────────────────────────────────────────────
+// The editor may reorder, rename, retype, add or remove entries. Rather than tear
+// every wire down and rebuild it, we keep the existing slot OBJECTS (matched by name),
+// move them into the entry order, and patch each link's slot-index field to the slot's
+// new position. Because a link's *other* endpoint is never touched, this also preserves
+// wires to a parent subgraph's input node (origin id -10) and output node (target id
+// -20) — those virtual nodes are not returned by getNodeById(), so they cannot be wired
+// back up through the normal connect() path.
+//
+// Matching is by name: a renamed entry no longer matches its old slot, so the old slot
+// (and its wire) is dropped and a fresh, unconnected slot is created — this is the
+// "reconnect by same name" rule. A type change likewise drops the wire (left disconnected).
+
+// Lay `ordered` (the custom slots, in entry order) after the fixed slots (pipe / any
+// widget-backed slot), mutating the array in place so litegraph keeps its reference.
+function relayoutSlots(slotArray, ordered) {
+    const fixed = slotArray.filter(s => !ordered.includes(s));
+    slotArray.length = 0;
+    slotArray.push(...fixed, ...ordered);
+}
+
+function reorderInputSlots(node, entries) {
+    const byName = new Map(customInputIndices(node).map(i => [node.inputs[i].name, node.inputs[i]]));
+
+    const ordered = [];
+    for (const e of entries) {
+        let slot = byName.get(e.name);
+        if (slot) {
+            byName.delete(e.name);
+            if (slot.type !== e.type) {                      // type changed → drop the wire
+                const idx = node.inputs.indexOf(slot);
+                if (slot.link != null && idx !== -1) node.disconnectInput(idx);
+                slot.type = e.type;
+            }
+        } else {
+            node.addInput(e.name, e.type);                   // new/renamed entry → fresh slot
+            slot = node.inputs[node.inputs.length - 1];
+        }
+        ordered.push(slot);
+    }
+
+    // entries removed or renamed away: drop their slots (also disconnects their wires)
+    for (const slot of byName.values()) {
+        const idx = node.inputs.indexOf(slot);
+        if (idx !== -1) node.removeInput(idx);
+    }
+
+    relayoutSlots(node.inputs, ordered);
+
+    // realign each input wire's target_slot with its slot's final index
+    const links = node.graph?.links;
+    if (links) {
+        node.inputs.forEach((slot, i) => {
+            const link = slot.link != null ? links[slot.link] : null;
+            if (link) link.target_slot = i;
+        });
+    }
+}
+
+function reorderOutputSlots(node, entries) {
+    const byName = new Map(customOutputIndices(node).map(i => [node.outputs[i].name, node.outputs[i]]));
+
+    const ordered = [];
+    for (const e of entries) {
+        let slot = byName.get(e.name);
+        if (slot) {
+            byName.delete(e.name);
+            if (slot.type !== e.type) {                      // type changed → drop the wire(s)
+                const idx = node.outputs.indexOf(slot);
+                if (slot.links?.length && idx !== -1) node.disconnectOutput(idx);
+                slot.type = e.type;
+            }
+        } else {
+            node.addOutput(e.name, e.type);
+            slot = node.outputs[node.outputs.length - 1];
+        }
+        ordered.push(slot);
+    }
+
+    for (const slot of byName.values()) {
+        const idx = node.outputs.indexOf(slot);
+        if (idx !== -1) node.removeOutput(idx);
+    }
+
+    relayoutSlots(node.outputs, ordered);
+
+    // realign each output wire's origin_slot with its slot's final index
+    const links = node.graph?.links;
+    if (links) {
+        node.outputs.forEach((slot, i) => {
+            for (const id of slot.links ?? []) {
+                const link = links[id];
+                if (link) link.origin_slot = i;
+            }
+        });
     }
 }
 
 function syncSlots(node, data) {
-    // inputs: drop excess custom slots (from the end, so indices stay valid)
-    let idxs = customInputIndices(node);
-    while (idxs.length > data.inputs.length) {
-        node.removeInput(idxs.pop());
-    }
-    idxs = customInputIndices(node);
-    data.inputs.forEach((e, i) => {
-        if (i < idxs.length) {
-            const slot = node.inputs[idxs[i]];
-            if (slot.type !== e.type) {
-                if (slot.link != null) node.disconnectInput(idxs[i]);
-                slot.type = e.type;
-            }
-            renameSlot(slot, e.name);
-        } else {
-            node.addInput(e.name, e.type);
-        }
-    });
-
-    // outputs: same logic, driven by their own entry list
-    let odxs = customOutputIndices(node);
-    while (odxs.length > data.outputs.length) {
-        node.removeOutput(odxs.pop());
-    }
-    odxs = customOutputIndices(node);
-    data.outputs.forEach((e, i) => {
-        if (i < odxs.length) {
-            const slot = node.outputs[odxs[i]];
-            if (slot.type !== e.type) {
-                node.disconnectOutput(odxs[i]);
-                slot.type = e.type;
-            }
-            renameSlot(slot, e.name);
-        } else {
-            node.addOutput(e.name, e.type);
-        }
-    });
+    reorderInputSlots(node, data.inputs);
+    reorderOutputSlots(node, data.outputs);
 
     // snap the node height to its content
     requestAnimationFrame(() => {
@@ -359,6 +486,12 @@ function openEditDialog(node, widget, kind) {
     copyBtn.textContent = `Copy from ${otherKind}`;
     panel.appendChild(copyBtn);
 
+    // add a set of pre-defined properties from input/ntx_data/custompipe_configs.txt
+    const tplBtn = document.createElement("button");
+    tplBtn.className = "cpp-add";
+    tplBtn.textContent = "Load template…";
+    panel.appendChild(tplBtn);
+
     const errEl = document.createElement("div");
     errEl.className = "cpp-error";
     panel.appendChild(errEl);
@@ -374,9 +507,68 @@ function openEditDialog(node, widget, kind) {
     footer.append(cancelBtn, okBtn);
     panel.appendChild(footer);
 
+    // index of the row currently being dragged (null when no drag in progress)
+    let dragIndex = null;
+
+    function clearDropMarkers() {
+        rowsEl.querySelectorAll(".cpp-row").forEach(r =>
+            r.classList.remove("cpp-drop-before", "cpp-drop-after"));
+    }
+
+    // move the entry at `from` so it lands at array position `to` (0..length)
+    function moveEntry(from, to) {
+        if (from < 0 || from >= work.length) return;
+        const [item] = work.splice(from, 1);
+        if (from < to) to -= 1;             // removal shifted later indices down
+        to = Math.max(0, Math.min(to, work.length));
+        if (to === from) { work.splice(from, 0, item); return; }
+        work.splice(to, 0, item);
+        renderRows();
+    }
+
     function buildRow(entry, i) {
         const row = document.createElement("div");
         row.className = "cpp-row";
+
+        const handle = document.createElement("div");
+        handle.className = "cpp-drag";
+        handle.textContent = "⠿";
+        handle.title = "Drag to reorder";
+        handle.draggable = true;
+        handle.addEventListener("dragstart", (ev) => {
+            dragIndex = i;
+            row.classList.add("cpp-dragging");
+            ev.dataTransfer.effectAllowed = "move";
+            // Firefox requires some data to be set for the drag to start
+            try { ev.dataTransfer.setData("text/plain", String(i)); } catch { /* ignore */ }
+            try { ev.dataTransfer.setDragImage(row, 0, 0); } catch { /* ignore */ }
+        });
+        handle.addEventListener("dragend", () => {
+            dragIndex = null;
+            row.classList.remove("cpp-dragging");
+            clearDropMarkers();
+        });
+
+        // a drop lands relative to whichever row the cursor is over
+        row.addEventListener("dragover", (ev) => {
+            if (dragIndex === null) return;
+            ev.preventDefault();
+            ev.dataTransfer.dropEffect = "move";
+            const rect = row.getBoundingClientRect();
+            const after = ev.clientY > rect.top + rect.height / 2;
+            clearDropMarkers();
+            row.classList.add(after ? "cpp-drop-after" : "cpp-drop-before");
+        });
+        row.addEventListener("drop", (ev) => {
+            if (dragIndex === null) return;
+            ev.preventDefault();
+            const rect = row.getBoundingClientRect();
+            const after = ev.clientY > rect.top + rect.height / 2;
+            const from = dragIndex;
+            dragIndex = null;
+            clearDropMarkers();
+            moveEntry(from, after ? i + 1 : i);
+        });
 
         const nameEl = document.createElement("input");
         nameEl.className = "cpp-name";
@@ -408,7 +600,7 @@ function openEditDialog(node, widget, kind) {
             renderRows();
         });
 
-        row.append(nameEl, typeEl, delBtn);
+        row.append(handle, nameEl, typeEl, delBtn);
         return row;
     }
 
@@ -472,6 +664,110 @@ function openEditDialog(node, widget, kind) {
         close();
     }
 
+    // append a template's properties to the list, skipping any whose name is
+    // already present (and respecting the slot cap); returns the count added
+    function applyTemplate(tpl) {
+        const existing = new Set(work.map(e => e.name.trim()));
+        let added = 0;
+        for (const prop of tpl?.properties ?? []) {
+            if (work.length >= PIPE_MAX_SLOTS) break;
+            const name = String(prop?.name ?? "").trim();
+            const type = String(prop?.type ?? "*") || "*";
+            if (!name || existing.has(name)) continue;   // ignore duplicates by name
+            work.push({ name, type });
+            existing.add(name);
+            added++;
+        }
+        renderRows();
+        return added;
+    }
+
+    // fetch the templates and let the user pick one in a small overlay
+    async function openTemplatePicker() {
+        errEl.textContent = "";
+        let templates;
+        try {
+            const resp = await api.fetchApi(`/${API_PREFIX}/load_custompipe_templates`);
+            templates = await resp.json();
+        } catch (e) {
+            errEl.textContent = "Could not load templates.";
+            return;
+        }
+        if (!Array.isArray(templates) || templates.length === 0) {
+            errEl.textContent = "No templates available.";
+            return;
+        }
+
+        const pOverlay = document.createElement("div");
+        pOverlay.className = "cpp-overlay";
+        pOverlay.style.zIndex = "10001";
+
+        const pPanel = document.createElement("div");
+        pPanel.className = "cpp-panel";
+        pOverlay.appendChild(pPanel);
+
+        const pTitle = document.createElement("div");
+        pTitle.className = "cpp-title";
+        pTitle.textContent = `Load template — ${kind}`;
+        pPanel.appendChild(pTitle);
+
+        const listEl = document.createElement("div");
+        listEl.className = "cpp-tpl-list";
+        pPanel.appendChild(listEl);
+
+        const pFooter = document.createElement("div");
+        pFooter.className = "cpp-footer";
+        const pCancel = document.createElement("button");
+        pCancel.className = "cpp-btn";
+        pCancel.textContent = "Cancel";
+        pFooter.appendChild(pCancel);
+        pPanel.appendChild(pFooter);
+
+        function onPickerKey(ev) {
+            if (ev.key === "Escape") { ev.stopPropagation(); closePicker(); }
+        }
+        function closePicker() {
+            document.removeEventListener("keydown", onPickerKey, true);
+            pOverlay.remove();
+            document.addEventListener("keydown", onKeyDown, true);   // restore dialog Esc handling
+        }
+
+        for (const tpl of templates) {
+            const btn = document.createElement("button");
+            btn.className = "cpp-tpl-btn";
+
+            const nameEl = document.createElement("div");
+            nameEl.className = "cpp-tpl-name";
+            nameEl.textContent = tpl?.name ?? "(unnamed)";
+
+            const propsEl = document.createElement("div");
+            propsEl.className = "cpp-tpl-props";
+            propsEl.textContent = (tpl?.properties ?? [])
+                .map(p => `${p.name}:${p.type}`).join(", ") || "(no properties)";
+
+            btn.append(nameEl, propsEl);
+            btn.addEventListener("click", () => {
+                const added = applyTemplate(tpl);
+                closePicker();
+                const skipped = (tpl?.properties?.length ?? 0) - added;
+                if (added === 0) {
+                    errEl.textContent = `"${tpl?.name}" added no new ${kind} (already present).`;
+                } else if (skipped > 0) {
+                    errEl.textContent = `Added ${added}, skipped ${skipped} duplicate ${skipped === 1 ? "name" : "names"}.`;
+                }
+            });
+            listEl.appendChild(btn);
+        }
+
+        pCancel.addEventListener("click", closePicker);
+        pOverlay.addEventListener("click", (ev) => { if (ev.target === pOverlay) closePicker(); });
+
+        // suspend the dialog's Esc handler so Escape closes only the picker
+        document.removeEventListener("keydown", onKeyDown, true);
+        document.addEventListener("keydown", onPickerKey, true);
+        document.body.appendChild(pOverlay);
+    }
+
     function onKeyDown(ev) {
         if (ev.key === "Escape") { ev.stopPropagation(); close(); }
         else if (ev.key === "Enter" && ev.target?.classList?.contains("cpp-name")) { apply(); }
@@ -488,6 +784,7 @@ function openEditDialog(node, widget, kind) {
         errEl.textContent = "";
         renderRows();
     });
+    tplBtn.addEventListener("click", openTemplatePicker);
     cancelBtn.addEventListener("click", close);
     okBtn.addEventListener("click", apply);
     document.addEventListener("keydown", onKeyDown, true);

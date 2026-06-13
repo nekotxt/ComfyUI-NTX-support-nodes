@@ -4,7 +4,7 @@ from typing_extensions import override
 
 import json
 
-from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_DIR
 from .logging import logger
 from .utils import clone_data, load_list_image_sizes, extract_image_size, DICT_TYPE, LIST_TYPE, LORA_STACK_TYPE, CONTROL_NET_STACK_TYPE
 
@@ -404,3 +404,47 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         GenerationDataGet,
         GenerationDataMaxSize,
     ]
+
+# ===== JAVASCRIPT API =====================================================================================================================
+
+# Pre-defined property sets the frontend editor can load. Stored in
+# input/ntx_data/custompipe_configs.txt: each template starts with a name line,
+# followed by "- name:type" property lines; a blank line separates templates.
+CUSTOMPIPE_TEMPLATES_FILE = SETTINGS_DIR / "custompipe_configs.txt"
+
+def load_custompipe_templates():
+    """Parse the templates file into a list of
+    [{"name": <template>, "properties": [{"name":..., "type":...}, ...]}, ...]."""
+    templates = []
+    if not CUSTOMPIPE_TEMPLATES_FILE.is_file():
+        return templates
+
+    current = None
+    try:
+        with open(CUSTOMPIPE_TEMPLATES_FILE, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line:
+                    continue
+                if line.startswith("-"):
+                    if current is None:
+                        continue   # property line before any template name — skip
+                    name, sep, ptype = line[1:].partition(":")
+                    name = name.strip()
+                    ptype = ptype.strip() if sep else ""
+                    if name:
+                        current["properties"].append({"name": name, "type": ptype or "*"})
+                else:
+                    current = {"name": line, "properties": []}
+                    templates.append(current)
+    except OSError as e:
+        logger.warning(f"PipeCustom : could not read custom pipe templates : {e}")
+        return []
+    return templates
+
+from aiohttp import web
+from server import PromptServer
+
+@PromptServer.instance.routes.get(f"/{API_PREFIX}/load_custompipe_templates")
+async def load_custompipe_templates_route(request):
+    return web.json_response(load_custompipe_templates())
