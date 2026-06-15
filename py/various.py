@@ -159,6 +159,25 @@ class DownloadModelsList(io.ComfyNode):
 
         return io.NodeOutput(result)
 
+class IsNull(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}IsNull",
+            display_name=f"{ADDON_PREFIX} IsNull",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.AnyType.Input("value", optional=True),
+            ],
+            outputs=[
+                io.Boolean.Output("isNull")
+            ]
+        )
+
+    @classmethod
+    def execute(cls, value=None) -> io.NodeOutput:
+        return io.NodeOutput(value == None)
+
 # ===== INITIALIZATION =====================================================================================================================
 
 def get_nodes_list() -> list[type[io.ComfyNode]]:
@@ -167,4 +186,5 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         CollectModelNtxdata,
         #CLIPTextEncodeWithCutoff,
         DownloadModelsList,
+        IsNull,
     ]
