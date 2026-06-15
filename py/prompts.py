@@ -22,6 +22,9 @@ NO_PROMPTS_OPTION = "(no prompts found)"
 # image extensions looked up (in order) next to a prompt id, e.g. scenes/fantasy/dungeon.png
 IMAGE_EXTENSIONS = (".png", ".jpeg", ".jpg")
 
+# name separator to be used in leaf strings to identify a name
+NAME_SEPARATOR = "::"
+
 
 def _flatten_prompts(node, prefix, out):
     """Recursively walk the parsed YAML, building an ordered {id: prompt} map.
@@ -44,8 +47,11 @@ def _flatten_prompts(node, prefix, out):
                 _flatten_prompts(item, prefix, out)
             else:
                 leaf = str(item)
+                text = leaf
+                if NAME_SEPARATOR in leaf:
+                    leaf, text = leaf.split(NAME_SEPARATOR, 1)
                 key = f"{prefix}/{leaf}" if prefix else leaf
-                out[key] = leaf
+                out[key] = text
 
 
 # cached result of _build_prompts_map(); populated lazily on the first
@@ -303,7 +309,6 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         LoadPrompt,
         SavePrompt,
     ]
-
 
 # ===== JAVASCRIPT API =====================================================================================================================
 

@@ -8,7 +8,7 @@ import { ADDON_PREFIX, API_PREFIX } from "./config.js";
 // ── Configuration ─────────────────────────────────────────────────────────────
 // Subdirectory (inside the ComfyUI user "workflows" folder) that is scanned for
 // template workflows. Change this to point the picker somewhere else.
-const TEMPLATES_SUBDIR = "_cloud/_templates";
+const TEMPLATES_SUBDIR = "ntx/_templates";
 
 // Name of the throw-away workflow tab used while importing a template. The
 // frontend appends ".json" and de-conflicts the path, so collisions with real
