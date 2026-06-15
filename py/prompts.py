@@ -304,7 +304,6 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         SavePrompt,
     ]
 
-
 # ===== JAVASCRIPT API =====================================================================================================================
 
 from aiohttp import web
