@@ -8,7 +8,7 @@ from typing_extensions import override
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, SETTINGS_DIR, MODELS_DIR
 from .logging import logger
-from .utils import LORA_STACK_TYPE
+from .utils import LORA_STACK_TYPE, notify_user
 from ..scripts.download_models import download_models_from_text_list
 
 # ===== NODES ==============================================================================================================================
@@ -170,13 +170,38 @@ class IsNull(io.ComfyNode):
                 io.AnyType.Input("value", optional=True),
             ],
             outputs=[
-                io.Boolean.Output("isNull")
+                io.Boolean.Output("is_null")
             ]
         )
 
     @classmethod
     def execute(cls, value=None) -> io.NodeOutput:
         return io.NodeOutput(value == None)
+
+class CheckNotNull(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}CheckNotNull",
+            display_name=f"{ADDON_PREFIX} CheckNotNull",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.AnyType.Input("value"),
+                io.String.Input("error_message"),
+            ],
+            outputs=[
+                io.Boolean.Output("is_not_null")
+            ]
+        )
+
+    @classmethod
+    def execute(cls, value, error_message) -> io.NodeOutput:
+        if value == None:
+            logger.warning(f"CheckNotNull : {error_message}")
+            notify_user("warn", "CheckNotNull", error_message)
+            return io.NodeOutput(False)
+        else:
+            return io.NodeOutput(True)
 
 # ===== INITIALIZATION =====================================================================================================================
 
@@ -187,4 +212,5 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         #CLIPTextEncodeWithCutoff,
         DownloadModelsList,
         IsNull,
+        CheckNotNull,
     ]

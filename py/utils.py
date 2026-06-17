@@ -8,8 +8,10 @@ import re
 import subprocess
 from pathlib import Path
 
-from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, SETTINGS_DIR
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, API_PREFIX, ADDON_CATEGORY, SETTINGS_DIR
 from .logging import logger
+
+from server import PromptServer
 
 # ===== Custom types ===========================================================================================================================
 
@@ -64,6 +66,18 @@ def dict_merge(base:dict, overwrite:dict):
 # utility for cleaning path names
 def clean_path(path:str):
     return path.replace("\\", os.path.sep).replace("/", os.path.sep)
+
+# ===== FRONTEND MESSAGING =========================================================================================================================
+
+def notify_user(severity, summary, detail):
+    """Best-effort toast on the frontend (see web/js listener); never fatal."""
+    try:
+        PromptServer.instance.send_sync(
+            f"{API_PREFIX}.toast",
+            {"severity": severity, "summary": summary, "detail": detail},
+        )
+    except Exception:
+        pass
 
 # ===== FILE DOWNLOAD =========================================================================================================================
 

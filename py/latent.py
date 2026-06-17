@@ -7,7 +7,7 @@ from typing_extensions import override
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY
 from .logging import logger
-from .utils import load_list_vaes, load_list_image_sizes, extract_image_size
+from .utils import load_list_vaes, load_list_image_sizes, extract_image_size, notify_user
 
 # ===== NODES ==============================================================================================================================
 
@@ -110,6 +110,11 @@ class CreateImageLatent(io.ComfyNode):
             from nodes import EmptyLatentImage # the nodes module can be referenced, because its path is added to sys.path in __init__
             (latent, ) = EmptyLatentImage().generate(width=width, height=height, batch_size=batch_size)
         else:
+            # vae must be non-null, if it is null notify the user
+            if vae == None:
+                msg = "The vae input is null : a non-null vae is required to encode the opt_image input. Check that a valid vae is passed to the node"
+                logger.warning(f"CreateImageLatent : {msg}")
+                notify_user("warn", "CreateImageLatent", msg)
             from nodes import VAEEncode # the nodes module can be referenced, because its path is added to sys.path in __init__
             (latent, ) = VAEEncode().encode(vae, opt_image, )
             if batch_size > 1:

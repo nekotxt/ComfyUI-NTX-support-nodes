@@ -8,6 +8,7 @@ from PIL import Image, ImageOps
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_DIR
 from .logging import logger
+from .utils import notify_user
 
 # ===== PROMPT LIBRARY =====================================================================================================================
 
@@ -242,17 +243,6 @@ def save_prompt_files(category, name, prompt, image=None, overwrite=False):
     global _PROMPTS_CACHE
     _PROMPTS_CACHE = None
     return (True, "saved")
-
-
-def notify_user(severity, summary, detail):
-    """Best-effort toast on the frontend (see web/js listener); never fatal."""
-    try:
-        PromptServer.instance.send_sync(
-            f"{API_PREFIX}.toast",
-            {"severity": severity, "summary": summary, "detail": detail},
-        )
-    except Exception:
-        pass
 
 
 class SavePrompt(io.ComfyNode):
