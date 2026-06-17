@@ -25,7 +25,6 @@ IMAGE_EXTENSIONS = (".png", ".jpeg", ".jpg")
 # name separator to be used in leaf strings to identify a name
 NAME_SEPARATOR = "::"
 
-
 def _flatten_prompts(node, prefix, out):
     """Recursively walk the parsed YAML, building an ordered {id: prompt} map.
     Dict keys extend the category path; only list items become leaves. A list item
@@ -57,7 +56,6 @@ def _flatten_prompts(node, prefix, out):
 # cached result of _build_prompts_map(); populated lazily on the first
 # load_prompts_map() call. Call reload_prompts_map() to rebuild from disk.
 _PROMPTS_CACHE = None
-
 
 def load_prompts_map():
     """Return the merged {id: prompt} map, building it from disk on first use and
