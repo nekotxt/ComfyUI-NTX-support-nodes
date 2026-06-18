@@ -250,10 +250,13 @@ class PipeCustom(io.ComfyNode):
             logger.warning("PipeCustom : input pipe is not a dictionary, starting from an empty pipe")
             new_pipe = {}
 
+        in_index = 0
         for name in in_names:
             value = kwargs.get(name)
             if value is not None:
                 new_pipe[name] = value
+                #logger.info(f"PipeCustom : {name}[{in_types[in_index]}] <= {value}")
+            in_index += 1
 
         # recover output from pipe. If not present, try to get a default if available
         outputs = []

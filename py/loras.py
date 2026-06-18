@@ -12,7 +12,7 @@ from typing_extensions import override
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, MODELS_DIR, MAX_CACHED_LORAS, DOWNLOAD_MISSING_LORAS, CLOUD_STORAGE_ID
 from .logging import logger
-from .utils import clone_data, download_file_from_cloud, load_list_loras, LORA_STACK_TYPE
+from .utils import clone_data, download_file_from_cloud, load_list_loras, find_model_file, notify_user, LORA_STACK_TYPE
 
 # ===== LoRA utilities =================================================================================================================
 
@@ -21,7 +21,7 @@ CACHED_LORAS = []
 logger.info(f"MAX_CACHED_LORAS = {MAX_CACHED_LORAS}")
 
 def normalize_lora_name(lora_name:str):
-    if lora_name.endswith(".safetensors") == False:
+    if Path(lora_name).suffix == "":
         lora_name += ".safetensors"
 
     lora_name = lora_name.replace("\\", os.path.sep).replace("/", os.path.sep)
@@ -84,43 +84,6 @@ def format_lora_as_string(lora_name, strength_model, strength_clip, compact_form
             return f"<lora:{lora_name}:{strength_model}:{strength_clip}>"
     else:
         return f"<lora:{lora_name}:{strength_model}:{strength_clip}>"
-
-LIST_OF_LORA_DIRS = None
-def solve_lora_name(lora_name:str):
-    # logger.info(f"Solve lora name [{lora_name}]")
-
-    lora_path = ""
-    try:
-        lora_path = folder_paths.get_full_path_or_raise("loras", lora_name)
-        # logger.info(f"- found [{lora_name}] => {lora_path}")
-        return (lora_name, lora_path)
-    except Exception as e:
-        logger.info(f"- {e}")
-
-    # generate the list of candidate dirs, if needed
-    global LIST_OF_LORA_DIRS
-    if LIST_OF_LORA_DIRS is None:
-        logger.info("RETRIEVE LIST OF LORA DIRS")
-        LIST_OF_LORA_DIRS = []
-        for lora_dir in folder_paths.folder_names_and_paths.get("loras", ([], []))[0]:
-            lora_dir_path = Path(lora_dir)
-            for subdir in lora_dir_path.rglob("*"):
-                if subdir.is_dir():
-                    LIST_OF_LORA_DIRS.append((lora_dir, subdir))
-
-    # try with file name only
-    lora_name_short = Path(lora_name).name
-    for (lora_dir, subdir) in LIST_OF_LORA_DIRS:
-        # logger.info(f"- try with dir:{subdir}")
-        lora_path = subdir / lora_name_short
-        if lora_path.exists():
-            lora_path = str(lora_path)
-            lora_name_updated = lora_path[len(lora_dir)+1:]
-            logger.info(f"- found [{lora_name}] => [{lora_name_updated}] => {lora_path}")
-            return (lora_name_updated, lora_path)
-
-    # it could not find the model
-    return (lora_name, None)
 
 # ===== NODES ==============================================================================================================================
 
@@ -254,12 +217,14 @@ class ApplyLoraStack(io.ComfyNode):
                 logger.info(f"- SKIP [{lora_name}] - already applied")
                 continue
 
-            (lora_name, lora_path) = solve_lora_name(lora_name)
+            (lora_name, lora_path) = find_model_file("loras", lora_name)
             if lora_path is None:
                 # lora file not present, try to get it from cloud or raise an error
                 if (CLOUD_STORAGE_ID == "") or (DOWNLOAD_MISSING_LORAS == False):  
-                    # download from cloud is not required or not possible: just notify the error              
-                    logger.warning(f"- ERROR [{lora_name}] model file not found")
+                    # download from cloud is not required or not possible: just notify the error
+                    msg = f"[{lora_name}] model file not found"
+                    notify_user("warn", "ApplyLoraStack", msg)           
+                    logger.warning("- ERROR " + msg)
                     continue
                 else:
                     # try to download from cloud
@@ -277,7 +242,8 @@ class ApplyLoraStack(io.ComfyNode):
                         lora_path = str(save_path)
                     else:
                         # failure: stop
-                        logger.warning(f"- ERROR {dl_message}")
+                        notify_user("warn", "ApplyLoraStack", f"[{lora_name}] model file not found and unable to download from cloud")
+                        logger.warning(f"- ERROR [{lora_name}] {dl_message}")
                         continue
 
             try:

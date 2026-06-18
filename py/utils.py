@@ -140,3 +140,46 @@ def extract_image_size(image_size):
         return (512, 512)
     else:
         return (int(match[1]), int(match[2]))
+
+# ===== RETRIVE ACTUAL POSITION OF A MODEL =================================================================================================
+
+LIST_OF_MODEL_DIRS = {}
+def find_model_file(model_type:str, model_name:str):
+    # logger.info(f"Solve lora name [{model_name}]")
+
+    model_name = clean_path(model_name)
+
+    # first try : look for the model in the exact position specified by caller
+    model_path = ""
+    try:
+        model_path = folder_paths.get_full_path_or_raise(model_type, model_name)
+        # logger.info(f"- found [{model_name}] => {model_path}")
+        return (model_name, model_path)
+    except Exception as e:
+        logger.info(f"- {e}")
+
+    # generate the list of candidate dirs, if needed
+    # this is a list of all dirs defined in ComfyUI including all subdirs
+    global LIST_OF_MODEL_DIRS
+    if not model_type in LIST_OF_MODEL_DIRS:
+        logger.info(f"* Retrieve list of {model_type} dirs defined in ComfyUI")
+        list_of_dirs_for_model_type = []
+        for model_dir in folder_paths.folder_names_and_paths.get(model_type, ([], []))[0]:
+            for subdir in Path(model_dir).rglob("*"):
+                if subdir.is_dir():
+                    list_of_dirs_for_model_type.append((model_dir, subdir))
+        LIST_OF_MODEL_DIRS[model_type] = list_of_dirs_for_model_type
+
+    # check if a file with the required name exists in one of the model dirs
+    model_name_short = Path(model_name).name
+    for (model_dir, subdir) in LIST_OF_MODEL_DIRS[model_type]:
+        # logger.info(f"- try with dir:{subdir}")
+        model_path = subdir / model_name_short
+        if model_path.exists():
+            model_path = str(model_path)
+            model_name_found = model_path[len(model_dir)+1:]
+            logger.info(f"- found [{model_name}] => [{model_name_found}] => {model_path}")
+            return (model_name_found, model_path)
+
+    # it could not find the model
+    return (model_name, None)
