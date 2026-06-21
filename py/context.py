@@ -54,7 +54,7 @@ class PipeBase(io.ComfyNode):
             node_id=node_id,
             display_name=display_name,
             description=description,
-            category=f"{ADDON_CATEGORY}/context",
+            category=f"{ADDON_CATEGORY}/deprecated/context",
             inputs=inputs,
             outputs=outputs,
         )
@@ -278,7 +278,7 @@ class GenerationDataSet(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}GenerationDataSet",
-            display_name=f"{ADDON_PREFIX} GenerationDataSet",
+            display_name=f"{ADDON_PREFIX} GenerationData Set",
             description="Set data for image generation",
             category=f"{ADDON_CATEGORY}/context",
             inputs=[
@@ -326,7 +326,7 @@ class GenerationDataGet(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}GenerationDataGet",
-            display_name=f"{ADDON_PREFIX} GenerationDataGet",
+            display_name=f"{ADDON_PREFIX} GenerationData Get",
             description="Get data for image generation",
             category=f"{ADDON_CATEGORY}/context",
             inputs=[
@@ -365,7 +365,7 @@ class GenerationDataMaxSize(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}GenerationDataMaxSize",
-            display_name=f"{ADDON_PREFIX} GenerationDataMaxSize",
+            display_name=f"{ADDON_PREFIX} GenerationData MaxSize",
             description="Get max image size in the set of image generation data",
             category=f"{ADDON_CATEGORY}/context",
             inputs=[

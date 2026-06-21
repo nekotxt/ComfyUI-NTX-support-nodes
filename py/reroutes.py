@@ -18,7 +18,7 @@ class RerouteBase(io.ComfyNode):
     def define_schema(cls):
         node_id = f"{ADDON_PREFIX}{cls.__name__ if cls.NODE_NAME == "" else cls.NODE_NAME}"
 
-        display_name = f"{ADDON_PREFIX} {cls.__name__ if cls.NODE_NAME == "" else cls.NODE_NAME}"
+        display_name = f"{ADDON_PREFIX} {cls.__name__.replace('Reroute', 'Reroute ') if cls.NODE_NAME == "" else cls.NODE_NAME}"
 
         description = f"{ADDON_PREFIX} Reroute node for {cls.DATA_NAME} data type"
 

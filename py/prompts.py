@@ -197,7 +197,7 @@ class LoadPrompt(io.ComfyNode):
 # ===== SAVING PROMPTS =====================================================================================================================
 
 def prompt_target_paths(category, name):
-    """Build the (txt_path, png_path) a prompt with the given category/name would be
+    """Build the (txt_path, img_path) a prompt with the given category/name would be
     saved to, e.g. category="scenes/fantasy", name="lake" -> scenes/fantasy/lake.{txt,png}.
     Returns None when the name is empty or the target would fall outside PROMPTS_DIR."""
     name = (name or "").strip().strip("/")
@@ -209,11 +209,11 @@ def prompt_target_paths(category, name):
         base.resolve().relative_to(PROMPTS_DIR.resolve())
     except ValueError:
         return None
-    return (base.with_name(base.name + ".txt"), base.with_name(base.name + ".png"))
+    return (base.with_name(base.name + ".txt"), base.with_name(base.name + ".jpg"))
 
 
 def save_tensor_as_png(image, path):
-    """Save a ComfyUI IMAGE tensor ([B,H,W,C] or [H,W,C], float 0..1) as a PNG (first frame)."""
+    """Save a ComfyUI IMAGE tensor ([B,H,W,C] or [H,W,C], float 0..1) as a IMAGE (first frame)."""
     img = image[0] if image.ndim == 4 else image
     arr = (img.clamp(0.0, 1.0).cpu().numpy() * 255.0).round().astype(np.uint8)
     Image.fromarray(arr).save(path)
@@ -226,7 +226,7 @@ def save_prompt_files(category, name, prompt, image=None, overwrite=False):
     paths = prompt_target_paths(category, name)
     if paths is None:
         return (False, "invalid category/name")
-    txt_path, png_path = paths
+    txt_path, img_path = paths
 
     if txt_path.exists() and not overwrite:
         return (False, "exists")
@@ -235,7 +235,7 @@ def save_prompt_files(category, name, prompt, image=None, overwrite=False):
         txt_path.parent.mkdir(parents=True, exist_ok=True)
         txt_path.write_text(prompt or "", encoding="utf-8")
         if image is not None:
-            save_tensor_as_png(image, png_path)
+            save_tensor_as_png(image, img_path)
     except Exception as e:
         return (False, f"could not save : {e}")
 

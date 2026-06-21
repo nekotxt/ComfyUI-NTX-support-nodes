@@ -81,40 +81,6 @@ def parse_list_text(text) -> List[ModelData]:
     lines = text.splitlines()
     return parse_list(lines)
 
-    # blocks = []
-    # file_subpath = file_hash = None
-    # urls = []
-    # line_in_block = 0
-
-    # with open(path, "r", encoding="utf-8") as f:
-    #     for raw in f:
-    #         line = raw.rstrip("\r\n").strip()
-
-    #         if line.startswith("#"):
-    #             continue
-
-    #         if line == "":
-    #             if file_subpath:
-    #                 blocks.append(ModelData(subpath=file_subpath, file_hash=file_hash, urls=urls))
-    #             file_subpath = file_hash = None
-    #             urls = []
-    #             line_in_block = 0
-    #             continue
-
-    #         if line_in_block == 0:
-    #             file_subpath = line
-    #         elif line.startswith("hash:"):
-    #             file_hash = line[5:]
-    #         else:
-    #             urls.append(line)
-    #         line_in_block += 1
-
-    # if file_subpath:
-    #     blocks.append(ModelData(subpath=file_subpath, file_hash=file_hash, urls=urls))
-
-    # return blocks
-
-
 def parse_list(lines) -> List[ModelData]:
     """Extracts the model data
     Each model is provided with:
@@ -144,8 +110,10 @@ def parse_list(lines) -> List[ModelData]:
 
         if line_in_block == 0:
             file_subpath = line
-        elif line.startswith("hash:"):
+        elif line.lower().startswith("hash:"):
             file_hash = line[5:]
+        elif line.lower().startswith("sha256:"):
+            file_hash = line[7:]
         else:
             urls.append(line)
         line_in_block += 1

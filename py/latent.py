@@ -51,7 +51,7 @@ class CreateImageLatent(io.ComfyNode):
             description="""Build the latents from the specified image size. If an image is provided, its size will be used.
                     To customize the list of image sizes, create a file /input/ntx_data/image_sizes.txt
                     and write the sizes, one for each row, int the form WIDTHxHEIGHT""",
-            category=f"{ADDON_CATEGORY}/utils",
+            category=f"{ADDON_CATEGORY}/deprecated/utils",
             inputs=[
                 io.Combo.Input("image_size", options=["custom"] + load_list_image_sizes(), default="custom"),
                 io.Int.Input("width", default=0, min=0, max=4096, step=1),
@@ -96,7 +96,7 @@ class CreateImageLatent(io.ComfyNode):
                 opt_image = comfy.utils.common_upscale(opt_image.movedim(-1, 1), final_width, final_height, "lanczos", "disabled").movedim(1, -1)
                 width = opt_image.shape[2]
                 height = opt_image.shape[1]
-            else:
+            else: #"use image size"
                 width = opt_image.shape[2]
                 height = opt_image.shape[1]
 

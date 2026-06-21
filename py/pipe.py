@@ -42,7 +42,7 @@ class DictSetMulti(io.ComfyNode):
             node_id=node_id,
             display_name=display_name,
             description="Dictionary set",
-            category=f"{ADDON_CATEGORY}/pipe",
+            category=f"{ADDON_CATEGORY}/deprecated/pipe",
             inputs=inputs,
             outputs=[
                 DICT_TYPE.Output("pipe"),
@@ -107,7 +107,7 @@ class DictSet(io.ComfyNode):
             node_id=node_id,
             display_name=display_name,
             description="Dictionary set",
-            category=f"{ADDON_CATEGORY}/pipe",
+            category=f"{ADDON_CATEGORY}/deprecated/pipe",
             inputs=[
                 io.String.Input("key", default=""),
 
@@ -153,7 +153,7 @@ class DictGet(io.ComfyNode):
             node_id=node_id,
             display_name=display_name,
             description="Dictionary get",
-            category=f"{ADDON_CATEGORY}/pipe",
+            category=f"{ADDON_CATEGORY}/deprecated/pipe",
             inputs=[
                 DICT_TYPE.Input("pipe"),
                 io.String.Input("key", default=""),

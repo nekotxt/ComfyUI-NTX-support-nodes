@@ -1,6 +1,7 @@
 from comfy_api.latest import ComfyExtension, io
 
 import comfy.samplers
+import comfy.utils
 import folder_paths
 
 import os
@@ -126,6 +127,8 @@ def load_list_samplers():
 def load_list_schedulers():
     return comfy.samplers.KSampler.SCHEDULERS
 
+# ===== UTILITY FUNCTIONS FOR IMAGES ======================================================================================================
+
 image_sizes_file = SETTINGS_DIR / "image_sizes.txt"
 if image_sizes_file.is_file():
     IMAGE_SIZES = image_sizes_file.read_text(encoding="utf-8").splitlines()
@@ -141,12 +144,33 @@ def extract_image_size(image_size):
     else:
         return (int(match[1]), int(match[2]))
 
+def image_crop(image, width:int, height:int, rescaler:str="lanczos", crop_position:str="center"):
+    final_image = comfy.utils.common_upscale(image.movedim(-1, 1), width, height, rescaler, crop_position).movedim(1, -1)
+    return final_image
+
+def image_rescale_keeping_aspect_ratio(image, width:int, height:int, rescaler:str="lanczos"):
+    image_w = image.shape[2]
+    image_h = image.shape[1]
+
+    ratio_w = width / image_w
+    ratio_h = height / image_h
+    if ratio_w < ratio_h:
+        final_width = width
+        final_height = round(image_h * ratio_w)
+    else:
+        final_width = round(image_w * ratio_h)
+        final_height = height
+
+    final_image = comfy.utils.common_upscale(image.movedim(-1, 1), final_width, final_height, rescaler, "disabled").movedim(1, -1)
+    #width = image.shape[2]
+    #height = image.shape[1]
+
+    return final_image
+
 # ===== RETRIVE ACTUAL POSITION OF A MODEL =================================================================================================
 
 LIST_OF_MODEL_DIRS = {}
-def find_model_file(model_type:str, model_name:str):
-    # logger.info(f"Solve lora name [{model_name}]")
-
+def find_model_file(model_type:str, model_name:str, look_in_all_dirs:bool=True):
     model_name = clean_path(model_name)
 
     # first try : look for the model in the exact position specified by caller
@@ -158,28 +182,31 @@ def find_model_file(model_type:str, model_name:str):
     except Exception as e:
         logger.info(f"- {e}")
 
-    # generate the list of candidate dirs, if needed
-    # this is a list of all dirs defined in ComfyUI including all subdirs
-    global LIST_OF_MODEL_DIRS
-    if not model_type in LIST_OF_MODEL_DIRS:
-        logger.info(f"* Retrieve list of {model_type} dirs defined in ComfyUI")
-        list_of_dirs_for_model_type = []
-        for model_dir in folder_paths.folder_names_and_paths.get(model_type, ([], []))[0]:
-            for subdir in Path(model_dir).rglob("*"):
-                if subdir.is_dir():
-                    list_of_dirs_for_model_type.append((model_dir, subdir))
-        LIST_OF_MODEL_DIRS[model_type] = list_of_dirs_for_model_type
+    # if specified by caller, try to find the file name in all configured dirs
+    if look_in_all_dirs:
 
-    # check if a file with the required name exists in one of the model dirs
-    model_name_short = Path(model_name).name
-    for (model_dir, subdir) in LIST_OF_MODEL_DIRS[model_type]:
-        # logger.info(f"- try with dir:{subdir}")
-        model_path = subdir / model_name_short
-        if model_path.exists():
-            model_path = str(model_path)
-            model_name_found = model_path[len(model_dir)+1:]
-            logger.info(f"- found [{model_name}] => [{model_name_found}] => {model_path}")
-            return (model_name_found, model_path)
+        # generate the list of candidate dirs, if needed
+        # this is a list of all dirs defined in ComfyUI including all subdirs
+        global LIST_OF_MODEL_DIRS
+        if not model_type in LIST_OF_MODEL_DIRS:
+            logger.info(f"* Retrieve list of {model_type} dirs defined in ComfyUI")
+            list_of_dirs_for_model_type = []
+            for model_dir in folder_paths.folder_names_and_paths.get(model_type, ([], []))[0]:
+                for subdir in Path(model_dir).rglob("*"):
+                    if subdir.is_dir():
+                        list_of_dirs_for_model_type.append((model_dir, subdir))
+            LIST_OF_MODEL_DIRS[model_type] = list_of_dirs_for_model_type
+
+        # check if a file with the required name exists in one of the model dirs
+        model_name_short = Path(model_name).name
+        for (model_dir, subdir) in LIST_OF_MODEL_DIRS[model_type]:
+            # logger.info(f"- try with dir:{subdir}")
+            model_path = subdir / model_name_short
+            if model_path.exists():
+                model_path = str(model_path)
+                model_name_found = model_path[len(model_dir)+1:]
+                logger.info(f"- found [{model_name}] => [{model_name_found}] => {model_path}")
+                return (model_name_found, model_path)
 
     # it could not find the model
     return (model_name, None)

@@ -15,7 +15,8 @@ from torchvision.transforms import InterpolationMode
 from typing_extensions import override
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY
-from .logging import logger #log_info, log_node_name
+from .logging import logger
+from .utils import  load_list_image_sizes, extract_image_size, image_crop, image_rescale_keeping_aspect_ratio
 
 # ===== Custom types ===========================================================================================================================
 
@@ -75,7 +76,7 @@ class SaveMultipleImages(io.ComfyNode):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}SaveMultipleImages",
             display_name=f"{ADDON_PREFIX} Save Multiple Images",
-            category=f"{ADDON_CATEGORY}/utils",
+            category=f"{ADDON_CATEGORY}/images",
             is_output_node=True,
             inputs=[
                 io.Image.Input("images"),
@@ -175,9 +176,51 @@ class SaveMultipleImages(io.ComfyNode):
 
         return io.NodeOutput(pillow_to_tensor(img_grid), list_saved_images)
 
+class ImageSize(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}ImageSize",
+            display_name=f"{ADDON_PREFIX} Image Size",
+            description="Pick image size from presets",
+            category=f"{ADDON_CATEGORY}/images",
+            inputs=[
+                io.Combo.Input("image_size", options=["custom"] + load_list_image_sizes(), default="custom"),
+                io.Int.Input("width", default=0, min=0, max=4096, step=1),
+                io.Int.Input("height", default=0, min=0, max=4096, step=1),
+                io.Image.Input("opt_image", optional=True),
+                io.Combo.Input("opt_image_size", options=["use image size", "crop to input size", "resize and use new size"], optional=True),
+            ],
+            outputs=[
+                io.Int.Output("width"),
+                io.Int.Output("height"),
+                io.Image.Output("opt_image"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, image_size, width, height, opt_image=None, opt_image_size=None):
+
+        if image_size != "custom": # decode standard image size if any
+            width, height = extract_image_size(image_size)
+
+        if opt_image is not None:
+            if opt_image_size == "crop to input size":
+                opt_image = image_crop(opt_image, width, height)
+            elif opt_image_size == "resize and use new size":
+                opt_image = image_rescale_keeping_aspect_ratio(opt_image, width, height)
+                width = opt_image.shape[2]
+                height = opt_image.shape[1]
+            else: # "use image size"
+                width = opt_image.shape[2]
+                height = opt_image.shape[1]
+
+        return io.NodeOutput(width, height, opt_image)
+
 # ===== INITIALIZATION =====================================================================================================================
 
 def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         SaveMultipleImages,
+        ImageSize,
     ]

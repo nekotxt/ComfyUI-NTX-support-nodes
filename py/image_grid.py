@@ -39,7 +39,7 @@ class ImageGridNode(io.ComfyNode):
             description="Compose a variable number of images into a single uniform grid, "
                         "split over a given number of columns, with a configurable margin "
                         "and background color filling the gaps and padding.",
-            category=f"{ADDON_CATEGORY}/image",
+            category=f"{ADDON_CATEGORY}/images",
             inputs=[
                 io.Autogrow.Input(
                     "images",

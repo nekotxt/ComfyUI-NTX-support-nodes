@@ -131,7 +131,7 @@ class DownloadModelsList(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}DownloadModelsList",
-            display_name=f"{ADDON_PREFIX} DownloadModelsList",
+            display_name=f"{ADDON_PREFIX} Download Models List",
             description="",
             category=f"{ADDON_CATEGORY}/utils",
             is_output_node=True,
@@ -164,7 +164,7 @@ class IsNull(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id=f"{ADDON_PREFIX}IsNull",
-            display_name=f"{ADDON_PREFIX} IsNull",
+            display_name=f"{ADDON_PREFIX} Is Null",
             category=f"{ADDON_CATEGORY}/utils",
             inputs=[
                 io.AnyType.Input("value", optional=True),
@@ -183,7 +183,7 @@ class CheckNotNull(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id=f"{ADDON_PREFIX}CheckNotNull",
-            display_name=f"{ADDON_PREFIX} CheckNotNull",
+            display_name=f"{ADDON_PREFIX} Check Not Null",
             category=f"{ADDON_CATEGORY}/utils",
             inputs=[
                 io.AnyType.Input("value"),
