@@ -958,6 +958,80 @@ function splitCustomPipe(node) {
     graph.setDirtyCanvas(true, true);
 }
 
+// ── Merge custom pipes ────────────────────────────────────────────────────────
+// Merges target (right-click node) back into its upstream source PipeCustom:
+//   • source gets target's output list (its own custom outputs are replaced)
+//   • all outgoing links of target (pipe + custom) are moved to source
+//   • target is deleted
+
+function mergeCustomPipes(node) {
+    const graph = node.graph;
+    if (!graph) return;
+
+    const target = node;
+
+    function warn(message) {
+        const toast = app.extensionManager?.toast;
+        if (toast?.add) {
+            toast.add({ severity: "warn", summary: target.title || NODE_ID, detail: message, life: 6000 });
+        } else {
+            alert(message);
+        }
+    }
+
+    // target's pipe input (slot 0) must be connected from another PipeCustom node
+    const pipeInLink = target.inputs?.[0]?.link != null ? graph.links[target.inputs[0].link] : null;
+    const source = pipeInLink ? graph.getNodeById(pipeInLink.origin_id) : null;
+    if (!source || source.comfyClass !== NODE_ID) {
+        warn("Select a node connected to another pipe node");
+        return;
+    }
+
+    // target must have no non-pipe inputs connected
+    if ((target.inputs ?? []).some((slot, i) => i > 0 && slot.link != null)) {
+        warn("Disconnect inputs from target (except pipe) before proceeding");
+        return;
+    }
+
+    // source must have no non-pipe outputs connected
+    if ((source.outputs ?? []).some((slot, i) => i > 0 && (slot.links?.length ?? 0) > 0)) {
+        warn("Disconnect outputs from source (except pipe) before proceeding");
+        return;
+    }
+
+    const targetWidget = getPipeWidget(target);
+    const sourceWidget = getPipeWidget(source);
+    if (!targetWidget?.__isPipeUI || !sourceWidget?.__isPipeUI) return;
+
+    // Snapshot all outgoing link destinations from target's output slots.
+    // Indexed by slot index: [0] = pipe output, [1+] = custom outputs.
+    const targetOutDests = (target.outputs ?? []).map(slot => {
+        if (!slot?.links?.length) return [];
+        return slot.links.map(linkId => {
+            const link = graph.links[linkId];
+            return link ? { targetId: link.target_id, targetSlot: link.target_slot } : null;
+        }).filter(Boolean);
+    });
+
+    // Replace source's custom outputs with target's and rebuild its slots
+    sourceWidget.setEntries("outputs", targetWidget.getData().outputs.map(e => ({ ...e })));
+    syncSlots(source, sourceWidget.getData());
+
+    // Move each link from target's output slot i to source's output slot i.
+    // Slot 0 is pipe for both; custom outputs follow at 1+.
+    for (let i = 0; i < targetOutDests.length; i++) {
+        for (const dest of targetOutDests[i]) {
+            const destNode = graph.getNodeById(dest.targetId);
+            if (destNode) source.connect(i, destNode, dest.targetSlot);
+        }
+    }
+
+    // Remove target (cleans up the source→target pipe link automatically)
+    graph.remove(target);
+
+    graph.setDirtyCanvas(true, true);
+}
+
 function installMenu(node) {
     if (node.__cppMenuInstalled) return;
     node.__cppMenuInstalled = true;
@@ -982,6 +1056,10 @@ function installMenu(node) {
         options.push({
             content: ADDON_PREFIX + " Split custom pipe",
             callback: () => { splitCustomPipe(this); },
+        });
+        options.push({
+            content: ADDON_PREFIX + " Merge custom pipes",
+            callback: () => { mergeCustomPipes(this); },
         });
         return r;
     };
