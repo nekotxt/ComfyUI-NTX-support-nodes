@@ -881,6 +881,83 @@ function rebuildPipeUI(node, force = false) {
     }
 }
 
+// ── Split custom pipe ─────────────────────────────────────────────────────────
+// Creates a new PipeCustom node (target) that:
+//   • receives the pipe output of the original
+//   • exposes the same custom outputs as the original
+//   • takes over all outgoing links that were on those outputs
+// The original is then left with only its pipe output (custom outputs removed).
+
+function splitCustomPipe(node) {
+    const graph = node.graph;
+    if (!graph) return;
+
+    const widget = getPipeWidget(node);
+    if (!widget?.__isPipeUI) return;
+
+    const data = widget.getData();
+
+    // Snapshot link destinations BEFORE any rewiring — connecting target→dest
+    // will auto-disconnect those links from origin (one source per input).
+
+    // pipe output (slot 0) destinations — to be moved to target's pipe output
+    const pipeSlot = node.outputs[0];
+    const pipeDests = (pipeSlot?.links ?? []).map(linkId => {
+        const link = graph.links[linkId];
+        return link ? { targetId: link.target_id, targetSlot: link.target_slot } : null;
+    }).filter(Boolean);
+
+    // custom output destinations
+    const origCustomSlots = customOutputIndices(node);
+    const linkDests = origCustomSlots.map(slotIdx => {
+        const slot = node.outputs[slotIdx];
+        if (!slot?.links?.length) return [];
+        return slot.links.map(linkId => {
+            const link = graph.links[linkId];
+            return link ? { targetId: link.target_id, targetSlot: link.target_slot } : null;
+        }).filter(Boolean);
+    });
+
+    // Create and position the target node
+    const targetNode = LiteGraph.createNode(NODE_ID);
+    if (!targetNode) return;
+    targetNode.pos = [node.pos[0] + node.size[0] + 60, node.pos[1]];
+    graph.add(targetNode);
+
+    // Give the target the same custom outputs as the original; no custom inputs
+    const targetWidget = getPipeWidget(targetNode);
+    if (targetWidget?.__isPipeUI) {
+        targetWidget.setEntries("outputs", data.outputs.map(e => ({ ...e })));
+        targetWidget.setEntries("inputs", []);
+        syncSlots(targetNode, targetWidget.getData());
+    }
+
+    // original pipe output (slot 0) → target pipe input (slot 0)
+    node.connect(0, targetNode, 0);
+
+    // Move the original pipe output's downstream links to target's pipe output
+    for (const dest of pipeDests) {
+        const destNode = graph.getNodeById(dest.targetId);
+        if (destNode) targetNode.connect(0, destNode, dest.targetSlot);
+    }
+
+    // Move each link that was on an original custom output to the matching
+    // target custom output. Target custom outputs start at slot 1 (pipe is 0).
+    for (let ci = 0; ci < linkDests.length; ci++) {
+        const targetSlotIdx = ci + 1;
+        for (const dest of linkDests[ci]) {
+            const destNode = graph.getNodeById(dest.targetId);
+            if (destNode) targetNode.connect(targetSlotIdx, destNode, dest.targetSlot);
+        }
+    }
+
+    // Strip all custom outputs from the original; keep only the pipe output
+    widget.setEntries("outputs", []);
+    syncSlots(node, widget.getData());
+
+    graph.setDirtyCanvas(true, true);
+}
+
 function installMenu(node) {
     if (node.__cppMenuInstalled) return;
     node.__cppMenuInstalled = true;
@@ -901,6 +978,10 @@ function installMenu(node) {
                 const w = getPipeWidget(this);
                 if (w?.__isPipeUI) openEditDialog(this, w, "outputs");
             },
+        });
+        options.push({
+            content: ADDON_PREFIX + " Split custom pipe",
+            callback: () => { splitCustomPipe(this); },
         });
         return r;
     };
