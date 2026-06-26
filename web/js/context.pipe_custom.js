@@ -897,6 +897,32 @@ function splitCustomPipe(node) {
 
     const data = widget.getData();
 
+    // BFS from node's outputs to collect all pre-existing downstream nodes.
+    // Done before creating targetNode so the new node is never included.
+    const downstreamNodes = [];
+    {
+        const visited = new Set();
+        const queue = downstreamNodes;
+        for (const slot of node.outputs ?? []) {
+            for (const linkId of slot.links ?? []) {
+                const link = graph.links[linkId];
+                if (!link) continue;
+                const n = graph.getNodeById(link.target_id);
+                if (n && !visited.has(n.id)) { visited.add(n.id); queue.push(n); }
+            }
+        }
+        for (let i = 0; i < queue.length; i++) {
+            for (const slot of queue[i].outputs ?? []) {
+                for (const linkId of slot.links ?? []) {
+                    const link = graph.links[linkId];
+                    if (!link) continue;
+                    const n = graph.getNodeById(link.target_id);
+                    if (n && !visited.has(n.id)) { visited.add(n.id); queue.push(n); }
+                }
+            }
+        }
+    }
+
     // Snapshot link destinations BEFORE any rewiring — connecting target→dest
     // will auto-disconnect those links from origin (one source per input).
 
@@ -923,6 +949,10 @@ function splitCustomPipe(node) {
     if (!targetNode) return;
     targetNode.pos = [node.pos[0] + node.size[0] + 60, node.pos[1]];
     graph.add(targetNode);
+
+    // Displacement: how far the target node is from the original
+    const dx = targetNode.pos[0] - node.pos[0];
+    const dy = targetNode.pos[1] - node.pos[1];
 
     // Give the target the same custom outputs as the original; no custom inputs
     const targetWidget = getPipeWidget(targetNode);
@@ -954,6 +984,24 @@ function splitCustomPipe(node) {
     // Strip all custom outputs from the original; keep only the pipe output
     widget.setEntries("outputs", []);
     syncSlots(node, widget.getData());
+
+    // Collect groups that contain at least one downstream node, checked at their
+    // original positions before any nodes are moved.
+    const downstreamIds = new Set(downstreamNodes.map(n => n.id));
+    const groupsToMove = (graph._groups ?? []).filter(group =>
+        downstreamNodes.some(n =>
+            n.pos[0] >= group.pos[0] && n.pos[0] <= group.pos[0] + group.size[0] &&
+            n.pos[1] >= group.pos[1] && n.pos[1] <= group.pos[1] + group.size[1]));
+
+    // Shift downstream nodes and their groups by the original→target displacement
+    for (const n of downstreamNodes) {
+        n.pos[0] += dx;
+        n.pos[1] += dy;
+    }
+    for (const group of groupsToMove) {
+        group.pos[0] += dx;
+        group.pos[1] += dy;
+    }
 
     graph.setDirtyCanvas(true, true);
 }
