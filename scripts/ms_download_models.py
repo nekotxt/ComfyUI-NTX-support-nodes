@@ -1,4 +1,6 @@
 # TITLE : download models specified in download dir, or from list
+# VER 1.0
+
 import hashlib
 import json
 import logging
@@ -122,85 +124,46 @@ def parse_list(lines) -> List[ModelData]:
         blocks.append(ModelData(subpath=file_subpath, file_hash=file_hash, urls=urls))
 
     return blocks
+   
+def load_modeldata_from_ntxdata_file(path: Path) -> ModelData:
+    """
+    Load model metadata from .ntxdata file
+    
+    Args:
+        path: Path to .ntxdata file
+        
+    Returns:
+        Dictionary containing model metadata
+    """
 
+    from ntxdata_file import NtxDataFile
 
-class NtxdataFileReader:
-    """Handles loading and parsing model metadata files (extension .ntxdata)"""
-    
-    YAML_START_TAG = "CONFIG-DATA::"
-    
-    def __init__(self):
-        self.yaml = YAML(typ='safe', pure=True)
-        self.yaml.width = 500
-        self.yaml.indent(mapping=2, sequence=4, offset=2)
-        self.yaml.default_flow_style = False
-    
-    def _split_content(self, content: str) -> Tuple[str, str]:
-        """Split content into initial text (before YAML_START_TAG) and YAML parts (after YAML_START_TAG)"""
-        idx = content.find(self.YAML_START_TAG)
-        
-        if idx == -1:
-            return content, ""
-        
-        text_part = content[:idx]
-        yaml_part = content[idx + len(self.YAML_START_TAG):].lstrip("\r\n").replace("\t", "    ")
-        
-        return text_part, yaml_part
-    
-    def _parse_yaml(self, yaml_content: str, path: Path) -> Optional[dict]:
-        """Parse YAML content with error handling"""
-        if not yaml_content.strip():
-            return None
-        
-        try:
-            return self.yaml.load(yaml_content)
-        except Exception as e:
-            logger.error(f"Failed to parse YAML in {path}: {e}")
-            raise
-    
-    def load_ntxdata_file(self, path: Path) -> ModelData:
-        """
-        Load model metadata from .ntxdata file
-        
-        Args:
-            path: Path to .ntxdata file
-            
-        Returns:
-            Dictionary containing model metadata
-        """
-        txt_content = path.read_text(encoding="utf-8")
-        text_part, yaml_part = self._split_content(txt_content)
-        
-        data = self._parse_yaml(yaml_part, path)
-        
-        # Ensure we have a dictionary
-        if data is None:
-            data = {}
-        
-        # all data before the YAML_START_TAG is considered to be comments
-        data["notes"] = text_part
-        
-        # extract the importand data
+    datafile = NtxDataFile()
+    datafile.load(path=path)
+    data = datafile.data
 
-        file_subpath = (data.get("model_type", "") + "/" + data.get("id", "")).replace("\\", "/")
-        
-        file_hash = data.get("hash", {}).get("sha256", None)
+    # extract the importand data
 
-        urls = []
-        # - top-level URL has highest priority
-        if "url" in data:
-            url = data.get("url", "").strip()
+    file_subpath = (data.get("model_type", "") + "/" + data.get("id", "")).replace("\\", "/")
+    
+    file_hash = data.get("hash", {}).get("sha256", None)
+
+    urls = []
+    # - top-level URL has highest priority
+    if "url" in data:
+        url = data.get("url", "").strip()
+        if url:
+            urls.append(url)        
+    # - check download section
+    if "download" in data:
+        downloads = data.get("download", [])
+        for download_data in downloads:
+            url = download_data.get("url", "").strip()
             if url:
-                urls.append(url)        
-        # - check download section
-        if "download" in data:
-            downloads = data.get("download", [])
-            for download_data in downloads:
-                url = download_data.get("url", "").strip()
-                if url:
-                    urls.append(url)
+                urls.append(url)
 
-        return ModelData(subpath=file_subpath, file_hash=file_hash, urls=urls, ntxdata_path=path)
+    return ModelData(subpath=file_subpath, file_hash=file_hash, urls=urls, ntxdata_path=path)
+
 
 def select_from_ntxdata_catalogue(catalogue_path: Path) -> List[ModelData]:
 
@@ -823,8 +786,7 @@ def main_loop(models_dir:str, lists_dir:str, ntxdata_dir:str, catalogue_path:str
             sys.exit(0)
 
         elif choices == "D":
-            ndr = NtxdataFileReader()
-            models_list = [ndr.load_ntxdata_file(f) for f in ntxdata_dir.rglob("*.ntxdata", case_sensitive=False) if f.is_file]
+            models_list = [load_modeldata_from_ntxdata_file(f) for f in ntxdata_dir.rglob("*.ntxdata", case_sensitive=False) if f.is_file]
             overall_summary = process_list_of_models(models_list=models_list, models_dir=models_dir, tokens=tokens, cloud_storage_id=cloud_storage_id, max_workers=max_workers, simulation_only=simulation_only)
 
         elif choices == "C":

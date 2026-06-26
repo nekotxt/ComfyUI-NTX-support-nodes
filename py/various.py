@@ -9,7 +9,7 @@ from typing_extensions import override
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, SETTINGS_DIR, MODELS_DIR
 from .logging import logger
 from .utils import LORA_STACK_TYPE, notify_user
-from ..scripts.download_models import download_models_from_text_list
+from ..scripts.ms_download_models import download_models_from_text_list
 
 # ===== NODES ==============================================================================================================================
 
@@ -44,6 +44,37 @@ class SwitchAny(io.ComfyNode):
         if input4 is not None:
             return io.NodeOutput(input4)
         return io.NodeOutput(input5)
+
+class SelectAnyInput(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        autogrow_template = io.Autogrow.TemplatePrefix(
+            input=io.AnyType.Input("input"),  # template for each input
+            prefix="input",                  # prefix for generated input names
+            min=2,                           # minimum number of inputs shown
+            max=50,                          # maximum number of inputs allowed
+        )
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}SelectAnyInput",
+            display_name=f"{ADDON_PREFIX} Select Any",
+            description="Return the selected item",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.Autogrow.Input("inputs", template=autogrow_template),
+                io.Int.Input("select", default=1, min=1, max=4096, step=1),
+            ],
+            outputs=[io.AnyType.Output("output")],
+        )
+
+    @classmethod
+    def execute(cls, inputs: io.Autogrow.Type, select) -> io.NodeOutput:
+        # 'inputs' is a dict mapping input names to their values
+        inputs_list = list(inputs.values())
+        if select < 0:
+            select = 0
+        if select >= len(inputs_list):
+            select = len(inputs_list) - 1
+        return io.NodeOutput(inputs_list[select])
 
 class CollectModelNtxdata(io.ComfyNode):
     @classmethod
@@ -208,6 +239,7 @@ class CheckNotNull(io.ComfyNode):
 def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         SwitchAny,
+        SelectAnyInput,
         CollectModelNtxdata,
         #CLIPTextEncodeWithCutoff,
         DownloadModelsList,

@@ -151,7 +151,7 @@ class TestNode(io.ComfyNode):
     def execute(cls, lora_stack):
 
         from pathlib import Path
-        from ..scripts.download_models import get_model_file_path
+        from ..scripts.ms_download_models import get_model_file_path
         from ..config_variables import MODELS_DIR
 
         print(get_model_file_path(MODELS_DIR, "loras/ILL/chars/BasdiaCnn.safetensors"))

@@ -1,4 +1,4 @@
-from comfy_api.latest import ComfyExtension, io
+from comfy_api.latest import ComfyExtension, io, ui
 
 import folder_paths
 
@@ -90,6 +90,7 @@ class SaveMultipleImages(io.ComfyNode):
                 io.AnyType.Input("model_name", optional=True),
                 io.AnyType.Input("sampler_name", optional=True),
                 io.AnyType.Input("scheduler", optional=True),
+                io.Boolean.Input("preview", default=True, label_on="yes", label_off="no", optional=True),
             ],
             outputs=[
                 io.Image.Output("grid"),
@@ -99,7 +100,7 @@ class SaveMultipleImages(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, images, date_in_name: bool, save_prefix: str, save_individual: bool, save_grid: bool, grid_gap: int, grid_color: str, save_workflow: bool, model_name=None, sampler_name=None, scheduler=None):
+    def execute(cls, images, date_in_name: bool, save_prefix: str, save_individual: bool, save_grid: bool, grid_gap: int, grid_color: str, save_workflow: bool, model_name=None, sampler_name=None, scheduler=None, preview: bool=True):
 
         logger.node_name("SaveMultipleImages")
 
@@ -174,7 +175,12 @@ class SaveMultipleImages(io.ComfyNode):
         for s in list_saved_images:
             logger.info(f"Saved file : {s}")
 
-        return io.NodeOutput(pillow_to_tensor(img_grid), list_saved_images)
+        output_image_grid = pillow_to_tensor(img_grid)
+
+        if preview:
+            return io.NodeOutput(output_image_grid, list_saved_images, ui=ui.PreviewImage(output_image_grid, cls=cls))
+        else:
+            return io.NodeOutput(output_image_grid, list_saved_images)
 
 class ImageSize(io.ComfyNode):
     @classmethod
