@@ -1003,6 +1003,38 @@ function mergeCustomPipes(node) {
     const sourceWidget = getPipeWidget(source);
     if (!targetWidget?.__isPipeUI || !sourceWidget?.__isPipeUI) return;
 
+    // Displacement that will be applied to downstream nodes: source pos − target pos
+    const dx = source.pos[0] - target.pos[0];
+    const dy = source.pos[1] - target.pos[1];
+
+    // BFS from target's outputs to collect all downstream nodes (target itself excluded)
+    function collectDownstream(startNode) {
+        const visited = new Set();
+        const queue = [];
+        for (const slot of startNode.outputs ?? []) {
+            for (const linkId of slot.links ?? []) {
+                const link = graph.links[linkId];
+                if (!link) continue;
+                const n = graph.getNodeById(link.target_id);
+                if (n && !visited.has(n.id)) { visited.add(n.id); queue.push(n); }
+            }
+        }
+        for (let i = 0; i < queue.length; i++) {
+            for (const slot of queue[i].outputs ?? []) {
+                for (const linkId of slot.links ?? []) {
+                    const link = graph.links[linkId];
+                    if (!link) continue;
+                    const n = graph.getNodeById(link.target_id);
+                    if (n && !visited.has(n.id)) { visited.add(n.id); queue.push(n); }
+                }
+            }
+        }
+        return queue;
+    }
+
+    const downstreamNodes = collectDownstream(target);
+    const downstreamIds = new Set(downstreamNodes.map(n => n.id));
+
     // Snapshot all outgoing link destinations from target's output slots.
     // Indexed by slot index: [0] = pipe output, [1+] = custom outputs.
     const targetOutDests = (target.outputs ?? []).map(slot => {
@@ -1028,6 +1060,25 @@ function mergeCustomPipes(node) {
 
     // Remove target (cleans up the source→target pipe link automatically)
     graph.remove(target);
+
+    // Collect groups that contain at least one downstream node, checked at their
+    // original positions before any nodes are moved.
+    const groupsToMove = (graph._groups ?? []).filter(group =>
+        downstreamNodes.some(n =>
+            n.pos[0] >= group.pos[0] && n.pos[0] <= group.pos[0] + group.size[0] &&
+            n.pos[1] >= group.pos[1] && n.pos[1] <= group.pos[1] + group.size[1]));
+
+    // Shift all downstream nodes by (dx, dy)
+    for (const n of downstreamNodes) {
+        n.pos[0] += dx;
+        n.pos[1] += dy;
+    }
+
+    // Shift the qualifying groups
+    for (const group of groupsToMove) {
+        group.pos[0] += dx;
+        group.pos[1] += dy;
+    }
 
     graph.setDirtyCanvas(true, true);
 }
