@@ -17,10 +17,6 @@ const PROMPT_NODE_IDS = new Set([NODE_ID, ADV_NODE_ID]);
 const SAVE_NODE_ID = ADDON_PREFIX + "SavePrompt";
 const CATEGORY_WIDGET = "category";
 
-// extra string widgets carried only by LoadPromptAdvanced; each one is filled
-// from the selected id's params (or cleared when that id does not define it).
-const PARAM_WIDGETS = ["param1", "param2", "param3"];
-
 // {id: prompt} map mirrored from the backend (py/prompts.py). Fetched once and
 // reused; used to fill the prompt textbox when the id combobox changes and to
 // build the hierarchical tree picker.
@@ -83,16 +79,18 @@ function applyPrompt(node, id) {
     node.setDirtyCanvas(true, true);
 }
 
-// fill param1/param2/param3 from the selected id, clearing any the id does not
-// define. A no-op on the basic LoadPrompt node, which has no param widgets.
+// fill the param widgets from the selected id, clearing any the id does not
+// define. Each param widget is matched by its *current* (user-facing) name, so
+// renaming e.g. "param3" to "save_name" makes it pick up the id's "save_name"
+// value instead. The param widgets are every widget other than id and prompt, so
+// this is a no-op on the basic LoadPrompt node, which has none.
 function applyParams(node, id) {
     if (promptsParams == null) return;
     const entry = promptsParams[id] || {};
     let changed = false;
-    for (const name of PARAM_WIDGETS) {
-        const widget = node.widgets?.find((w) => w.name === name);
-        if (!widget) continue;
-        widget.value = entry[name] ?? "";
+    for (const widget of node.widgets ?? []) {
+        if (widget.name === ID_WIDGET || widget.name === PROMPT_WIDGET) continue;
+        widget.value = entry[widget.label] ?? "";
         changed = true;
     }
     if (changed) node.setDirtyCanvas(true, true);
