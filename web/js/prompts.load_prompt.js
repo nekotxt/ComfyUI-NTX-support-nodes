@@ -17,11 +17,20 @@ const PROMPT_NODE_IDS = new Set([NODE_ID, ADV_NODE_ID]);
 const SAVE_NODE_ID = ADDON_PREFIX + "SavePrompt";
 const CATEGORY_WIDGET = "category";
 
+// extra string widgets carried only by LoadPromptAdvanced; each one is filled
+// from the selected id's params (or cleared when that id does not define it).
+const PARAM_WIDGETS = ["param1", "param2", "param3"];
+
 // {id: prompt} map mirrored from the backend (py/prompts.py). Fetched once and
 // reused; used to fill the prompt textbox when the id combobox changes and to
 // build the hierarchical tree picker.
 let promptsMap = null;
 let promptsMapPromise = null;
+
+// {id: {paramN: value}} map mirrored from the backend; only ids that define at
+// least one param appear. Used by LoadPromptAdvanced to fill its param widgets.
+let promptsParams = null;
+let promptsParamsPromise = null;
 
 async function getPromptsMap() {
     if (promptsMap) return promptsMap;
@@ -37,11 +46,28 @@ async function getPromptsMap() {
     return promptsMapPromise;
 }
 
-// ask the backend to re-read the prompt files from disk and refresh the cached map
+async function getPromptsParams() {
+    if (promptsParams) return promptsParams;
+    if (!promptsParamsPromise) {
+        promptsParamsPromise = api.fetchApi(`/${API_PREFIX}/load_prompt_params`)
+            .then((resp) => resp.json())
+            .then((data) => (promptsParams = data || {}))
+            .catch((err) => {
+                console.error("LoadPrompt : failed to load prompt params map", err);
+                return (promptsParams = {});
+            });
+    }
+    return promptsParamsPromise;
+}
+
+// ask the backend to re-read the prompt files from disk and refresh the cached maps
 async function reloadPromptsMap() {
     try {
         const resp = await api.fetchApi(`/${API_PREFIX}/reload_prompts`, { method: "POST" });
         promptsMap = (await resp.json()) || {};
+        // the reload rebuilt the params too; pull the fresh copy
+        const presp = await api.fetchApi(`/${API_PREFIX}/load_prompt_params`);
+        promptsParams = (await presp.json()) || {};
     } catch (err) {
         console.error("LoadPrompt : failed to reload prompts map", err);
     }
@@ -55,6 +81,21 @@ function applyPrompt(node, id) {
     if (!(id in promptsMap)) return;
     promptWidget.value = promptsMap[id];
     node.setDirtyCanvas(true, true);
+}
+
+// fill param1/param2/param3 from the selected id, clearing any the id does not
+// define. A no-op on the basic LoadPrompt node, which has no param widgets.
+function applyParams(node, id) {
+    if (promptsParams == null) return;
+    const entry = promptsParams[id] || {};
+    let changed = false;
+    for (const name of PARAM_WIDGETS) {
+        const widget = node.widgets?.find((w) => w.name === name);
+        if (!widget) continue;
+        widget.value = entry[name] ?? "";
+        changed = true;
+    }
+    if (changed) node.setDirtyCanvas(true, true);
 }
 
 // set the id combobox to a new value, going through its callback so the prompt
@@ -660,12 +701,15 @@ app.registerExtension({
         if (!idWidget) return;
 
         await getPromptsMap();
+        await getPromptsParams();
 
-        // sync the textbox whenever the id selection changes
+        // sync the textbox (and the advanced node's param widgets) whenever the
+        // id selection changes
         const originalCallback = idWidget.callback;
         idWidget.callback = function (value, ...args) {
             const ret = originalCallback?.apply(this, [value, ...args]);
             applyPrompt(node, value);
+            applyParams(node, value);
             return ret;
         };
     },

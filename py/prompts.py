@@ -26,25 +26,36 @@ IMAGE_EXTENSIONS = (".png", ".jpeg", ".jpg")
 # name separator to be used in leaf strings to identify a name
 NAME_SEPARATOR = "::"
 
-def _flatten_prompts(node, prefix, out):
+# optional extra string fields a dictionary entry may carry; each one that is
+# present is exposed to LoadPromptAdvanced and loaded into the matching widget.
+PARAM_KEYS = ("param1", "param2", "param3")
+
+def _flatten_prompts(node, prefix, out, params):
     """Recursively walk the parsed YAML, building an ordered {id: prompt} map.
     Dict keys extend the category path; only list items become leaves. A list item
     is either a plain string (used both as the combobox label and the prompt), or a
     dictionary with a "name" key (shown in the combobox) and a "positive" key (the
     prompt text). e.g. clothing: [T-shirt] -> {"clothing/T-shirt": "T-shirt"}.
-    Bare scalars (a key mapping to a single value) are ignored."""
+    Bare scalars (a key mapping to a single value) are ignored.
+
+    A dictionary entry may additionally carry any of param1/param2/param3; those
+    that are present are collected into `params` as {id: {paramN: value}} (only the
+    keys actually defined are stored) for LoadPromptAdvanced."""
     if isinstance(node, dict):
         for key, value in node.items():
             new_prefix = f"{prefix}/{key}" if prefix else str(key)
-            _flatten_prompts(value, new_prefix, out)
+            _flatten_prompts(value, new_prefix, out, params)
     elif isinstance(node, (list, tuple)):
         for item in node:
             if isinstance(item, dict) and "name" in item:
                 leaf = str(item["name"])
                 key = f"{prefix}/{leaf}" if prefix else leaf
                 out[key] = str(item.get("positive", leaf))
+                entry = {p: str(item[p]) for p in PARAM_KEYS if item.get(p) is not None}
+                if entry:
+                    params[key] = entry
             elif isinstance(item, (dict, list, tuple)):
-                _flatten_prompts(item, prefix, out)
+                _flatten_prompts(item, prefix, out, params)
             else:
                 leaf = str(item)
                 text = leaf
@@ -54,28 +65,37 @@ def _flatten_prompts(node, prefix, out):
                 out[key] = text
 
 
-# cached result of _build_prompts_map(); populated lazily on the first
+# cached results of _build_prompts_map(); populated lazily on the first
 # load_prompts_map() call. Call reload_prompts_map() to rebuild from disk.
+# _PROMPTS_CACHE is the {id: prompt} map; _PARAMS_CACHE is the parallel
+# {id: {paramN: value}} map (only ids that define at least one param appear).
 _PROMPTS_CACHE = None
+_PARAMS_CACHE = None
 
 def load_prompts_map():
     """Return the merged {id: prompt} map, building it from disk on first use and
     caching it afterwards. Use reload_prompts_map() to pick up file changes."""
-    global _PROMPTS_CACHE
+    global _PROMPTS_CACHE, _PARAMS_CACHE
     if _PROMPTS_CACHE is None:
-        _PROMPTS_CACHE = _build_prompts_map()
+        _PROMPTS_CACHE, _PARAMS_CACHE = _build_prompts_map()
     return _PROMPTS_CACHE
 
 
+def load_prompts_params():
+    """Return the {id: {paramN: value}} map, building the cache if needed."""
+    load_prompts_map()  # ensures both caches are populated together
+    return _PARAMS_CACHE
+
+
 def reload_prompts_map():
-    """Discard the cache and rebuild the map from disk on the next access."""
-    global _PROMPTS_CACHE
-    _PROMPTS_CACHE = _build_prompts_map()
+    """Discard the cache and rebuild the maps from disk on the next access."""
+    global _PROMPTS_CACHE, _PARAMS_CACHE
+    _PROMPTS_CACHE, _PARAMS_CACHE = _build_prompts_map()
     return _PROMPTS_CACHE
 
 
 def _build_prompts_map():
-    """Build a single merged, ordered {id: prompt} dict from PROMPTS_DIR.
+    """Build the merged, ordered ({id: prompt}, {id: {paramN: value}}) maps from PROMPTS_DIR.
 
     Two sources are combined:
     - every *.yaml / *.yml file in PROMPTS_DIR (top level), flattened into category
@@ -86,9 +106,10 @@ def _build_prompts_map():
       path without extension becomes the id and its text content the prompt, e.g.
       scenes/fantasy/castle.txt -> {"scenes/fantasy/castle": "<file content>"}."""
     out = {}
+    params = {}
     if not PROMPTS_DIR.is_dir():
         logger.warning(f"LoadPrompt : prompts directory not found : {PROMPTS_DIR}")
-        return out
+        return out, params
 
     # YAML files (top level only)
     yaml = YAML(typ="rt")
@@ -97,7 +118,7 @@ def _build_prompts_map():
             with open(path, "r", encoding="utf-8") as f:
                 data = yaml.load(f)
             if data is not None:
-                _flatten_prompts(data, "", out)
+                _flatten_prompts(data, "", out, params)
         except Exception as e:
             logger.warning(f"LoadPrompt : could not read prompts file {path.name} : {e}")
 
@@ -114,7 +135,7 @@ def _build_prompts_map():
 
     if not out:
         logger.warning(f"LoadPrompt : no prompts found in : {PROMPTS_DIR}")
-    return out
+    return out, params
 
 
 def load_prompt_ids():
@@ -352,6 +373,10 @@ from server import PromptServer
 @PromptServer.instance.routes.get(f"/{API_PREFIX}/load_prompts")
 async def load_prompts_route(request):
     return web.json_response(load_prompts_map())
+
+@PromptServer.instance.routes.get(f"/{API_PREFIX}/load_prompt_params")
+async def load_prompt_params_route(request):
+    return web.json_response(load_prompts_params())
 
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/reload_prompts")
 async def reload_prompts_route(request):
