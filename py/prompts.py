@@ -26,9 +26,9 @@ IMAGE_EXTENSIONS = (".png", ".jpeg", ".jpg")
 # name separator to be used in leaf strings to identify a name
 NAME_SEPARATOR = "::"
 
-# optional extra string fields a dictionary entry may carry; each one that is
-# present is exposed to LoadPromptAdvanced and loaded into the matching widget.
-PARAM_KEYS = ("param1", "param2", "param3")
+# keys of a dictionary entry that are not extra parameters: "name" is the id and
+# "positive" is the prompt. Every other key:value pair is exposed as a parameter.
+RESERVED_KEYS = ("name", "positive")
 
 def _flatten_prompts(node, prefix, out, params):
     """Recursively walk the parsed YAML, building an ordered {id: prompt} map.
@@ -38,9 +38,9 @@ def _flatten_prompts(node, prefix, out, params):
     prompt text). e.g. clothing: [T-shirt] -> {"clothing/T-shirt": "T-shirt"}.
     Bare scalars (a key mapping to a single value) are ignored.
 
-    A dictionary entry may additionally carry any of param1/param2/param3; those
-    that are present are collected into `params` as {id: {paramN: value}} (only the
-    keys actually defined are stored) for LoadPromptAdvanced."""
+    A dictionary entry may additionally carry any number of extra keys (anything
+    besides "name" and "positive"); those are collected into `params` as
+    {id: {key: value}} for LoadPromptAdvanced."""
     if isinstance(node, dict):
         for key, value in node.items():
             new_prefix = f"{prefix}/{key}" if prefix else str(key)
@@ -51,7 +51,8 @@ def _flatten_prompts(node, prefix, out, params):
                 leaf = str(item["name"])
                 key = f"{prefix}/{leaf}" if prefix else leaf
                 out[key] = str(item.get("positive", leaf))
-                entry = {p: str(item[p]) for p in PARAM_KEYS if item.get(p) is not None}
+                entry = {k: str(v) for k, v in item.items()
+                         if k not in RESERVED_KEYS and v is not None}
                 if entry:
                     params[key] = entry
             elif isinstance(item, (dict, list, tuple)):
