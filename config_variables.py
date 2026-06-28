@@ -24,13 +24,17 @@ COMFY_EXTRAS_DIR_str = str(COMFY_EXTRAS_DIR)
 if not COMFY_EXTRAS_DIR_str in sys.path:
     sys.path.append(COMFY_EXTRAS_DIR_str)
 
-SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
-SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
-
 MODEL_TYPES = ["vae", "checkpoints", "loras"]
 MODELS_DIR = Path.cwd() / "models"
 
-# user configuration file
+# user configuration files
+
+SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
+if not SETTINGS_DIR.exists():
+    SETTINGS_DIR = Path(__file__).parent / "ntx_data"
+    #SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+print(f"{ADDON_NAME} Load settings from {SETTINGS_DIR}")
+
 CONFIGURATION = {}
 configuration_file = SETTINGS_DIR / "config.json"
 if configuration_file.is_file():
@@ -41,3 +45,4 @@ INCLUDE_MODELS_FROM_CATALOGUE = CONFIGURATION.get("include_models_from_catalogue
 MAX_CACHED_LORAS = CONFIGURATION.get("cache", {}).get("max_loras", 5)
 DOWNLOAD_MISSING_LORAS = CONFIGURATION.get("download_missing_loras", False) and sys.platform.lower().startswith("linux") # only download for linux (pods)
 CLOUD_STORAGE_ID = CONFIGURATION.get("cloud_storage_id", "")
+
