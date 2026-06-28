@@ -7,12 +7,13 @@ import { ADDON_PREFIX, API_PREFIX } from "./config.js";
 
 const NODE_ID = ADDON_PREFIX + "LoadPrompt";
 const ADV_NODE_ID = ADDON_PREFIX + "LoadPromptAdvanced";
+const CHAR_NODE_ID = ADDON_PREFIX + "LoadPromptChar";
 const ID_WIDGET = "id";
 const PROMPT_WIDGET = "prompt";
 
-// LoadPrompt and LoadPromptAdvanced share the exact same id/prompt behaviour
-// (tree picker + textbox sync); the advanced node just adds plain string widgets.
-const PROMPT_NODE_IDS = new Set([NODE_ID, ADV_NODE_ID]);
+// All LoadPrompt* share the exact same id/prompt behaviour
+// (tree picker + textbox sync); the advanced nodes just add plain string widgets.
+const PROMPT_NODE_IDS = new Set([NODE_ID, ADV_NODE_ID, CHAR_NODE_ID]);
 
 const SAVE_NODE_ID = ADDON_PREFIX + "SavePrompt";
 const CATEGORY_WIDGET = "category";
