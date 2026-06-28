@@ -194,6 +194,51 @@ class LoadPrompt(io.ComfyNode):
         return io.NodeOutput(prompt, id, image)
 
 
+class LoadPromptAdvanced(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}LoadPromptAdvanced",
+            display_name=f"{ADDON_PREFIX} Load Prompt Advanced",
+            description="Pick a prompt from the nested library in input/ntx_data/prompts/test.yaml; the text can be edited before use. Adds three free-form string parameters that are passed straight through to the outputs.",
+            category=f"{ADDON_CATEGORY}/prompts",
+            inputs=[
+                io.Combo.Input("id", options=load_prompt_ids()),
+                io.String.Input("prompt", multiline=True, default=""),
+                io.String.Input("param1", default=""),
+                io.String.Input("param2", default=""),
+                io.String.Input("param3", default=""),
+            ],
+            outputs=[
+                io.String.Output("prompt"),
+                io.String.Output("id"),
+                io.Image.Output("image"),
+                io.String.Output("param1"),
+                io.String.Output("param2"),
+                io.String.Output("param3"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, id, prompt, param1, param2, param3):
+        # the frontend fills the prompt box from the selected id, but fall back to
+        # the library text when it is empty (e.g. headless / API execution)
+        if not prompt or prompt.isspace():
+            prompt = load_prompts_map().get(id, "")
+
+        # look for an image with the same name as the id; return None if missing
+        image = None
+        image_path = find_prompt_image(id)
+        if image_path is not None:
+            try:
+                image = load_image_as_tensor(image_path)
+            except Exception as e:
+                logger.warning(f"LoadPromptAdvanced : could not load image {image_path.name} : {e}")
+
+        # the three extra parameters are simply repeated as outputs
+        return io.NodeOutput(prompt, id, image, param1, param2, param3)
+
+
 # ===== SAVING PROMPTS =====================================================================================================================
 
 def prompt_target_paths(category, name):
@@ -295,6 +340,7 @@ class SavePrompt(io.ComfyNode):
 def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         LoadPrompt,
+        LoadPromptAdvanced,
         SavePrompt,
     ]
 

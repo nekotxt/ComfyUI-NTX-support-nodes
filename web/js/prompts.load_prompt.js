@@ -6,8 +6,13 @@ import { api } from "../../../scripts/api.js";
 import { ADDON_PREFIX, API_PREFIX } from "./config.js";
 
 const NODE_ID = ADDON_PREFIX + "LoadPrompt";
+const ADV_NODE_ID = ADDON_PREFIX + "LoadPromptAdvanced";
 const ID_WIDGET = "id";
 const PROMPT_WIDGET = "prompt";
+
+// LoadPrompt and LoadPromptAdvanced share the exact same id/prompt behaviour
+// (tree picker + textbox sync); the advanced node just adds plain string widgets.
+const PROMPT_NODE_IDS = new Set([NODE_ID, ADV_NODE_ID]);
 
 const SAVE_NODE_ID = ADDON_PREFIX + "SavePrompt";
 const CATEGORY_WIDGET = "category";
@@ -613,7 +618,7 @@ function onCapturePointerDown(e) {
     if (!widget) return;
 
     let picker = null;
-    if (node.comfyClass === NODE_ID && widget.name === ID_WIDGET) {
+    if (PROMPT_NODE_IDS.has(node.comfyClass) && widget.name === ID_WIDGET) {
         picker = openTreePicker;
     } else if (node.comfyClass === SAVE_NODE_ID && widget.name === CATEGORY_WIDGET) {
         picker = openCategoryPicker;
@@ -649,7 +654,7 @@ app.registerExtension({
     },
 
     async nodeCreated(node) {
-        if (node.comfyClass !== NODE_ID) return;
+        if (!PROMPT_NODE_IDS.has(node.comfyClass)) return;
 
         const idWidget = node.widgets?.find((w) => w.name === ID_WIDGET);
         if (!idWidget) return;
