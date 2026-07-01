@@ -3,6 +3,7 @@ from comfy_api.latest import ComfyExtension, io
 from typing_extensions import override
 
 import json
+import textwrap
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_DIR
 from .logging import logger
@@ -244,29 +245,101 @@ class PipeCustom(io.ComfyNode):
     @classmethod
     def execute(cls, inputs_data, pipe=None, **kwargs):
         (in_names, in_types, out_names, out_types) = parse_inputs_data(inputs_data)
+        #logger.info(f"PipeCustom : {inputs_data}")
+        #logger.info(f"PipeCustom : {kwargs}")
 
         new_pipe = clone_data(pipe) if pipe is not None else {}
         if not isinstance(new_pipe, dict):
             logger.warning("PipeCustom : input pipe is not a dictionary, starting from an empty pipe")
             new_pipe = {}
 
-        in_index = 0
         for name in in_names:
             value = kwargs.get(name)
             if value is not None:
                 new_pipe[name] = value
-                #logger.info(f"PipeCustom : {name}[{in_types[in_index]}] <= {value}")
-            in_index += 1
+                #logger.info(f"PipeCustom : {name}[{in_types[name]}] <= {value}")
 
         # recover output from pipe. If not present, try to get a default if available
         outputs = []
         for name in out_names:
             if name in new_pipe:
                 outputs.append(new_pipe[name])
+                #logger.info(f"PipeCustom : {name}[{out_types[name]}] => {new_pipe[name]}")
             else:
                 outputs.append(DEFAULT_PIPE_VALUES.get(out_types[name], None))
+                #logger.info(f"PipeCustom : {name}[{out_types[name]}] => {DEFAULT_PIPE_VALUES.get(out_types[name], None)}")
 
         return io.NodeOutput(new_pipe, *outputs)
+
+
+# ===== NODES : DEBUG PIPE ====================================================================================
+
+# format a multiline string
+def format_multiline_string(leader, text, max_width):
+    return leader + textwrap.fill(text, width=(max_width-len(leader))).replace("\n", "\n" + ' '*len(leader))
+
+def print_pipe_data(prefix:str, name:str, data):
+    text = ""
+
+    if "prompt_" in name:
+        leader = f"{prefix}{name} : "
+        text += format_multiline_string(leader, str(data), 100) + "\n"
+    elif "lora_stack" in name and type(data) is list:
+        text += f"{prefix}{name} :\n"
+        i = 0
+        for entry in data:
+            text += f"{prefix}- [{str(i)}] {entry}\n"
+            i += 1
+    elif type(data) is dict:
+        text += f"{prefix}{name} :\n"
+        names = list(data.keys())
+        names.sort()
+        for k in names:
+            text += print_pipe_data(prefix + "  ", k, data.get(k))
+    elif type(data) is list:
+        text += f"{prefix}{name} :\n"
+        i = 0
+        for entry in data:
+            text += print_pipe_data(f"{prefix}- ", f"[{str(i)}]", entry)
+            i += 1
+    elif str(type(data)) == "<class 'torch.Tensor'>":
+        text += f"{prefix}{name} : torch.Tensor\n"
+    else:
+        text += f"{prefix}{name} : {str(data)}\n"
+
+    return text
+
+
+class PipeDebug(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}PipeDebug",
+            display_name=f"{ADDON_PREFIX} Pipe Debug",
+            description="Print the information in the pipe dictionary.",
+            category=f"{ADDON_CATEGORY}/pipe",
+            inputs=[
+                DICT_TYPE.Input("pipe"),
+            ],
+            # links are validated by output index, so the maximum number of outputs must be
+            # declared here; the frontend shows/renames only the configured ones
+            outputs=[
+                DICT_TYPE.Output("pipe"),
+                io.String.Output("text"),
+            ]
+        )
+
+    @classmethod
+    def execute(cls, pipe):
+
+        text = ""
+        
+        names = list(pipe.keys())
+        names.sort()
+        for k in names:
+            text += print_pipe_data("", k, pipe.get(k))
+
+        return io.NodeOutput(pipe, text)
 
 # ===== NODES : GENERATION DATA ==========================================================================================================
 
@@ -402,6 +475,8 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         PipeVideoWan,
 
         PipeCustom,
+
+        PipeDebug,
 
         GenerationDataSet,
         GenerationDataGet,

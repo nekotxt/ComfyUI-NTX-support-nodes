@@ -275,7 +275,7 @@ class LoadPromptChar(io.ComfyNode):
                 io.String.Input("save_name", default=""),
             ],
             outputs=[
-                io.String.Output("prompt"),
+                io.String.Output("char"),
                 io.String.Output("save_name"),
             ],
         )

@@ -76,6 +76,38 @@ class SelectAnyInput(io.ComfyNode):
             select = len(inputs_list) - 1
         return io.NodeOutput(inputs_list[select])
 
+class LazySelectAny(io.ComfyNode):
+    MAX_INPUTS = 5
+
+    @classmethod
+    def define_schema(cls):
+        slots = [
+            io.AnyType.Input(f"input{i}", optional=True, lazy=True)
+            for i in range(cls.MAX_INPUTS)
+        ]
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}LazySelectAny",
+            display_name=f"{ADDON_PREFIX} Lazy Select Any",
+            description="Return the selected item (do not execute the unselected branches)",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.Int.Input("select", default=0, min=0, max=cls.MAX_INPUTS - 1, step=1),
+                *slots,
+            ],
+            outputs=[io.AnyType.Output("output")],
+        )
+
+    @classmethod
+    def check_lazy_status(cls, select, **kwargs):
+        key = "input%d" % select
+        if kwargs.get(key, None) is None:
+            return [key]
+        return []
+
+    @classmethod
+    def execute(cls, select, **kwargs) -> io.NodeOutput:
+        return io.NodeOutput(kwargs.get("input%d" % select))
+
 class CollectModelNtxdata(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -240,6 +272,7 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         SwitchAny,
         SelectAnyInput,
+        LazySelectAny,
         CollectModelNtxdata,
         #CLIPTextEncodeWithCutoff,
         DownloadModelsList,

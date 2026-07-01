@@ -106,11 +106,18 @@ def download_file_from_cloud(cloud_storage_id:str, model_subpath: Path, save_pat
 
 # ===== UTILITY FUNCTIONS TO RETRIEVE INFORMATION ========================================================================================
 
+def load_list_models(model_type:str):
+    models_list = folder_paths.get_filename_list(model_type) or []
+    return models_list
+
 def load_list_ckpts():
     return folder_paths.get_filename_list("checkpoints")
 
-def load_list_unets():
-    return folder_paths.get_filename_list("unet")
+def load_list_diffusion_models():
+    return folder_paths.get_filename_list("diffusion_models")
+
+# def load_list_unets():
+#     return folder_paths.get_filename_list("unet")
 
 def load_list_clips():
     return folder_paths.get_filename_list("clip")
@@ -171,6 +178,11 @@ def image_rescale_keeping_aspect_ratio(image, width:int, height:int, rescaler:st
 
 LIST_OF_MODEL_DIRS = {}
 def find_model_file(model_type:str, model_name:str, look_in_all_dirs:bool=True):
+    # Try to find a model with the specified name (which may include subdirs)
+    # Optionally look for the model file name in all subdirs for the given model_type (for example, in the whole loras directory, including all subdirs)
+    # Return the actual model name including the subdir where it was found (if not found, return the input model_name) and the full absolute path (if found, otherwise none)
+
+    model_type = folder_paths.map_legacy(model_type)
     model_name = clean_path(model_name)
 
     # first try : look for the model in the exact position specified by caller
