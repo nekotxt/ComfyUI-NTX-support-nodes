@@ -1,7 +1,11 @@
 from comfy_api.latest import ComfyExtension, io
 
+from pathlib import Path
+
 from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX
+from .logging import logger
 from .utils import load_list_models, load_list_samplers, load_list_schedulers, find_model_file
+from ..scripts.ntxdata_file import NtxDataFile
 
 MODELTYPE_SEPARATOR = "  "
 
@@ -82,45 +86,69 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
 from aiohttp import web
 from server import PromptServer
 
-@PromptServer.instance.routes.get(f"/{API_PREFIX}/get_modelinfo_data")
+@PromptServer.instance.routes.post(f"/{API_PREFIX}/get_modelinfo_data")
 async def get_modelinfo_data(request):
-    # Accepts a model_name value from ModelInfo node
-    # and returns the default data for all fields of the ModelInfo node.
+    # Accepts a model_name value from the ModelInfo node and returns the known
+    # data for as many of its widgets as could be resolved. Widgets missing
+    # from the response are left untouched by the frontend.
 
     data = await request.json()
 
     model_name = data.get("model_name", "")
 
     if model_name == "":
-        return web.json_response({model_name: model_name})
+        return web.json_response({})
 
-    (model_type, model_id) = split_model_type_and_name(data.get("model_type", ""))
+    (model_type, model_id) = split_model_type_and_name(model_name)
 
-    source_data = {}
+    # try to recover the data associated with the model (a file with same path as the model, but with .ntxdata extension)
+    source_data = None
+    (model_id, model_path) = find_model_file(model_type, model_id)
+    if model_path != None:
+        data_file_path = Path(model_path).with_suffix(".ntxdata")
+        if data_file_path.is_file():
+            ntx_data = NtxDataFile()
+            ntx_data.load(data_file_path)
+            source_data = ntx_data.data.get("model", None)
+            if source_data is not None:
+                source_data["notes"] = source_data.get("notes", "") + ntx_data.data.get("notes", "")
+    if source_data == None:
+        logger.warning(f"Model file not found or incomplete for {model_name}")
+        return web.json_response(None)
 
-    # validate the clip and vae names
-    clip_name   = "None" if (name:=source_data.get("clip", "")) == ""     else find_model_file("clip", name)[0]
-    clip_name_2 = "None" if (name:=source_data.get("clip2", "")) == ""    else find_model_file("clip", name)[0]
-    clip_name_3 = "None" if (name:=source_data.get("clip3", "")) == ""    else find_model_file("clip", name)[0]
-    vae_name    = "Baked VAE" if (name:=source_data.get("vae", "")) == "" else find_model_file("vae", name)[0]
+    # validate the values
 
-    response = {
-        model_name: model_name,
-        clip_name: clip_name,
-        clip_name_2: clip_name_2,
-        clip_name_3: clip_name_3,
-        vae_name: vae_name,
-        clip_skip: 0,
-        shift: 0.0,
-        guidance: 0.0,
-        steps: 0,
-        cfg: 1.0,
-        sampler_name: "Euler",
-        scheduler: "Simple",
-        model_prompt_positive: "",
-        model_prompt_negative: "",
-        notes: "",
-    }
+    def _check_clip(name:str):
+        name_clean = name.strip().lower()
+        if name_clean == "" or name_clean in ["none", "embedded"]:
+            return "None"
+        else:
+            (model_name_found, model_path) = find_model_file("clip", name)
+            return model_name_found
+
+    def _check_vae(name:str):
+        name_clean = name.strip().lower()
+        if name_clean == "" or name_clean in ["baked vae", "embedded"]:
+            return "Baked VAE"
+        else:
+            (model_name_found, model_path) = find_model_file("vae", name)
+            return model_name_found
+
+    response = {}
+    response["model_name"] =            model_name
+    response["clip_name"] =             _check_clip(source_data.get("clip", ""))
+    response["clip_name_2"] =           _check_clip(source_data.get("clip2", ""))
+    response["clip_name_3"] =           _check_clip(source_data.get("clip3", ""))
+    response["vae_name"] =              _check_vae(source_data.get("vae", ""))
+    response["clip_skip"] =             val if (val:=source_data.get("clip_skip", 0)) <= 0 else -val
+    response["shift"] =                 val if (val:=source_data.get("shift", 0.0)) >= 0.0 else -val
+    response["guidance"] =              val if (val:=source_data.get("guidance", 0.0)) >= 0.0 else -val
+    response["steps"] =                 source_data.get("steps", None)
+    response["cfg"] =                   source_data.get("cfg", None)
+    response["sampler_name"] =          name if (name:=source_data.get("sampler_name", "").strip().lower()) in load_list_samplers() else None
+    response["scheduler"] =             name if (name:=source_data.get("scheduler", "").strip().lower()) in load_list_schedulers() else None
+    response["model_prompt_positive"] = source_data.get("positive", "")
+    response["model_prompt_negative"] = source_data.get("negative", "")
+    response["notes"] =                 source_data.get("notes", "")
 
     return web.json_response(response)
-

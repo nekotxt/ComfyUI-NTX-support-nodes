@@ -13,6 +13,7 @@ from pathlib import Path
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_DIR, MODEL_TYPES, INCLUDE_MODELS_FROM_CATALOGUE
 from .logging import logger#log_info, log_warning
 from .utils import clone_data, clean_path, load_list_vaes, load_list_samplers, load_list_schedulers, DICT_TYPE
+from ..scripts.ntxdata_file import NtxDataFile
 
 #SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
 #MODEL_TYPES = ["vae", "checkpoints", "loras"]
