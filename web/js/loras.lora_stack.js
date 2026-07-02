@@ -528,6 +528,25 @@ function fetchLoraList() {
     return _loraFetch;
 }
 
+// Force the backend to re-scan the loras folder on disk and replace the cache.
+// On failure the previous cache is kept so the UI keeps working with the old list.
+function reloadLoraList() {
+    const previous = _loraCache;
+    _loraFetch = fetch(`/${API_PREFIX}/reload_loras_list`, { method: "POST" })
+        .then(r => {
+            if (!r.ok) throw new Error(`reload_loras_list HTTP ${r.status}`);
+            return r.json();
+        })
+        .then(list => { _loraCache = ["none", ...list]; return _loraCache; })
+        .catch(err => {
+            console.warn("[LoraStack] failed to reload LoRA list:", err);
+            _loraFetch = null;
+            _loraCache = previous;
+            return previous ?? ["none"];
+        });
+    return _loraFetch;
+}
+
 // ── Pill number widget ────────────────────────────────────────────────────────
 // Looks like ComfyUI's built-in number widget: [◀  0.70  ▶]
 // - Click arrows to step ±0.05
@@ -682,6 +701,14 @@ function openTreeSelector(currentName, loraNames, onConfirm) {
     const btns = document.createElement("div");
     btns.className = "cll-tree-btns";
 
+    const refreshBtn = document.createElement("button");
+    refreshBtn.className = "cll-tree-btn";
+    refreshBtn.textContent = "Refresh";
+    refreshBtn.title = "Re-scan the loras folder on disk";
+
+    const spacer = document.createElement("span");
+    spacer.style.flex = "1 1 auto";
+
     const cancelBtn = document.createElement("button");
     cancelBtn.className = "cll-tree-btn";
     cancelBtn.textContent = "Cancel";
@@ -691,6 +718,8 @@ function openTreeSelector(currentName, loraNames, onConfirm) {
     okBtn.textContent = "OK";
     okBtn.disabled = true;
 
+    btns.appendChild(refreshBtn);
+    btns.appendChild(spacer);
     btns.appendChild(cancelBtn);
     btns.appendChild(okBtn);
     dlg.appendChild(btns);
@@ -825,6 +854,26 @@ function openTreeSelector(currentName, loraNames, onConfirm) {
     rebuild("");
     filterInput.addEventListener("input", () => rebuild(filterInput.value));
 
+    refreshBtn.addEventListener("click", async () => {
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = "Refreshing…";
+        const fresh = await reloadLoraList();
+        // Mutate the array in place: the flat dropdown behind the dialog holds
+        // the same reference, so it picks up the new list as well.
+        loraNames.length = 0;
+        loraNames.push(...fresh);
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = "Refresh";
+        rebuild(filterInput.value);
+        try {
+            app.extensionManager?.toast?.add({
+                severity: "success",
+                summary: "LoRA list reloaded",
+                detail: "Re-scanned the loras folder on disk",
+                life: 4000,
+            });
+        } catch { console.log("[LoraStack] LoRA list reloaded"); }
+    });
     okBtn.addEventListener("click", confirm);
     cancelBtn.addEventListener("click", close);
     overlay.addEventListener("pointerdown", e => {
@@ -1327,11 +1376,16 @@ app.registerExtension({
             {
                 content: ADDON_PREFIX + " Reload Lora List from disk",
                 callback: () => {
-                    fetch(`/${API_PREFIX}/reload_models_list`)
-                    .then(response => response.json())
-                    .then(message => alert(message))
-                    .catch(error => {console.error('Error(Reload Lora List from disk):', error);} );                    
-                    _loraCache = null;                
+                    reloadLoraList().then(() => {
+                        try {
+                            app.extensionManager?.toast?.add({
+                                severity: "success",
+                                summary: "LoRA list reloaded",
+                                detail: "Re-scanned the loras folder on disk",
+                                life: 4000,
+                            });
+                        } catch { console.log("[LoraStack] LoRA list reloaded"); }
+                    });
                 },
             },
         ];

@@ -371,3 +371,9 @@ from server import PromptServer
 @PromptServer.instance.routes.get(f"/{API_PREFIX}/get_loras_list")
 async def get_loras_list(request):
     return web.json_response(load_list_loras())
+
+@PromptServer.instance.routes.post(f"/{API_PREFIX}/reload_loras_list")
+async def reload_loras_list(request):
+    # drop folder_paths' cached scan so the list is rebuilt from disk
+    folder_paths.filename_list_cache.pop("loras", None)
+    return web.json_response(load_list_loras())
