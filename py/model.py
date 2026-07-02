@@ -7,13 +7,15 @@ from .logging import logger
 from .utils import load_list_models, load_list_samplers, load_list_schedulers, find_model_file
 from ..scripts.ntxdata_file import NtxDataFile
 
-MODELTYPE_SEPARATOR = "  "
+MODELTYPE_SEPARATOR = ":"
 
 def build_full_models_list():
     full_list = [f"ckpt{MODELTYPE_SEPARATOR}{name}" for name in load_list_models("checkpoints")] + [f"diff{MODELTYPE_SEPARATOR}{name}" for name in load_list_models("diffusion_models")]
     return full_list
 
 def split_model_type_and_name(full_name:str):
+    if not MODELTYPE_SEPARATOR in full_name:
+        return ("undefined", full_name)
     model_type, model_name = full_name.split(MODELTYPE_SEPARATOR, 1) # strip the model type prefix
     if model_type == "ckpt":
         model_type = "checkpoints"
@@ -152,3 +154,50 @@ async def get_modelinfo_data(request):
     response["notes"] =                 source_data.get("notes", "")
 
     return web.json_response(response)
+
+@PromptServer.instance.routes.post(f"/{API_PREFIX}/save_modelinfo_data")
+async def save_modelinfo_data(request):
+    # Accepts the current widget values from the ModelInfo node.
+    data = await request.json()
+
+    model_name = data.get("model_name", "")
+
+    if model_name == "":
+        return web.json_response({"message": "model_name is missing: cannot save"})
+
+    (model_type, model_id) = split_model_type_and_name(model_name)
+
+    # try to recover the data associated with the model (a file with same path as the model, but with .ntxdata extension)
+    (model_id, model_path) = find_model_file(model_type, model_id)
+    if model_path == None:
+        return web.json_response({"message": "Cannot resolve the location of the model file: cannot save"})
+    data_file_path = Path(model_path).with_suffix(".ntxdata")
+    ntx_data = NtxDataFile(data_file_path)
+    if data_file_path.is_file():
+        ntx_data.load()
+    if not "model" in ntx_data.data:
+        ntx_data.data["model"] = {}
+    
+    # write the new data
+    name_map = {
+        "clip_name": "clip",
+        "clip_name_2": "clip2",
+        "clip_name_3": "clip3",
+        "vae_name": "vae",
+        "model_prompt_positive": "positive",
+        "model_prompt_negative": "negative",
+    }
+    for k,v in data.items():
+        if k in ["model_name", "notes"]:
+            continue
+        ntx_data.data["model"][name_map.get(k, k)] = v
+    ntx_data.id = model_id
+    ntx_data.model_type = model_type
+    if "notes" in data:
+        ntx_data.data["notes"] = data["notes"]
+
+    # save the new file
+    new_data_file_path = Path(model_path).with_suffix(".ntxdata_new")
+    ntx_data.save(new_data_file_path)
+
+    return web.json_response({"message": f"Saved to {new_data_file_path}"})

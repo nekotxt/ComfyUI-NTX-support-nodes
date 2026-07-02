@@ -1,4 +1,4 @@
-# VER 1.0
+# VER 1.1
 
 """
 Example of ntxdata file:
@@ -191,10 +191,10 @@ class NtxDataFile:
             self.path = path
 
         # Ensure there are no nulls
-        _replace_nulls(data)
+        _replace_nulls(self.data)
 
         # enforce the standard order of main keys
-        self.reorder_data()
+        self.sort_data_keys()
 
         # temporarily remove the notes
         notes_present = "notes" in self.data

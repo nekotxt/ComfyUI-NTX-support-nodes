@@ -86,6 +86,29 @@ async function loadModelInfo(node) {
     }
 }
 
+async function saveModelInfo(node) {
+    const values = {};
+    for (const widget of node.widgets ?? []) {
+        values[widget.name] = widget.value;
+    }
+
+    let data;
+    try {
+        const resp = await api.fetchApi(`/${API_PREFIX}/save_modelinfo_data`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(values),
+        });
+        data = await resp.json();
+    } catch (err) {
+        console.error("ModelInfo : failed to save model info", err);
+        notify("error", "Save Model Info", "Failed to reach the server.");
+        return;
+    }
+
+    notify("success", "Save Model Info", data?.message ?? "OK");
+}
+
 app.registerExtension({
     name: API_PREFIX + ".model.load_model_info",
 
@@ -95,6 +118,10 @@ app.registerExtension({
             {
                 content: ADDON_PREFIX + " Load Model Info",
                 callback: () => loadModelInfo(node),
+            },
+            {
+                content: ADDON_PREFIX + " Save Model Info",
+                callback: () => saveModelInfo(node),
             },
         ];
     },
