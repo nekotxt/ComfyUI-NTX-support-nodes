@@ -71,6 +71,20 @@ async function reloadPromptsMap() {
     return promptsMap;
 }
 
+// toast shown after the prompt cache has been re-read from disk
+function notifyPromptsReloaded() {
+    try {
+        app.extensionManager?.toast?.add({
+            severity: "success",
+            summary: "Prompt cache reloaded",
+            detail: "Prompt cache reloaded: press R to refresh combo",
+            life: 4000,
+        });
+    } catch (err) {
+        console.log("Prompt cache reloaded: press R to refresh combo");
+    }
+}
+
 // fill the prompt textbox with the library text for the selected id
 function applyPrompt(node, id) {
     const promptWidget = node.widgets?.find((w) => w.name === PROMPT_WIDGET);
@@ -318,16 +332,7 @@ function openTreePicker(node) {
         refreshBtn.disabled = false;
         refreshBtn.textContent = "Refresh";
         renderTree();
-        try {
-            app.extensionManager?.toast?.add({
-                severity: "success",
-                summary: "Prompt cache reloaded",
-                detail: "Prompt cache reloaded: press R to refresh combo",
-                life: 4000,
-            });
-        } catch (err) {
-            console.log("Prompt cache reloaded: press R to refresh combo");
-        }
+        notifyPromptsReloaded();
     }
 
     let selectedRowEl = null;
@@ -671,6 +676,27 @@ function onCapturePointerDown(e) {
     getPromptsMap().then(() => picker(node));
 }
 
+// ── RMB node menu ────────────────────────────────────────────────────────────────
+
+// RMB menu entry on the prompt nodes to re-read the prompt files from disk —
+// same effect as the tree picker's Refresh button.
+function installReloadMenu(node) {
+    if (node.__lptMenuInstalled) return;
+    node.__lptMenuInstalled = true;
+
+    const origGetExtraMenuOptions = node.getExtraMenuOptions;
+    node.getExtraMenuOptions = function (canvas, options) {
+        const r = origGetExtraMenuOptions?.apply(this, arguments);
+        options.push({
+            content: ADDON_PREFIX + " Rebuild Prompts List from disk",
+            callback: () => {
+                reloadPromptsMap().then(() => notifyPromptsReloaded());
+            },
+        });
+        return r;
+    };
+}
+
 app.registerExtension({
     name: API_PREFIX + ".prompts.load_prompt",
 
@@ -695,6 +721,8 @@ app.registerExtension({
 
     async nodeCreated(node) {
         if (!PROMPT_NODE_IDS.has(node.comfyClass)) return;
+
+        installReloadMenu(node);
 
         const idWidget = node.widgets?.find((w) => w.name === ID_WIDGET);
         if (!idWidget) return;

@@ -1349,18 +1349,23 @@ function installRebuildMenu(node) {
             content: ADDON_PREFIX + " Rebuild LoraStack UI",
             callback: () => rebuildLoraUI(this, true),
         });
-        // options.push({
-        //     content: ADDON_PREFIX + " Reload Lora List from disk",
-        //     callback: () => {
-        //         fetch(`/${API_PREFIX}/reload_models_list`)
-        //         .then(response => response.json())
-        //         .then(message => alert(message))
-        //         .catch(error => {console.error('Error(Reload Lora List from disk):', error);} );                    
-                
-        //         _loraCache = null;                
-        //         rebuildLoraUI(this, true)
-        //     },
-        // });
+        options.push({
+            content: ADDON_PREFIX + " Reload Lora List from disk",
+            callback: () => {
+                reloadLoraList().then(() => {
+                    // rebuild so the widget picks up the fresh list immediately
+                    rebuildLoraUI(this, true);
+                    try {
+                        app.extensionManager?.toast?.add({
+                            severity: "success",
+                            summary: "LoRA list reloaded",
+                            detail: "Re-scanned the loras folder on disk",
+                            life: 4000,
+                        });
+                    } catch { console.log("[LoraStack] LoRA list reloaded"); }
+                });
+            },
+        });
         return r;
     };
 }
@@ -1370,26 +1375,6 @@ function installRebuildMenu(node) {
 const LORA_STACK_NODE_ID = ADDON_PREFIX + "LoraStack"
 app.registerExtension({
 	name: API_PREFIX + ".loras.lora_stack",
-
-    getCanvasMenuItems() {
-        return [
-            {
-                content: ADDON_PREFIX + " Reload Lora List from disk",
-                callback: () => {
-                    reloadLoraList().then(() => {
-                        try {
-                            app.extensionManager?.toast?.add({
-                                severity: "success",
-                                summary: "LoRA list reloaded",
-                                detail: "Re-scanned the loras folder on disk",
-                                life: 4000,
-                            });
-                        } catch { console.log("[LoraStack] LoRA list reloaded"); }
-                    });
-                },
-            },
-        ];
-    },
 
     // addCustomNodeDefs(defs) {
     //     if (defs[LORA_STACK_NODE_ID]) {
