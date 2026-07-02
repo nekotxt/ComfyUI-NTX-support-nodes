@@ -1,7 +1,7 @@
 [project]
 name = "ComfyUI-NTX-support-nodes"
-description = "Utility nodes to support the creation of pipes"
-version = "1.2.0"
+description = "Nodes to support the creation of pipes, and other utilities"
+version = "2.0.0"
 license = { file = "LICENSE.txt" }
 dependencies  = []
 
