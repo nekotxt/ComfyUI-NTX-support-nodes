@@ -93,7 +93,7 @@ class LoraStack(io.ComfyNode):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}LoraStack",
             display_name=f"{ADDON_PREFIX} Lora Stack",
-            description="",
+            description="Build a LORA_STACK from an editable list of LoRAs (enable/disable, per-lora model/clip strengths); chain stacks via the optional lora_stack input.",
             category=f"{ADDON_CATEGORY}/loras",
             inputs=[
                 io.String.Input("loras_data", default="[]"),

@@ -157,6 +157,49 @@ const CSS = `
     opacity: 0.45;
 }
 
+/* Drag handle */
+.cll-drag {
+    flex: 0 0 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+    cursor: grab;
+    font-size: 12px;
+    line-height: 1;
+    user-select: none;
+}
+
+.cll-drag:hover {
+    color: #fff;
+}
+
+.cll-drag:active {
+    cursor: grabbing;
+}
+
+.cll-row.cll-dragging {
+    opacity: 0.4;
+}
+
+/* drop position indicators (set during a drag-over) */
+.cll-row.cll-drop-before {
+    box-shadow: 0 -2px 0 0 #4a90d9;
+}
+
+.cll-row.cll-drop-after {
+    box-shadow: 0 2px 0 0 #4a90d9;
+}
+
+/* name pill warnings: file missing from the loras folder / duplicate row */
+.cll-dd-wrap.cll-missing {
+    box-shadow: inset 0 0 0 1px #c05555;
+}
+
+.cll-dd-wrap.cll-dup {
+    box-shadow: inset 0 0 0 1px #c9a13b;
+}
+
 /* Common-strength header row */
 .cll-header {
     display: flex;
@@ -278,6 +321,10 @@ const CSS = `
 .cll-dd-arr:hover {
     color: #ddd;
     background: rgba(255, 255, 255, 0.08);
+}
+
+.cll-dd-tree {
+    font-size: 11px;
 }
 
 .cll-dd-panel {
@@ -547,11 +594,19 @@ function reloadLoraList() {
     return _loraFetch;
 }
 
+// Comparison key for lora names: path-separator and case insensitive, so
+// "ILL\\aaa.safetensors" matches "ill/aaa.safetensors".
+function normLoraKey(name) {
+    return String(name ?? "").replace(/\\/g, "/").toLowerCase();
+}
+
 // ── Pill number widget ────────────────────────────────────────────────────────
 // Looks like ComfyUI's built-in number widget: [◀  0.70  ▶]
 // - Click arrows to step ±0.05
 // - Drag the value display left/right to scrub
-// - Double-click the value display to type a number directly
+// - Click the value display (without dragging) to type a number directly:
+//   Enter/blur confirms, Escape cancels
+// - Hold CTRL while clicking the arrows or scrubbing for fine steps (step / 5)
 
 function makeNumPill(initVal, step, onChange) {
     let value = initVal;
@@ -575,24 +630,24 @@ function makeNumPill(initVal, step, onChange) {
     pill.appendChild(disp);
     pill.appendChild(inc);
 
-    function snap(v) {
+    function snap(v, s = step) {
         // Round to avoid floating-point drift
-        return parseFloat((Math.round(v / step) * step).toFixed(6));
+        return parseFloat((Math.round(v / s) * s).toFixed(6));
     }
 
-    function set(v) {
-        value = snap(v);
+    function set(v, s = step) {
+        value = snap(v, s);
         disp.textContent = value.toFixed(2);
         onChange(value);
     }
 
-    // Arrow clicks
-    dec.addEventListener("click", e => { e.stopPropagation(); set(value - step); });
-    inc.addEventListener("click", e => { e.stopPropagation(); set(value + step); });
+    // Arrow clicks (CTRL = fine step)
+    dec.addEventListener("click", e => { e.stopPropagation(); const s = e.ctrlKey ? step / 5 : step; set(value - s, s); });
+    inc.addEventListener("click", e => { e.stopPropagation(); const s = e.ctrlKey ? step / 5 : step; set(value + s, s); });
 
-    // Double-click → inline text input
-    disp.addEventListener("dblclick", e => {
-        e.stopPropagation();
+    // Inline text input in place of the value display.
+    // Enter (or clicking away) confirms, Escape cancels.
+    function startEdit() {
         const inp = document.createElement("input");
         inp.className = "cll-num-edit";
         inp.type = "number";
@@ -602,23 +657,32 @@ function makeNumPill(initVal, step, onChange) {
         inp.focus();
         inp.select();
 
-        const finish = () => {
-            const v = parseFloat(inp.value);
-            if (!isNaN(v)) value = v;
+        // the `done` guard keeps a blur fired by the Escape removal (browser
+        // dependent) from committing the value after the edit was cancelled
+        let done = false;
+        const finish = commit => {
+            if (done) return;
+            done = true;
+            if (commit) {
+                const v = parseFloat(inp.value);
+                if (!isNaN(v)) value = v;
+            }
             disp.textContent = value.toFixed(2);
             inp.replaceWith(disp);
-            onChange(value);
+            if (commit) onChange(value);
         };
 
-        inp.addEventListener("blur", finish);
+        inp.addEventListener("blur", () => finish(true));
         inp.addEventListener("keydown", ev => {
             if (ev.key === "Enter")  { inp.blur(); }
-            if (ev.key === "Escape") { inp.replaceWith(disp); }
+            if (ev.key === "Escape") { finish(false); }
             ev.stopPropagation();
         });
-    });
+    }
 
-    // Drag to scrub — document-level listeners avoid losing capture to the canvas
+    // Mouse on the value display: moving past a small threshold scrubs the
+    // value; releasing without having moved opens the inline editor instead.
+    // Document-level listeners avoid losing capture to the canvas.
     disp.addEventListener("mousedown", e => {
         if (e.button !== 0) return;
         e.preventDefault();
@@ -626,14 +690,19 @@ function makeNumPill(initVal, step, onChange) {
 
         const startX   = e.clientX;
         const startVal = value;
+        let scrubbing  = false;
 
         const onMove = ev => {
-            const delta = (ev.clientX - startX) * step * 0.4;
-            set(startVal + delta);
+            if (!scrubbing && Math.abs(ev.clientX - startX) < 4) return;
+            scrubbing = true;
+            const fine = ev.ctrlKey;
+            const delta = (ev.clientX - startX) * step * (fine ? 0.08 : 0.4);
+            set(startVal + delta, fine ? step / 5 : step);
         };
         const onUp = () => {
             document.removeEventListener("mousemove", onMove);
             document.removeEventListener("mouseup",   onUp);
+            if (!scrubbing) startEdit();   // plain click → direct edit
         };
 
         document.addEventListener("mousemove", onMove);
@@ -909,6 +978,12 @@ function makeNameCombo(currentName, loraNames, onChange) {
     arrNext.textContent = "▶";
     wrap.appendChild(arrNext);
 
+    const treeBtn = document.createElement("span");
+    treeBtn.className = "cll-dd-arr cll-dd-tree";
+    treeBtn.textContent = "📂";
+    treeBtn.title = "Browse the LoRA folder tree (Shift+click the name does the same)";
+    wrap.appendChild(treeBtn);
+
     let panel = null;
     let dismissListener = null;
 
@@ -1013,18 +1088,24 @@ function makeNameCombo(currentName, loraNames, onChange) {
         setTimeout(() => document.addEventListener("pointerdown", dismissListener, true), 0);
     }
 
+    function openTree() {
+        closePanel();
+        try {
+            openTreeSelector(display.textContent, loraNames, selectValue);
+        } catch (err) {
+            // Fall back to the flat dropdown rather than leaving the user stuck
+            console.warn("[LoraStack] tree selector failed, falling back:", err);
+            openPanel();
+        }
+    }
+
+    treeBtn.addEventListener("click", e => { e.stopPropagation(); openTree(); });
+
     display.addEventListener("click", e => {
         if (e.shiftKey) {
             e.preventDefault();
             e.stopPropagation();
-            closePanel();
-            try {
-                openTreeSelector(display.textContent, loraNames, selectValue);
-            } catch (err) {
-                // Fall back to the flat dropdown rather than leaving the user stuck
-                console.warn("[LoraStack] tree selector failed, falling back:", err);
-                openPanel();
-            }
+            openTree();
             return;
         }
         openPanel();
@@ -1032,6 +1113,8 @@ function makeNameCombo(currentName, loraNames, onChange) {
 
     wrap.getValue = () => display.textContent;
     wrap.setValue = name => { display.textContent = name; display.title = name; };
+    // let the row overwrite the hover tooltip (used for missing/duplicate hints)
+    wrap.setTitle = t => { display.title = t; };
 
     return wrap;
 }
@@ -1098,16 +1181,180 @@ function makeLoraWidget(node, inputName, defaultValue) {
     addBtn.textContent = "+ Add LoRA";
     wrap.appendChild(addBtn);
 
-    wrap.addEventListener("contextmenu", e => e.preventDefault());
+    // right-click outside a row (header, add button, padding) → stack-level menu
+    wrap.addEventListener("contextmenu", e => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.target.matches?.("input.cll-num-edit")) return;   // typing a value — no menu
+        openContextMenu(e, stackMenuItems());
+    });
 
     function commit() {
         widget.value = JSON.stringify(state);
         app.graph?.setDirtyCanvas(true, true);
     }
 
+    // ── Stack-level actions (bulk toggles, copy/paste as <lora:…> text) ──────
+
+    function toast(severity, summary, detail) {
+        try { app.extensionManager?.toast?.add({ severity, summary, detail, life: 4000 }); }
+        catch { console.log(`[LoraStack] ${summary}: ${detail}`); }
+    }
+
+    function formatLoraAsText(lora) {
+        const m = +(lora.modelStrength ?? 1).toFixed(2);
+        const c = state.commonStrength ? m : +(lora.clipStrength ?? 1).toFixed(2);
+        return m === c ? `<lora:${lora.name}:${m}>` : `<lora:${lora.name}:${m}:${c}>`;
+    }
+
+    function copyStackAsText() {
+        const rows = state.loras.filter(l => l.enabled && l.name && l.name !== "none");
+        if (!rows.length) { toast("warn", "Copy stack", "No enabled LoRAs to copy"); return; }
+        const text = rows.map(formatLoraAsText).join("\n");
+        const fallback = () => window.prompt("Stack as text (copy manually):", text);
+        try {
+            navigator.clipboard.writeText(text).then(
+                () => toast("success", "Copy stack", `Copied ${rows.length} LoRA${rows.length === 1 ? "" : "s"} to the clipboard`),
+                fallback,
+            );
+        } catch { fallback(); }
+    }
+
+    // resolve a pasted name against the known list: exact path match first, then
+    // basename match inside subfolders; unknown names are kept as typed (the row
+    // will show the missing-file warning)
+    function resolvePastedName(name) {
+        if (!/\.[^\\/]+$/.test(name)) name += ".safetensors";
+        const key = normLoraKey(name);
+        return loraNames.find(n => normLoraKey(n) === key)
+            ?? loraNames.find(n => normLoraKey(n).endsWith("/" + key))
+            ?? name;
+    }
+
+    function parseLoraText(text) {
+        const out = [];
+        const re = /<lora:([^:>]+):([^:>]+?)(?::([^>]+))?>/g;
+        let m;
+        while ((m = re.exec(text))) {
+            const ms = parseFloat(m[2]);
+            if (isNaN(ms)) continue;
+            const cs = m[3] !== undefined ? parseFloat(m[3]) : NaN;
+            out.push({
+                enabled: true,
+                name: resolvePastedName(m[1].trim()),
+                modelStrength: ms,
+                clipStrength: isNaN(cs) ? ms : cs,
+            });
+        }
+        return out;
+    }
+
+    async function pasteFromText() {
+        let text = "";
+        try { text = await navigator.clipboard.readText(); } catch { /* denied/unavailable */ }
+        if (!/<lora:/i.test(text)) {
+            text = window.prompt("Paste <lora:name:strength[:clip]> text:", "") ?? "";
+        }
+        const entries = parseLoraText(text);
+        if (!entries.length) {
+            if (text) toast("warn", "Paste LoRAs", "No <lora:…> tags found in the text");
+            return;
+        }
+        state.loras.push(...entries);
+        render();
+        commit();
+        toast("success", "Paste LoRAs", `Added ${entries.length} LoRA${entries.length === 1 ? "" : "s"}`);
+    }
+
+    function stackMenuItems() {
+        return [
+            {
+                label: "Enable all",
+                disabled: !state.loras.some(l => !l.enabled),
+                callback() { state.loras.forEach(l => { l.enabled = true; }); render(); commit(); },
+            },
+            {
+                label: "Disable all",
+                disabled: !state.loras.some(l => l.enabled),
+                callback() { state.loras.forEach(l => { l.enabled = false; }); render(); commit(); },
+            },
+            {
+                label: "Remove disabled",
+                disabled: !state.loras.some(l => !l.enabled),
+                callback() { state.loras = state.loras.filter(l => l.enabled); render(); commit(); },
+            },
+            null,
+            { label: "Copy stack as text", disabled: !state.loras.length, callback: copyStackAsText },
+            { label: "Paste from text", callback: pasteFromText },
+        ];
+    }
+
+    // ── Drag reorder ──────────────────────────────────────────────────────────
+
+    // index of the row currently being dragged (null when no drag in progress)
+    let dragIndex = null;
+
+    function clearDropMarkers() {
+        rowsEl.querySelectorAll(".cll-row").forEach(r =>
+            r.classList.remove("cll-drop-before", "cll-drop-after"));
+    }
+
+    // move the lora at `from` so it lands at array position `to` (0..length)
+    function moveLora(from, to) {
+        if (from < 0 || from >= state.loras.length) return;
+        const [item] = state.loras.splice(from, 1);
+        if (from < to) to -= 1;             // removal shifted later indices down
+        to = Math.max(0, Math.min(to, state.loras.length));
+        state.loras.splice(to, 0, item);
+        render();
+        commit();
+    }
+
     function buildRow(lora, idx) {
         const row = document.createElement("div");
         row.className = "cll-row" + (lora.enabled ? "" : " off");
+
+        // ── Drag handle ───────────────────────────────────────────────────────
+        const handle = document.createElement("div");
+        handle.className = "cll-drag";
+        handle.textContent = "⠿";
+        handle.title = "Drag to reorder";
+        handle.draggable = true;
+        handle.addEventListener("dragstart", ev => {
+            dragIndex = idx;
+            row.classList.add("cll-dragging");
+            ev.dataTransfer.effectAllowed = "move";
+            // Firefox requires some data to be set for the drag to start
+            try { ev.dataTransfer.setData("text/plain", String(idx)); } catch { /* ignore */ }
+            try { ev.dataTransfer.setDragImage(row, 0, 0); } catch { /* ignore */ }
+        });
+        handle.addEventListener("dragend", () => {
+            dragIndex = null;
+            row.classList.remove("cll-dragging");
+            clearDropMarkers();
+        });
+        row.appendChild(handle);
+
+        // a drop lands relative to whichever row the cursor is over
+        row.addEventListener("dragover", ev => {
+            if (dragIndex === null) return;
+            ev.preventDefault();
+            ev.dataTransfer.dropEffect = "move";
+            const rect = row.getBoundingClientRect();
+            const after = ev.clientY > rect.top + rect.height / 2;
+            clearDropMarkers();
+            row.classList.add(after ? "cll-drop-after" : "cll-drop-before");
+        });
+        row.addEventListener("drop", ev => {
+            if (dragIndex === null) return;
+            ev.preventDefault();
+            const rect = row.getBoundingClientRect();
+            const after = ev.clientY > rect.top + rect.height / 2;
+            const from = dragIndex;
+            dragIndex = null;
+            clearDropMarkers();
+            moveLora(from, after ? idx + 1 : idx);
+        });
 
         // ── Per-lora toggle ───────────────────────────────────────────────────
         const toggleLabel = document.createElement("label");
@@ -1140,6 +1387,20 @@ function makeLoraWidget(node, inputName, defaultValue) {
         });
         row.appendChild(combo);
 
+        // flag rows whose file is missing from the fetched list, or that repeat
+        // an earlier row (ApplyLoraStack would silently skip the duplicate)
+        if (lora.name && lora.name !== "none") {
+            const key = normLoraKey(lora.name);
+            const listReady = loraNames.length > 1;   // backend list fetched
+            if (listReady && !loraNames.some(n => normLoraKey(n) === key)) {
+                combo.classList.add("cll-missing");
+                combo.setTitle(`Not found in the loras folder: ${lora.name}`);
+            } else if (state.loras.some((l, j) => j < idx && normLoraKey(l.name) === key)) {
+                combo.classList.add("cll-dup");
+                combo.setTitle(`Duplicate of an earlier row: ${lora.name}`);
+            }
+        }
+
         // ── Model strength pill ───────────────────────────────────────────────
         const lblM = document.createElement("span");
         lblM.className = "cll-lbl";
@@ -1151,7 +1412,7 @@ function makeLoraWidget(node, inputName, defaultValue) {
             0.05,
             v => { state.loras[idx].modelStrength = v; commit(); },
         );
-        pillM.title = "Model strength";
+        pillM.title = "Model strength — click to type, drag to scrub, CTRL for fine steps";
         row.appendChild(pillM);
 
         // ── Clip strength pill (hidden when commonStrength is on) ─────────────
@@ -1164,7 +1425,7 @@ function makeLoraWidget(node, inputName, defaultValue) {
             0.05,
             v => { state.loras[idx].clipStrength = v; commit(); },
         );
-        pillC.title = "Clip strength";
+        pillC.title = "Clip strength — click to type, drag to scrub, CTRL for fine steps";
 
         if (!state.commonStrength) {
             row.appendChild(lblC);
@@ -1200,6 +1461,8 @@ function makeLoraWidget(node, inputName, defaultValue) {
                         render(); commit();
                     },
                 },
+                null,
+                ...stackMenuItems(),
             ]);
         });
 

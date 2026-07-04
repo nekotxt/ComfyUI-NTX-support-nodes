@@ -100,15 +100,26 @@ The `loras_data` widget is replaced by a custom LoRA list UI:
 
 - **Common strength** toggle in the header: when on, the clip strength column is hidden and the
   model strength is used for both.
-- Each row: an on/off toggle, the LoRA name, and *M* (model) / *C* (clip) strength widgets.
-  The strength pills step ±0.05 with the ◀ ▶ arrows, scrub on horizontal drag, and accept a
-  typed value on double-click.
+- Each row: a drag handle (⠿, drag to reorder), an on/off toggle, the LoRA name, and *M* (model) /
+  *C* (clip) strength widgets. The strength pills step ±0.05 with the ◀ ▶ arrows (CTRL+click for
+  ±0.01) and scrub on horizontal drag (CTRL for fine steps); a plain click on the value opens an
+  input box to type it directly (Enter or clicking away confirms, Escape cancels).
 - Clicking the LoRA name opens a flat dropdown with a live filter box; the ◀ ▶ arrows next to
   the name step to the previous/next LoRA in the list.
-- **Shift+click** on the LoRA name opens a **tree selector** organised by subfolder, with a
-  search box, **Refresh** button (re-scans the loras folder on disk via the
+- The 📂 button (or **Shift+click** on the LoRA name) opens a **tree selector** organised by
+  subfolder, with a search box, **Refresh** button (re-scans the loras folder on disk via the
   `reload_loras_list` backend route), OK/Cancel, double-click to confirm, and Enter/Escape keys.
-- **+ Add LoRA** appends a row; **right-click on a row** offers *Delete*, *Move up*, *Move down*.
+- Rows referencing a file that is **missing** from the loras folder get a red outline; rows that
+  **duplicate** an earlier entry (which ApplyLoraStack would skip) get an amber outline. The
+  tooltip on the name explains the warning.
+- **+ Add LoRA** appends a row; **right-click on a row** offers *Delete*, *Move up*, *Move down*
+  plus the stack-level actions; **right-click elsewhere** on the widget (header, add button)
+  opens the stack-level menu directly: *Enable all*, *Disable all*, *Remove disabled*,
+  *Copy stack as text* and *Paste from text*.
+- **Copy stack as text** puts the enabled rows on the clipboard in `<lora:name:model[:clip]>`
+  format (one per line); **Paste from text** parses any text containing such tags and appends
+  the entries, matching names against the known list (a missing extension defaults to
+  `.safetensors`, and bare basenames are resolved against subfolders).
 
 Right-click menu options on the node:
 
