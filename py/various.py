@@ -94,7 +94,10 @@ class LazySelectAny(io.ComfyNode):
                 io.Int.Input("select", default=0, min=0, max=cls.MAX_INPUTS - 1, step=1),
                 *slots,
             ],
-            outputs=[io.AnyType.Output("output")],
+            outputs=[
+                io.AnyType.Output("output"),
+                io.Int.Output("select"),
+            ],
         )
 
     @classmethod
@@ -106,7 +109,7 @@ class LazySelectAny(io.ComfyNode):
 
     @classmethod
     def execute(cls, select, **kwargs) -> io.NodeOutput:
-        return io.NodeOutput(kwargs.get("input%d" % select))
+        return io.NodeOutput(kwargs.get("input%d" % select), select)
 
 class CollectModelNtxdata(io.ComfyNode):
     @classmethod

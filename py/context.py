@@ -271,6 +271,33 @@ class PipeCustom(io.ComfyNode):
 
         return io.NodeOutput(new_pipe, *outputs)
 
+class PipeMerge(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        autogrow_template = io.Autogrow.TemplatePrefix(
+            input=DICT_TYPE.Input("pipe"),  # template for each input
+            prefix="pipe",                  # prefix for generated input names
+            min=2,                           # minimum number of inputs shown
+            max=10,                          # maximum number of inputs allowed
+        )
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}PipeMerge",
+            display_name=f"{ADDON_PREFIX} Pipe Merge",
+            description="Merge multiple pipes",
+            category=f"{ADDON_CATEGORY}/pipe",
+            inputs=[
+                io.Autogrow.Input("inputs", template=autogrow_template),
+            ],
+            outputs=[io.AnyType.Output("pipe")],
+        )
+
+    @classmethod
+    def execute(cls, inputs: io.Autogrow.Type) -> io.NodeOutput:
+        # 'inputs' is a dict mapping input names to their values
+        output_pipe = {}
+        for pipe in list(inputs.values()):
+            output_pipe.update(clone_data(pipe))
+        return io.NodeOutput(output_pipe)
 
 # ===== NODES : DEBUG PIPE ====================================================================================
 
@@ -475,6 +502,8 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         PipeVideoWan,
 
         PipeCustom,
+
+        PipeMerge,
 
         PipeDebug,
 

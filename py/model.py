@@ -71,7 +71,36 @@ class ModelInfo(io.ComfyNode):
 
     @classmethod
     def execute(cls, **kwargs):
-        (kwargs["model_type"], kwargs["model_name"]) = kwargs.get("model_name", "").split(MODELTYPE_SEPARATOR, 1) # strip the model type prefix
+        (kwargs["model_type"], kwargs["model_name"]) = split_model_type_and_name(kwargs.get("model_name", "")) #kwargs.get("model_name", "").split(MODELTYPE_SEPARATOR, 1) # strip the model type prefix
+        return io.NodeOutput(*kwargs.values())
+
+class ModelInfoSimple(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}ModelInfoSimple",
+            display_name=f"{ADDON_PREFIX} Model Info Simple",
+            category=f"{ADDON_CATEGORY}/info",
+            inputs=[
+                io.Combo.Input("model_name", options=build_full_models_list()),
+                io.Combo.Input("clip_name", options=["None"] + load_list_models("text_encoders")),
+                io.Combo.Input("clip_name_2", options=["None"] + load_list_models("text_encoders")),
+                io.Combo.Input("clip_name_3", options=["None"] + load_list_models("text_encoders")),
+                io.Combo.Input("vae_name", options=["Baked VAE"] + load_list_models("vae"), default="Baked VAE"),
+            ],
+            outputs=[
+                io.AnyType.Output("model_name"),
+                io.AnyType.Output("clip_name"),
+                io.AnyType.Output("clip_name_2"),
+                io.AnyType.Output("clip_name_3"),
+                io.AnyType.Output("vae_name"),
+                io.String.Output("model_type"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, **kwargs):
+        (kwargs["model_type"], kwargs["model_name"]) = split_model_type_and_name(kwargs.get("model_name", "")) #kwargs.get("model_name", "").split(MODELTYPE_SEPARATOR, 1) # strip the model type prefix
         return io.NodeOutput(*kwargs.values())
 
 
@@ -80,6 +109,7 @@ class ModelInfo(io.ComfyNode):
 def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         ModelInfo,
+        ModelInfoSimple,
     ]
 
 
