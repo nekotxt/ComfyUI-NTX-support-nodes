@@ -7,7 +7,7 @@ import textwrap
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_DIR
 from .logging import logger
-from .utils import clone_data, load_list_image_sizes, extract_image_size, DICT_TYPE, LIST_TYPE, LORA_STACK_TYPE, CONTROL_NET_STACK_TYPE
+from .utils import clone_data, load_list_image_sizes, extract_image_size, notify_user, DICT_TYPE, LIST_TYPE, LORA_STACK_TYPE, CONTROL_NET_STACK_TYPE
 
 
 # ===== NODES : CONTEXT ==================================================================================================================
@@ -182,7 +182,7 @@ DEFAULT_PIPE_VALUES = {
 }
 
 # input names that cannot be used for custom pipe entries
-RESERVED_PIPE_NAMES = ("pipe", "inputs_data")
+RESERVED_PIPE_NAMES = ("pipe", "inputs_data", "strict")
 
 def parse_entry_list(data):
     """Parse one editor entry list ([{"name":..., "type":...}, ...]) into an ordered
@@ -235,6 +235,8 @@ class PipeCustom(io.ComfyNode):
             inputs=[
                 DICT_TYPE.Input("pipe", optional=True),
                 io.String.Input("inputs_data", default="[]"),
+                io.Boolean.Input("strict", default=False,
+                                 tooltip="Warn when a configured output name is not found in the pipe (a per-type default is returned either way)"),
             ],
             # links are validated by output index, so the maximum number of outputs must be
             # declared here; the frontend shows/renames only the configured ones
@@ -243,7 +245,7 @@ class PipeCustom(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, inputs_data, pipe=None, **kwargs):
+    def execute(cls, inputs_data, strict=False, pipe=None, **kwargs):
         (in_names, in_types, out_names, out_types) = parse_inputs_data(inputs_data)
         #logger.info(f"PipeCustom : {inputs_data}")
         #logger.info(f"PipeCustom : {kwargs}")
@@ -261,13 +263,22 @@ class PipeCustom(io.ComfyNode):
 
         # recover output from pipe. If not present, try to get a default if available
         outputs = []
+        missing = []
         for name in out_names:
             if name in new_pipe:
                 outputs.append(new_pipe[name])
                 #logger.info(f"PipeCustom : {name}[{out_types[name]}] => {new_pipe[name]}")
             else:
                 outputs.append(DEFAULT_PIPE_VALUES.get(out_types[name], None))
+                missing.append(name)
                 #logger.info(f"PipeCustom : {name}[{out_types[name]}] => {DEFAULT_PIPE_VALUES.get(out_types[name], None)}")
+
+        # in strict mode, outputs that fell back to their default are reported to
+        # the user — typically a typo between an upstream input and this output
+        if strict and missing:
+            msg = f"output name(s) not found in pipe : {', '.join(missing)}"
+            notify_user("warn", "PipeCustom", msg)
+            logger.warning(f"PipeCustom : {msg}")
 
         return io.NodeOutput(new_pipe, *outputs)
 

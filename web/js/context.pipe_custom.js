@@ -15,7 +15,7 @@ export const PIPE_MAX_SLOTS = 30
 
 const NODE_ID = ADDON_PREFIX + "PipeCustom";
 const WIDGET_NAME = "inputs_data";
-const RESERVED_NAMES = ["pipe", WIDGET_NAME];
+const RESERVED_NAMES = ["pipe", WIDGET_NAME, "strict"];
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
@@ -228,6 +228,16 @@ const CSS = `
     font-size: 11px;
     white-space: normal;
     word-break: break-word;
+}
+
+.cpp-tpl-replace {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
 }
 
 .cpp-footer {
@@ -473,6 +483,34 @@ function slotsMatch(node, data) {
     });
 }
 
+// ── Name suggestions ──────────────────────────────────────────────────────────
+// Candidate names offered by the editor's autocompletion: the entries already
+// configured on the other side of this node, plus every key written into the
+// pipe by the chain of PipeCustom nodes feeding this node's pipe input.
+// Returns a name → type map, also used to preset the row type when a
+// suggested name is picked.
+
+function collectNameSuggestions(node, widget, otherKind) {
+    const suggestions = new Map();
+    for (const e of widget.getData()[otherKind]) {
+        if (!suggestions.has(e.name)) suggestions.set(e.name, e.type);
+    }
+
+    let cur = node;
+    for (let guard = 0; guard < 100; guard++) {      // guard against link cycles
+        const pipeIn = (cur.inputs ?? []).find(s => s.name === "pipe" && !s.widget);
+        const link = pipeIn?.link != null ? cur.graph?.links?.[pipeIn.link] : null;
+        const up = link ? cur.graph.getNodeById(link.origin_id) : null;
+        if (!up || up.comfyClass !== NODE_ID) break;
+        const w = getPipeWidget(up);
+        for (const e of w?.getData?.().inputs ?? []) {
+            if (!suggestions.has(e.name)) suggestions.set(e.name, e.type);
+        }
+        cur = up;
+    }
+    return suggestions;
+}
+
 // ── Edit dialog ───────────────────────────────────────────────────────────────
 
 function openEditDialog(node, widget, kind) {
@@ -497,6 +535,18 @@ function openEditDialog(node, widget, kind) {
     title.className = "cpp-title";
     title.textContent = `${node.title || NODE_ID} — custom ${kind}`;
     panel.appendChild(title);
+
+    // autocompletion for the name fields (native datalist, shared by all rows)
+    const suggestions = collectNameSuggestions(node, widget, kind === "outputs" ? "inputs" : "outputs");
+    const DATALIST_ID = "cpp-name-suggestions";
+    const dataList = document.createElement("datalist");
+    dataList.id = DATALIST_ID;
+    for (const name of suggestions.keys()) {
+        const opt = document.createElement("option");
+        opt.value = name;
+        dataList.appendChild(opt);
+    }
+    panel.appendChild(dataList);
 
     const rowsEl = document.createElement("div");
     rowsEl.className = "cpp-rows";
@@ -610,7 +660,18 @@ function openEditDialog(node, widget, kind) {
         nameEl.type = "text";
         nameEl.placeholder = `${label} name`;
         nameEl.value = entry.name;
-        nameEl.addEventListener("input", () => { entry.name = nameEl.value; });
+        nameEl.setAttribute("list", DATALIST_ID);
+        nameEl.setAttribute("autocomplete", "off");
+        nameEl.addEventListener("input", () => {
+            entry.name = nameEl.value;
+            // a name known from the other side / upstream presets the row type,
+            // keeping the two ends of the pipe key consistent
+            const knownType = suggestions.get(nameEl.value.trim());
+            if (knownType && knownType !== entry.type) {
+                entry.type = knownType;
+                setTypeValue(knownType);
+            }
+        });
 
         const typeEl = document.createElement("select");
         typeEl.className = "cpp-type";
@@ -625,6 +686,17 @@ function openEditDialog(node, widget, kind) {
         }
         typeEl.value = entry.type;
         typeEl.addEventListener("change", () => { entry.type = typeEl.value; });
+
+        // select `t` in the dropdown, adding it first if it is not a stock type
+        function setTypeValue(t) {
+            if (![...typeEl.options].some(o => o.value === t)) {
+                const opt = document.createElement("option");
+                opt.value = t;
+                opt.textContent = t;
+                typeEl.insertBefore(opt, typeEl.firstChild);
+            }
+            typeEl.value = t;
+        }
 
         const delBtn = document.createElement("button");
         delBtn.className = "cpp-del";
@@ -738,8 +810,10 @@ function openEditDialog(node, widget, kind) {
     }
 
     // append a template's properties to the list, skipping any whose name is
-    // already present (and respecting the slot cap); returns the count added
-    function applyTemplate(tpl) {
+    // already present (and respecting the slot cap); returns the count added.
+    // With `replace` the current entries are cleared first.
+    function applyTemplate(tpl, replace = false) {
+        if (replace) work.length = 0;
         const existing = new Set(work.map(e => e.name.trim()));
         let added = 0;
         for (const prop of tpl?.properties ?? []) {
@@ -784,6 +858,16 @@ function openEditDialog(node, widget, kind) {
         pTitle.textContent = `Load template — ${kind}`;
         pPanel.appendChild(pTitle);
 
+        // append (default) or replace the current entries with the template's
+        const replaceWrap = document.createElement("label");
+        replaceWrap.className = "cpp-tpl-replace";
+        const replaceChk = document.createElement("input");
+        replaceChk.type = "checkbox";
+        const replaceLbl = document.createElement("span");
+        replaceLbl.textContent = "Replace current entries (instead of append)";
+        replaceWrap.append(replaceChk, replaceLbl);
+        pPanel.appendChild(replaceWrap);
+
         const listEl = document.createElement("div");
         listEl.className = "cpp-tpl-list";
         pPanel.appendChild(listEl);
@@ -820,10 +904,13 @@ function openEditDialog(node, widget, kind) {
 
             btn.append(nameEl, propsEl);
             btn.addEventListener("click", () => {
-                const added = applyTemplate(tpl);
+                const replace = replaceChk.checked;
+                const added = applyTemplate(tpl, replace);
                 closePicker();
                 const skipped = (tpl?.properties?.length ?? 0) - added;
-                if (added === 0) {
+                if (replace) {
+                    errEl.textContent = `Replaced with ${added} ${added === 1 ? "entry" : "entries"} from "${tpl?.name}".`;
+                } else if (added === 0) {
                     errEl.textContent = `"${tpl?.name}" added no new ${kind} (already present).`;
                 } else if (skipped > 0) {
                     errEl.textContent = `Added ${added}, skipped ${skipped} duplicate ${skipped === 1 ? "name" : "names"}.`;
