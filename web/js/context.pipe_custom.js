@@ -486,9 +486,8 @@ function slotsMatch(node, data) {
 // ── Name suggestions ──────────────────────────────────────────────────────────
 // Candidate names offered by the editor's autocompletion: the entries already
 // configured on the other side of this node, plus every key written into the
-// pipe by the chain of PipeCustom nodes feeding this node's pipe input.
-// Returns a name → type map, also used to preset the row type when a
-// suggested name is picked.
+// pipe by the PipeCustom nodes found upstream. Returns a name → type map,
+// also used to preset the row type when a suggested name is picked.
 
 function collectNameSuggestions(node, widget, otherKind) {
     const suggestions = new Map();
@@ -496,17 +495,37 @@ function collectNameSuggestions(node, widget, otherKind) {
         if (!suggestions.has(e.name)) suggestions.set(e.name, e.type);
     }
 
-    let cur = node;
-    for (let guard = 0; guard < 100; guard++) {      // guard against link cycles
-        const pipeIn = (cur.inputs ?? []).find(s => s.name === "pipe" && !s.widget);
-        const link = pipeIn?.link != null ? cur.graph?.links?.[pipeIn.link] : null;
-        const up = link ? cur.graph.getNodeById(link.origin_id) : null;
-        if (!up || up.comfyClass !== NODE_ID) break;
-        const w = getPipeWidget(up);
-        for (const e of w?.getData?.().inputs ?? []) {
-            if (!suggestions.has(e.name)) suggestions.set(e.name, e.type);
+    // Walk the graph upstream, breadth-first, starting from this node: every
+    // DICT-typed input is followed to its origin node, so merge/debug/other
+    // pipe-passing nodes do not cut the search short. Only PipeCustom nodes
+    // contribute names (their configured inputs — the keys they write into
+    // the pipe). Capped at 100 visited nodes to bound the walk.
+    const graph = node.graph;
+    if (!graph) return suggestions;
+
+    const visited = new Set([node.id]);
+    const queue = [node];
+    let hops = 0;
+    while (queue.length && hops < 100) {
+        const cur = queue.shift();
+        hops++;
+
+        if (cur !== node && cur.comfyClass === NODE_ID) {
+            const w = getPipeWidget(cur);
+            for (const e of w?.getData?.().inputs ?? []) {
+                if (!suggestions.has(e.name)) suggestions.set(e.name, e.type);
+            }
         }
-        cur = up;
+
+        for (const slot of cur.inputs ?? []) {
+            if (slot.type !== "DICT") continue;
+            const link = slot.link != null ? graph.links?.[slot.link] : null;
+            const up = link ? graph.getNodeById(link.origin_id) : null;
+            if (up && !visited.has(up.id)) {
+                visited.add(up.id);
+                queue.push(up);
+            }
+        }
     }
     return suggestions;
 }

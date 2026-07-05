@@ -31,6 +31,7 @@ outputs are configured **independently** — a node may, for example, only add v
 |---|---|---|
 | `pipe` | DICT (optional) | An upstream pipe to extend. If omitted, a new empty pipe is created. The input pipe is cloned, so downstream changes never affect the upstream dictionary. |
 | `inputs_data` | STRING (hidden) | JSON produced by the editor dialog describing the configured inputs/outputs (`{"inputs": [...], "outputs": [...]}`). Managed entirely by the frontend; not edited by hand. |
+| `strict` | BOOLEAN | When enabled, a warning toast (and log entry) lists every configured output whose name is not found in the pipe — typically a typo between an upstream input and this output. The per-type default is returned either way; execution is not interrupted. Default `false`. |
 | *custom inputs* | user-defined | One slot per configured input, with the chosen name and type. Only connected (non-None) values are written into the pipe. |
 
 ### Outputs
@@ -40,8 +41,8 @@ outputs are configured **independently** — a node may, for example, only add v
 | `pipe` | DICT | The merged pipe dictionary (input pipe + values from the connected custom inputs). |
 | *custom outputs* | user-defined | One slot per configured output; each returns `pipe[name]`. If the name is not present in the pipe, a per-type default is returned (`0` for INT, `0.0` for FLOAT, `""` for STRING, `False` for BOOLEAN, `[]` for LORA_STACK / CONTROL_NET_STACK / LIST, `{}` for DICT, `None` otherwise). |
 
-Up to **30** custom inputs and 30 custom outputs per node. The names `pipe` and `inputs_data`
-are reserved and cannot be used for custom entries.
+Up to **30** custom inputs and 30 custom outputs per node. The names `pipe`, `inputs_data` and
+`strict` are reserved and cannot be used for custom entries.
 
 ### Frontend
 
@@ -51,6 +52,11 @@ dialog for the corresponding side. In the dialog:
 - **+ Add** appends a new entry; each row has a name field and a type dropdown
   (IMAGE, MASK, LATENT, MODEL, CLIP, VAE, CONDITIONING, INT, FLOAT, STRING, BOOLEAN,
   LORA_STACK, CONTROL_NET_STACK, DICT, LIST, `*`).
+- The name field offers **autocompletion**: suggested names are the entries configured on the
+  other side of the node, plus every key written into the pipe by the PipeCustom nodes found
+  upstream (the graph is walked breadth-first through all DICT-typed inputs — so PipeMerge
+  branches and pipe-passing nodes are traversed — up to 100 nodes). Picking a suggested name
+  also presets the row's type to the type known for that key; it can still be changed manually.
 - Rows can be **drag-reordered** with the handle and removed with **✕**.
 - **Renaming** a row keeps its slot and any connected wires — only removing a row (or changing
   its type) drops the wire. A rename is also propagated to the entry with the same name on the
@@ -59,7 +65,9 @@ dialog for the corresponding side. In the dialog:
 - **Copy from inputs/outputs** replaces the list with the entries of the other side.
 - **Load template…** opens a picker with predefined property sets loaded from
   `input/ntx_data/custompipe_configs.txt`; the chosen template's properties are appended,
-  skipping names already present.
+  skipping names already present. Ticking **Replace current entries** in the picker clears the
+  list before the template is applied instead of appending to it (nothing is committed until
+  the editor dialog is confirmed with **OK**).
 - **Save as template…** stores the current list as a named template in the same file, so it can
   be reloaded later on any PipeCustom node. If the name is already taken, the button changes to
   **Overwrite** and a second click is required to replace the existing template.
