@@ -324,14 +324,16 @@ scenes:
 | `scenes/fantasy/dungeon` | `a torch-lit stone dungeon, dripping water, volumetric light` (`id::text` leaf) |
 | `scenes/sci-fi/space station` | `interior of a vast orbital space station, earth visible through the windows` (dictionary leaf) |
 
-The library is cached in memory after the first read; use the Refresh button / RMB option
-below to pick up changes made on disk.
+The library is cached in memory on the backend, but the `id` combo is a **remote combo**: its
+option list is fetched from the backend (which re-reads the files from disk) every time the
+list is opened for the first time, its refresh button is pressed, or the node definitions are
+reloaded with `R` — so prompts added on disk show up without a backend restart.
 
 ### Inputs
 
 | Input | Type | Description |
 |---|---|---|
-| `id` | COMBO | The prompt id (`category/.../name`). |
+| `id` | COMBO (remote) | The prompt id (`category/.../name`). The list is fetched from the backend on demand (see above). |
 | `prompt` | STRING (multiline) | The prompt text. The frontend fills it automatically when an id is selected, and it can be freely edited afterwards. If left empty (e.g. headless/API execution), the library text for the id is used. |
 
 ### Outputs
@@ -347,15 +349,17 @@ below to pick up changes made on disk.
 - **Shift+click** on the `id` widget opens a **tree picker** organised by category, with a
   filter box, OK/Cancel, double-click to confirm, and Enter/Escape keys. Its **Refresh** button
   makes the backend re-read the prompt files from disk and rebuilds the tree.
+- The tree picker shows a **preview pane** below the tree: the library text of the highlighted
+  prompt, together with its thumbnail when an image sits next to the prompt file.
 - Selecting an id (from the picker or the combo) automatically fills the `prompt` textbox with
-  the library text.
+  the library text. If the current text was **edited manually** (it differs from the library
+  text of the previously selected id), a confirmation dialog asks before replacing it —
+  cancelling keeps the edited text while still switching the id.
 
 Right-click menu option on the node:
 
 - **Rebuild Prompts List from disk** — same effect as the tree picker's Refresh button:
-  the backend re-reads the prompt files and the cached maps are refreshed. (The option list of
-  the `id` combo itself comes from the node definition — press `R` to reload the node
-  definitions if you need new entries to appear in the combo.)
+  the backend re-reads the prompt files and the cached maps are refreshed.
 
 The same frontend behaviour (tree picker, prompt auto-fill, RMB reload) is shared by the
 **LoadPromptAdvanced** and **LoadPromptChar** variants described below.
@@ -367,12 +371,15 @@ The same frontend behaviour (tree picker, prompt auto-fill, RMB reload) is share
 ![LoadPromptAdvanced node](images/LoadPromptAdvanced.png)
 
 Same as **LoadPrompt**, with three extra free-form string parameters that are passed straight
-through to the outputs.
+through to the outputs, plus a dictionary output carrying all the extra keys of the entry.
 
 Differences from LoadPrompt:
 
 - three additional STRING inputs, `param1`, `param2`, `param3`, each repeated unchanged as an
   output with the same name;
+- an additional `params` DICT output with **every** extra key:value pair of the selected
+  library entry (empty for plain-string leaves) — useful downstream with
+  **ReplaceTextParameters**, and not limited to three values or to widget renaming;
 - when the selected library entry is a dictionary carrying extra keys besides `name` and
   `positive`, the frontend fills the param widgets from those keys when the id is selected.
   A widget is matched by its **current (user-facing) name**, so renaming e.g. `param2` to

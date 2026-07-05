@@ -8,7 +8,7 @@ from PIL import Image, ImageOps
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_DIR
 from .logging import logger
-from .utils import notify_user
+from .utils import notify_user, DICT_TYPE
 
 # ===== PROMPT LIBRARY =====================================================================================================================
 
@@ -178,16 +178,63 @@ def load_image_as_tensor(path):
 
 # ===== NODES ==============================================================================================================================
 
-class LoadPrompt(io.ComfyNode):
+class LoadPromptBase(io.ComfyNode):
+    """Shared behaviour of the LoadPrompt* nodes: the remote id combobox, the
+    library-text fallback and the per-id preview image lookup. Not registered
+    as a node itself."""
+
+    @classmethod
+    def id_input(cls):
+        # remote combo: the frontend fetches the id list from the backend route on
+        # first use and whenever the refresh button is pressed, so prompts added on
+        # disk show up without a backend restart. With a remote combo the schema
+        # carries no options list, so validation is relaxed by validate_inputs.
+        return io.Combo.Input(
+            "id",
+            remote=io.RemoteOptions(
+                route=f"/{API_PREFIX}/load_prompt_ids",
+                refresh_button=True,
+                control_after_refresh="first",
+            ),
+        )
+
+    @classmethod
+    def validate_inputs(cls, id):
+        # the id list is dynamic (remote combo), so any string is accepted;
+        # execute() falls back gracefully when an id is unknown
+        return True
+
+    @classmethod
+    def resolve_prompt(cls, id, prompt):
+        # the frontend fills the prompt box from the selected id, but fall back to
+        # the library text when it is empty (e.g. headless / API execution)
+        if not prompt or prompt.isspace():
+            prompt = load_prompts_map().get(id, "")
+        return prompt
+
+    @classmethod
+    def load_prompt_image(cls, id):
+        # look for an image with the same name as the id; return None if missing
+        image_path = find_prompt_image(id)
+        if image_path is None:
+            return None
+        try:
+            return load_image_as_tensor(image_path)
+        except Exception as e:
+            logger.warning(f"{cls.__name__} : could not load image {image_path.name} : {e}")
+            return None
+
+
+class LoadPrompt(LoadPromptBase):
     @classmethod
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}LoadPrompt",
             display_name=f"{ADDON_PREFIX} Load Prompt",
-            description="Pick a prompt from the nested library in input/ntx_data/prompts/test.yaml; the text can be edited before use.",
+            description="Pick a prompt from the nested prompt library (input/ntx_data/prompts: *.yaml files and *.txt files in subfolders); the text can be edited before use.",
             category=f"{ADDON_CATEGORY}/prompts",
             inputs=[
-                io.Combo.Input("id", options=load_prompt_ids()),
+                cls.id_input(),
                 io.String.Input("prompt", multiline=True, default=""),
             ],
             outputs=[
@@ -199,33 +246,20 @@ class LoadPrompt(io.ComfyNode):
 
     @classmethod
     def execute(cls, id, prompt):
-        # the frontend fills the prompt box from the selected id, but fall back to
-        # the library text when it is empty (e.g. headless / API execution)
-        if not prompt or prompt.isspace():
-            prompt = load_prompts_map().get(id, "")
-
-        # look for an image with the same name as the id; return None if missing
-        image = None
-        image_path = find_prompt_image(id)
-        if image_path is not None:
-            try:
-                image = load_image_as_tensor(image_path)
-            except Exception as e:
-                logger.warning(f"LoadPrompt : could not load image {image_path.name} : {e}")
-
-        return io.NodeOutput(prompt, id, image)
+        prompt = cls.resolve_prompt(id, prompt)
+        return io.NodeOutput(prompt, id, cls.load_prompt_image(id))
 
 
-class LoadPromptAdvanced(io.ComfyNode):
+class LoadPromptAdvanced(LoadPromptBase):
     @classmethod
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}LoadPromptAdvanced",
             display_name=f"{ADDON_PREFIX} Load Prompt Advanced",
-            description="Pick a prompt from the nested library in input/ntx_data/prompts/test.yaml; the text can be edited before use. Adds three free-form string parameters that are passed straight through to the outputs.",
+            description="Pick a prompt from the nested prompt library (input/ntx_data/prompts); the text can be edited before use. Adds three free-form string parameters passed straight through to the outputs (auto-filled from the entry's extra keys by the frontend), plus a params dictionary with all the extra key:value pairs of the selected entry.",
             category=f"{ADDON_CATEGORY}/prompts",
             inputs=[
-                io.Combo.Input("id", options=load_prompt_ids()),
+                cls.id_input(),
                 io.String.Input("prompt", multiline=True, default=""),
                 io.String.Input("param1", default=""),
                 io.String.Input("param2", default=""),
@@ -238,39 +272,29 @@ class LoadPromptAdvanced(io.ComfyNode):
                 io.String.Output("param1"),
                 io.String.Output("param2"),
                 io.String.Output("param3"),
+                DICT_TYPE.Output("params"),
             ],
         )
 
     @classmethod
     def execute(cls, id, prompt, param1, param2, param3):
-        # the frontend fills the prompt box from the selected id, but fall back to
-        # the library text when it is empty (e.g. headless / API execution)
-        if not prompt or prompt.isspace():
-            prompt = load_prompts_map().get(id, "")
-
-        # look for an image with the same name as the id; return None if missing
-        image = None
-        image_path = find_prompt_image(id)
-        if image_path is not None:
-            try:
-                image = load_image_as_tensor(image_path)
-            except Exception as e:
-                logger.warning(f"LoadPromptAdvanced : could not load image {image_path.name} : {e}")
-
-        # the three extra parameters are simply repeated as outputs
-        return io.NodeOutput(prompt, id, image, param1, param2, param3)
+        prompt = cls.resolve_prompt(id, prompt)
+        # the three string parameters are repeated as outputs; params carries every
+        # extra key:value pair of the selected entry (empty for plain-string leaves)
+        params = load_prompts_params().get(id, {})
+        return io.NodeOutput(prompt, id, cls.load_prompt_image(id), param1, param2, param3, params)
 
 
-class LoadPromptChar(io.ComfyNode):
+class LoadPromptChar(LoadPromptBase):
     @classmethod
     def define_schema(cls):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}LoadPromptChar",
             display_name=f"{ADDON_PREFIX} Load Prompt Char",
-            description="Pick a prompt from the nested library in input/ntx_data/prompts/test.yaml; the text can be edited before use. Adds three free-form string parameters that are passed straight through to the outputs.",
+            description="Pick a character prompt from the nested prompt library (input/ntx_data/prompts); the text can be edited before use and is returned as 'char', together with the 'save_name' string.",
             category=f"{ADDON_CATEGORY}/prompts",
             inputs=[
-                io.Combo.Input("id", options=load_prompt_ids()),
+                cls.id_input(),
                 io.String.Input("prompt", multiline=True, default=""),
                 io.String.Input("save_name", default=""),
             ],
@@ -282,12 +306,7 @@ class LoadPromptChar(io.ComfyNode):
 
     @classmethod
     def execute(cls, id, prompt, save_name):
-        # the frontend fills the prompt box from the selected id, but fall back to
-        # the library text when it is empty (e.g. headless / API execution)
-        if not prompt or prompt.isspace():
-            prompt = load_prompts_map().get(id, "")
-
-        # the three extra parameters are simply repeated as outputs
+        prompt = cls.resolve_prompt(id, prompt)
         return io.NodeOutput(prompt, save_name)
 
 
@@ -295,7 +314,7 @@ class LoadPromptChar(io.ComfyNode):
 
 def prompt_target_paths(category, name):
     """Build the (txt_path, img_path) a prompt with the given category/name would be
-    saved to, e.g. category="scenes/fantasy", name="lake" -> scenes/fantasy/lake.{txt,png}.
+    saved to, e.g. category="scenes/fantasy", name="lake" -> scenes/fantasy/lake.{txt,jpg}.
     Returns None when the name is empty or the target would fall outside PROMPTS_DIR."""
     name = (name or "").strip().strip("/")
     cat_parts = [p for p in (category or "").split("/") if p.strip()]
@@ -309,8 +328,9 @@ def prompt_target_paths(category, name):
     return (base.with_name(base.name + ".txt"), base.with_name(base.name + ".jpg"))
 
 
-def save_tensor_as_png(image, path):
-    """Save a ComfyUI IMAGE tensor ([B,H,W,C] or [H,W,C], float 0..1) as a IMAGE (first frame)."""
+def save_tensor_as_image(image, path):
+    """Save a ComfyUI IMAGE tensor ([B,H,W,C] or [H,W,C], float 0..1) to an image
+    file; the format follows the path extension (first frame only for a batch)."""
     img = image[0] if image.ndim == 4 else image
     arr = (img.clamp(0.0, 1.0).cpu().numpy() * 255.0).round().astype(np.uint8)
     Image.fromarray(arr).save(path)
@@ -332,7 +352,7 @@ def save_prompt_files(category, name, prompt, image=None, overwrite=False):
         txt_path.parent.mkdir(parents=True, exist_ok=True)
         txt_path.write_text(prompt or "", encoding="utf-8")
         if image is not None:
-            save_tensor_as_png(image, img_path)
+            save_tensor_as_image(image, img_path)
     except Exception as e:
         return (False, f"could not save : {e}")
 
@@ -348,7 +368,7 @@ class SavePrompt(io.ComfyNode):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}SavePrompt",
             display_name=f"{ADDON_PREFIX} Save Prompt",
-            description="Save a prompt (and an optional image) into the library under category/name, e.g. scenes/fantasy/lake.txt (+ .png).",
+            description="Save a prompt (and an optional image) into the library under category/name, e.g. scenes/fantasy/lake.txt (+ .jpg).",
             category=f"{ADDON_CATEGORY}/prompts",
             is_output_node=True,
             inputs=[
@@ -405,6 +425,22 @@ from server import PromptServer
 @PromptServer.instance.routes.get(f"/{API_PREFIX}/load_prompts")
 async def load_prompts_route(request):
     return web.json_response(load_prompts_map())
+
+@PromptServer.instance.routes.get(f"/{API_PREFIX}/load_prompt_ids")
+async def load_prompt_ids_route(request):
+    # backing route of the remote id combobox: rebuild the maps from disk so the
+    # combo (first open, refresh button, R key) always reflects the current files
+    reload_prompts_map()
+    return web.json_response(load_prompt_ids())
+
+@PromptServer.instance.routes.get(f"/{API_PREFIX}/view_prompt_image")
+async def view_prompt_image_route(request):
+    # preview image sitting next to a prompt id, used by the tree picker;
+    # find_prompt_image() confines the lookup to PROMPTS_DIR
+    image_path = find_prompt_image(request.query.get("id", ""))
+    if image_path is None:
+        raise web.HTTPNotFound()
+    return web.FileResponse(image_path)
 
 @PromptServer.instance.routes.get(f"/{API_PREFIX}/load_prompt_params")
 async def load_prompt_params_route(request):

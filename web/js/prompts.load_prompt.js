@@ -71,17 +71,31 @@ async function reloadPromptsMap() {
     return promptsMap;
 }
 
+// the id combo is a remote combo whose list rebuilds from disk on every fetch
+// (first open, its refresh button, the R key) — see /load_prompt_ids in
+// py/prompts.py. The maps cached here can therefore lag behind the combo; this
+// refetches them when the combo hands us an id they do not know yet.
+async function ensureIdKnown(id) {
+    if (!promptsMap || id in promptsMap) return;
+    promptsMap = null;
+    promptsMapPromise = null;
+    promptsParams = null;
+    promptsParamsPromise = null;
+    await getPromptsMap();
+    await getPromptsParams();
+}
+
 // toast shown after the prompt cache has been re-read from disk
 function notifyPromptsReloaded() {
     try {
         app.extensionManager?.toast?.add({
             severity: "success",
             summary: "Prompt cache reloaded",
-            detail: "Prompt cache reloaded: press R to refresh combo",
+            detail: "Prompt files re-read from disk",
             life: 4000,
         });
     } catch (err) {
-        console.log("Prompt cache reloaded: press R to refresh combo");
+        console.log("Prompt files re-read from disk");
     }
 }
 
@@ -189,6 +203,36 @@ const CSS = `
 }
 .lpt-leaf.lpt-selected { background: #2d5a8a; color: #fff; }
 .lpt-empty { padding: 12px; opacity: 0.6; font-size: 13px; }
+.lpt-preview {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 6px;
+    border: 1px solid #444;
+    border-radius: 4px;
+    background: var(--comfy-input-bg, #1a1a1a);
+    min-height: 48px;
+    max-height: 130px;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+}
+.lpt-preview-img {
+    flex: 0 0 auto;
+    max-width: 110px;
+    max-height: 110px;
+    object-fit: contain;
+    border-radius: 3px;
+    align-self: center;
+}
+.lpt-preview-text {
+    flex: 1 1 auto;
+    overflow: auto;
+    font-size: 11px;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.lpt-preview-text.lpt-placeholder { opacity: 0.5; }
 .lpt-buttons {
     display: flex;
     justify-content: flex-end;
@@ -292,6 +336,33 @@ function openTreePicker(node) {
     const treeEl = document.createElement("div");
     treeEl.className = "lpt-tree";
     panel.appendChild(treeEl);
+
+    // preview of the highlighted prompt: library text + thumbnail (if any)
+    const preview = document.createElement("div");
+    preview.className = "lpt-preview";
+    const previewImg = document.createElement("img");
+    previewImg.className = "lpt-preview-img";
+    previewImg.style.display = "none";
+    const previewText = document.createElement("div");
+    previewText.className = "lpt-preview-text";
+    preview.appendChild(previewImg);
+    preview.appendChild(previewText);
+    panel.appendChild(preview);
+
+    function updatePreview() {
+        previewImg.style.display = "none";
+        previewImg.removeAttribute("src");
+        if (!selectedId) {
+            previewText.classList.add("lpt-placeholder");
+            previewText.textContent = "Select a prompt to preview it.";
+            return;
+        }
+        previewText.classList.remove("lpt-placeholder");
+        previewText.textContent = promptsMap?.[selectedId] ?? "";
+        previewImg.onload = () => { previewImg.style.display = ""; };
+        previewImg.onerror = () => { previewImg.style.display = "none"; };
+        previewImg.src = `/${API_PREFIX}/view_prompt_image?id=${encodeURIComponent(selectedId)}`;
+    }
 
     const buttons = document.createElement("div");
     buttons.className = "lpt-buttons";
@@ -405,6 +476,7 @@ function openTreePicker(node) {
             treeEl.appendChild(empty);
         }
         if (selectedRowEl) selectedRowEl.scrollIntoView({ block: "nearest" });
+        updatePreview();
     }
 
     function onKey(e) {
@@ -731,12 +803,30 @@ app.registerExtension({
         await getPromptsParams();
 
         // sync the textbox (and the advanced node's param widgets) whenever the
-        // id selection changes
+        // id selection changes. The id whose library text was last applied is
+        // tracked so a manually edited prompt is not overwritten silently.
+        let lastAppliedId = idWidget.value;
+
         const originalCallback = idWidget.callback;
         idWidget.callback = function (value, ...args) {
             const ret = originalCallback?.apply(this, [value, ...args]);
-            applyPrompt(node, value);
-            applyParams(node, value);
+
+            const promptWidget = node.widgets?.find((w) => w.name === PROMPT_WIDGET);
+            const current = String(promptWidget?.value ?? "").trim();
+            const lastLib = String(promptsMap?.[lastAppliedId] ?? "").trim();
+            const edited = current !== "" && current !== lastLib;
+
+            (async () => {
+                // the remote combo can know ids newer than the cached maps
+                await ensureIdKnown(value);
+                if (!edited || window.confirm(
+                    `The prompt text was edited manually.\nReplace it with the library text of "${value}"?`)) {
+                    applyPrompt(node, value);
+                    applyParams(node, value);
+                }
+                lastAppliedId = value;
+            })();
+
             return ret;
         };
     },
