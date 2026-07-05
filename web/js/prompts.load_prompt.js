@@ -791,6 +791,21 @@ app.registerExtension({
         });
     },
 
+    // The frontend's remote-combo helper (useRemoteWidget.onFirstLoad) sets the
+    // widget to the first fetched id as soon as the id list arrives, without
+    // checking whether the node was just deserialized with a saved id — so a
+    // reopened workflow loses its selection. Remember the saved id here (after
+    // configure() restored it, before the fetch resolves) so the wrapped
+    // callback below can put it back when that spurious reset fires.
+    loadedGraphNode(node) {
+        if (!PROMPT_NODE_IDS.has(node.comfyClass)) return;
+        const idWidget = node.widgets?.find((w) => w.name === ID_WIDGET);
+        const saved = idWidget?.value;
+        if (typeof saved === "string" && saved && saved !== "Loading...") {
+            node.__lptSavedId = saved;
+        }
+    },
+
     async nodeCreated(node) {
         if (!PROMPT_NODE_IDS.has(node.comfyClass)) return;
 
@@ -807,8 +822,29 @@ app.registerExtension({
         // tracked so a manually edited prompt is not overwritten silently.
         let lastAppliedId = idWidget.value;
 
+        // if the remote combo's first-load reset already fired before this
+        // wrapper was installed, undo it now
+        if (node.__lptSavedId !== undefined && idWidget.value !== node.__lptSavedId) {
+            idWidget.value = node.__lptSavedId;
+            lastAppliedId = node.__lptSavedId;
+            delete node.__lptSavedId;
+            node.setDirtyCanvas(true, true);
+        }
+
         const originalCallback = idWidget.callback;
         idWidget.callback = function (value, ...args) {
+            // first callback after a workflow load: this is the remote combo's
+            // first-load reset, not a user selection — restore the saved id and
+            // leave the saved prompt/param texts exactly as they were saved
+            const savedId = node.__lptSavedId;
+            if (savedId !== undefined) {
+                delete node.__lptSavedId;
+                idWidget.value = savedId;
+                lastAppliedId = savedId;
+                node.setDirtyCanvas(true, true);
+                return originalCallback?.apply(this, [savedId, ...args]);
+            }
+
             const ret = originalCallback?.apply(this, [value, ...args]);
 
             const promptWidget = node.widgets?.find((w) => w.name === PROMPT_WIDGET);
