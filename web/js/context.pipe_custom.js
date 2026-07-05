@@ -333,9 +333,37 @@ function customOutputIndices(node) {
 // -20) — those virtual nodes are not returned by getNodeById(), so they cannot be wired
 // back up through the normal connect() path.
 //
-// Matching is by name: a renamed entry no longer matches its old slot, so the old slot
-// (and its wire) is dropped and a fresh, unconnected slot is created — this is the
-// "reconnect by same name" rule. A type change likewise drops the wire (left disconnected).
+// Matching is by name, refined by the editor's rename map: each edited entry
+// remembers the slot name it had when the dialog opened, so a renamed entry
+// reclaims its old slot (wires preserved) instead of getting a fresh one.
+// Entries without a rename record (template/copy imports, graph reloads) match
+// by current name; no match means a fresh, unconnected slot. A type change
+// keeps the slot but drops the wire (left disconnected).
+
+// rename a slot in place, keeping any display label in sync
+function renameSlot(slot, name) {
+    if (slot.label != null) slot.label = name;
+    if (slot.localized_name != null) slot.localized_name = name;
+    slot.name = name;
+}
+
+// Pull the slot for entry `e` out of `byName`. A recorded rename (new name →
+// name at dialog-open) takes precedence over a direct name match so that
+// swapped or chained renames each reclaim their own slot.
+function takeSlot(byName, e, renames) {
+    const orig = renames?.get(e.name);
+    if (orig !== undefined) {
+        const slot = byName.get(orig);
+        if (slot) {
+            byName.delete(orig);
+            if (slot.name !== e.name) renameSlot(slot, e.name);
+            return slot;
+        }
+    }
+    const slot = byName.get(e.name);
+    if (slot) byName.delete(e.name);
+    return slot;
+}
 
 // Lay `ordered` (the custom slots, in entry order) after the fixed slots (pipe / any
 // widget-backed slot), mutating the array in place so litegraph keeps its reference.
@@ -345,27 +373,26 @@ function relayoutSlots(slotArray, ordered) {
     slotArray.push(...fixed, ...ordered);
 }
 
-function reorderInputSlots(node, entries) {
+function reorderInputSlots(node, entries, renames) {
     const byName = new Map(customInputIndices(node).map(i => [node.inputs[i].name, node.inputs[i]]));
 
     const ordered = [];
     for (const e of entries) {
-        let slot = byName.get(e.name);
+        let slot = takeSlot(byName, e, renames);
         if (slot) {
-            byName.delete(e.name);
             if (slot.type !== e.type) {                      // type changed → drop the wire
                 const idx = node.inputs.indexOf(slot);
                 if (slot.link != null && idx !== -1) node.disconnectInput(idx);
                 slot.type = e.type;
             }
         } else {
-            node.addInput(e.name, e.type);                   // new/renamed entry → fresh slot
+            node.addInput(e.name, e.type);                   // new entry → fresh slot
             slot = node.inputs[node.inputs.length - 1];
         }
         ordered.push(slot);
     }
 
-    // entries removed or renamed away: drop their slots (also disconnects their wires)
+    // entries removed: drop their slots (also disconnects their wires)
     for (const slot of byName.values()) {
         const idx = node.inputs.indexOf(slot);
         if (idx !== -1) node.removeInput(idx);
@@ -383,14 +410,13 @@ function reorderInputSlots(node, entries) {
     }
 }
 
-function reorderOutputSlots(node, entries) {
+function reorderOutputSlots(node, entries, renames) {
     const byName = new Map(customOutputIndices(node).map(i => [node.outputs[i].name, node.outputs[i]]));
 
     const ordered = [];
     for (const e of entries) {
-        let slot = byName.get(e.name);
+        let slot = takeSlot(byName, e, renames);
         if (slot) {
-            byName.delete(e.name);
             if (slot.type !== e.type) {                      // type changed → drop the wire(s)
                 const idx = node.outputs.indexOf(slot);
                 if (slot.links?.length && idx !== -1) node.disconnectOutput(idx);
@@ -422,9 +448,9 @@ function reorderOutputSlots(node, entries) {
     }
 }
 
-function syncSlots(node, data) {
-    reorderInputSlots(node, data.inputs);
-    reorderOutputSlots(node, data.outputs);
+function syncSlots(node, data, renames) {
+    reorderInputSlots(node, data.inputs, renames?.inputs);
+    reorderOutputSlots(node, data.outputs, renames?.outputs);
 
     // snap the node height to its content
     requestAnimationFrame(() => {
@@ -454,8 +480,11 @@ function openEditDialog(node, widget, kind) {
 
     const label = kind === "outputs" ? "output" : "input";
 
-    // working copy edited in place by the rows
+    // working copy edited in place by the rows; each entry remembers the name
+    // it had when the dialog opened, so apply() can tell a rename apart from a
+    // remove+add (renamed entries keep their slot and wires)
     const work = widget.getData()[kind];
+    for (const e of work) e.__orig = e.name;
 
     const overlay = document.createElement("div");
     overlay.className = "cpp-overlay";
@@ -491,6 +520,12 @@ function openEditDialog(node, widget, kind) {
     tplBtn.className = "cpp-add";
     tplBtn.textContent = "Load template…";
     panel.appendChild(tplBtn);
+
+    // store the edited list as a named template in the same file
+    const saveTplBtn = document.createElement("button");
+    saveTplBtn.className = "cpp-add";
+    saveTplBtn.textContent = "Save as template…";
+    panel.appendChild(saveTplBtn);
 
     const errEl = document.createElement("div");
     errEl.className = "cpp-error";
@@ -631,8 +666,8 @@ function openEditDialog(node, widget, kind) {
 
     // names present on both sides should carry the same type — accepted, but
     // warn the user so unintended type changes do not go unnoticed
-    function warnTypeMismatches(entries) {
-        const otherTypes = new Map(widget.getData()[otherKind].map(e => [e.name, e.type]));
+    function warnTypeMismatches(entries, otherEntries) {
+        const otherTypes = new Map(otherEntries.map(e => [e.name, e.type]));
         const mismatches = entries
             .filter(e => otherTypes.has(e.name) && otherTypes.get(e.name) !== e.type)
             .map(e => `"${e.name}" is ${e.type} in ${kind} but ${otherTypes.get(e.name)} in ${otherKind}`);
@@ -658,9 +693,47 @@ function openEditDialog(node, widget, kind) {
             return;
         }
         const entries = work.map(e => ({ name: e.name.trim(), type: e.type }));
-        warnTypeMismatches(entries);
+
+        // slot-matching map (current name → name at dialog-open); rows added in
+        // this session carry no __orig and simply match by name
+        const renames = new Map();
+        for (const e of work) {
+            if (e.__orig) renames.set(e.name.trim(), e.__orig);
+        }
+
+        // propagate real renames to the same-named entry on the other side, so
+        // a pipe key renamed here keeps matching there; skipped when the new
+        // name is already taken on that side
+        const otherEntries = widget.getData()[otherKind];
+        const otherRenames = new Map();
+        const propagated = [];
+        for (const [name, orig] of renames) {
+            if (name === orig) continue;
+            if (otherEntries.some(e => e.name === name)) continue;
+            const match = otherEntries.find(e => e.name === orig);
+            if (match) {
+                match.name = name;
+                otherRenames.set(name, orig);
+                propagated.push(`"${orig}" → "${name}"`);
+            }
+        }
+
+        warnTypeMismatches(entries, otherEntries);
+
         widget.setEntries(kind, entries);
-        syncSlots(node, widget.getData());
+        widget.setEntries(otherKind, otherEntries);
+        syncSlots(node, widget.getData(), kind === "inputs"
+            ? { inputs: renames, outputs: otherRenames }
+            : { inputs: otherRenames, outputs: renames });
+
+        if (propagated.length) {
+            app.extensionManager?.toast?.add?.({
+                severity: "info",
+                summary: `${node.title || NODE_ID}: renamed in ${otherKind} too`,
+                detail: propagated.join("\n"),
+                life: 5000,
+            });
+        }
         close();
     }
 
@@ -768,6 +841,115 @@ function openEditDialog(node, widget, kind) {
         document.body.appendChild(pOverlay);
     }
 
+    // ask for a template name and store the edited list on the backend; when the
+    // name is already taken the button turns into an explicit Overwrite step
+    function openSaveTemplateDialog() {
+        const error = validate();
+        if (error) { errEl.textContent = error; return; }
+        if (!work.length) { errEl.textContent = "Nothing to save — the list is empty."; return; }
+        errEl.textContent = "";
+
+        const sOverlay = document.createElement("div");
+        sOverlay.className = "cpp-overlay";
+        sOverlay.style.zIndex = "10001";
+
+        const sPanel = document.createElement("div");
+        sPanel.className = "cpp-panel";
+        sOverlay.appendChild(sPanel);
+
+        const sTitle = document.createElement("div");
+        sTitle.className = "cpp-title";
+        sTitle.textContent = `Save template — ${kind}`;
+        sPanel.appendChild(sTitle);
+
+        const nameEl = document.createElement("input");
+        nameEl.className = "cpp-name";
+        nameEl.type = "text";
+        nameEl.placeholder = "template name";
+        nameEl.style.width = "100%";
+        nameEl.style.boxSizing = "border-box";
+        sPanel.appendChild(nameEl);
+
+        const sErr = document.createElement("div");
+        sErr.className = "cpp-error";
+        sPanel.appendChild(sErr);
+
+        const sFooter = document.createElement("div");
+        sFooter.className = "cpp-footer";
+        const sCancel = document.createElement("button");
+        sCancel.className = "cpp-btn";
+        sCancel.textContent = "Cancel";
+        const sSave = document.createElement("button");
+        sSave.className = "cpp-btn cpp-ok";
+        sSave.textContent = "Save";
+        sFooter.append(sCancel, sSave);
+        sPanel.appendChild(sFooter);
+
+        let overwrite = false;
+
+        function onSaveKey(ev) {
+            if (ev.key === "Escape") { ev.stopPropagation(); closeSave(); }
+            else if (ev.key === "Enter") { ev.stopPropagation(); doSave(); }
+        }
+        function closeSave() {
+            document.removeEventListener("keydown", onSaveKey, true);
+            sOverlay.remove();
+            document.addEventListener("keydown", onKeyDown, true);   // restore dialog Esc handling
+        }
+
+        async function doSave() {
+            const name = nameEl.value.trim();
+            if (!name) { sErr.textContent = "Template name cannot be empty."; return; }
+            sSave.disabled = true;
+            let result;
+            try {
+                const resp = await api.fetchApi(`/${API_PREFIX}/save_custompipe_template`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        name,
+                        overwrite,
+                        properties: work.map(e => ({ name: e.name.trim(), type: e.type })),
+                    }),
+                });
+                result = await resp.json();
+            } catch {
+                sSave.disabled = false;
+                sErr.textContent = "Could not save the template.";
+                return;
+            }
+            sSave.disabled = false;
+
+            if (result?.ok) {
+                closeSave();
+                errEl.textContent = `Template "${name}" saved.`;
+            } else if (result?.status === "exists") {
+                overwrite = true;
+                sSave.textContent = "Overwrite";
+                sErr.textContent = `"${name}" already exists — press Overwrite to replace it.`;
+            } else {
+                sErr.textContent = `Could not save : ${result?.status ?? "unknown error"}`;
+            }
+        }
+
+        // editing the name resets a pending overwrite confirmation
+        nameEl.addEventListener("input", () => {
+            overwrite = false;
+            sSave.textContent = "Save";
+            sErr.textContent = "";
+        });
+
+        sCancel.addEventListener("click", closeSave);
+        sSave.addEventListener("click", doSave);
+        sOverlay.addEventListener("click", (ev) => { if (ev.target === sOverlay) closeSave(); });
+
+        // suspend the dialog's Esc handler so Escape closes only this overlay
+        document.removeEventListener("keydown", onKeyDown, true);
+        document.addEventListener("keydown", onSaveKey, true);
+        document.body.appendChild(sOverlay);
+        nameEl.focus();
+    }
+
     function onKeyDown(ev) {
         if (ev.key === "Escape") { ev.stopPropagation(); close(); }
         else if (ev.key === "Enter" && ev.target?.classList?.contains("cpp-name")) { apply(); }
@@ -785,6 +967,7 @@ function openEditDialog(node, widget, kind) {
         renderRows();
     });
     tplBtn.addEventListener("click", openTemplatePicker);
+    saveTplBtn.addEventListener("click", openSaveTemplateDialog);
     cancelBtn.addEventListener("click", close);
     okBtn.addEventListener("click", apply);
     document.addEventListener("keydown", onKeyDown, true);

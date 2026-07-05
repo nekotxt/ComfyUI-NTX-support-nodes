@@ -52,10 +52,17 @@ dialog for the corresponding side. In the dialog:
   (IMAGE, MASK, LATENT, MODEL, CLIP, VAE, CONDITIONING, INT, FLOAT, STRING, BOOLEAN,
   LORA_STACK, CONTROL_NET_STACK, DICT, LIST, `*`).
 - Rows can be **drag-reordered** with the handle and removed with **✕**.
-- **Copy** replaces the list with the entries of the other side (inputs ↔ outputs).
-- **Template** opens a picker with predefined property sets loaded from
+- **Renaming** a row keeps its slot and any connected wires — only removing a row (or changing
+  its type) drops the wire. A rename is also propagated to the entry with the same name on the
+  other side (inputs ↔ outputs), so the pipe key keeps matching end to end; an info toast lists
+  the propagated renames. Propagation is skipped if the new name is already taken on that side.
+- **Copy from inputs/outputs** replaces the list with the entries of the other side.
+- **Load template…** opens a picker with predefined property sets loaded from
   `input/ntx_data/custompipe_configs.txt`; the chosen template's properties are appended,
   skipping names already present.
+- **Save as template…** stores the current list as a named template in the same file, so it can
+  be reloaded later on any PipeCustom node. If the name is already taken, the button changes to
+  **Overwrite** and a second click is required to replace the existing template.
 - Names are validated on OK (non-empty, no duplicates, no reserved names). If a name exists on
   both sides with different types, a warning toast is shown.
 - **Enter** (while editing a name) confirms, **Escape** cancels.

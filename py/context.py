@@ -549,9 +549,74 @@ def load_custompipe_templates():
         return []
     return templates
 
+def format_custompipe_templates(templates):
+    """Serialize a template list back into the custompipe_configs.txt format."""
+    lines = []
+    for tpl in templates:
+        lines.append(tpl["name"])
+        for prop in tpl["properties"]:
+            lines.append(f"- {prop['name']}:{prop['type']}")
+        lines.append("")
+    return "\n".join(lines)
+
+def save_custompipe_template(name, properties, overwrite=False):
+    """Add (or replace) one named template in CUSTOMPIPE_TEMPLATES_FILE, keeping
+    the others. Returns (ok, status); status is "saved", "exists" (name taken and
+    overwrite not set) or an error message."""
+    name = str(name or "").strip()
+    if not name or name.startswith("-") or any(c in name for c in "\r\n"):
+        return (False, "invalid template name")
+
+    props = []
+    seen = set()
+    for prop in properties if isinstance(properties, list) else []:
+        if not isinstance(prop, dict):
+            continue
+        pname = str(prop.get("name", "")).strip()
+        ptype = str(prop.get("type", "*")).strip() or "*"
+        # ":" separates name and type in the file format, so neither part may contain it
+        if not pname or any(c in pname + ptype for c in ":\r\n"):
+            return (False, f"invalid property : {pname or '(unnamed)'}")
+        if pname in RESERVED_PIPE_NAMES or pname in seen:
+            continue
+        seen.add(pname)
+        props.append({"name": pname, "type": ptype})
+    if not props:
+        return (False, "no valid properties")
+
+    templates = load_custompipe_templates()
+    existing = next((tpl for tpl in templates if tpl["name"] == name), None)
+    if existing is not None:
+        if not overwrite:
+            return (False, "exists")
+        existing["properties"] = props
+    else:
+        templates.append({"name": name, "properties": props})
+
+    try:
+        CUSTOMPIPE_TEMPLATES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CUSTOMPIPE_TEMPLATES_FILE.write_text(format_custompipe_templates(templates), encoding="utf-8")
+    except OSError as e:
+        logger.warning(f"PipeCustom : could not save custom pipe template : {e}")
+        return (False, f"could not save : {e}")
+
+    logger.info(f"PipeCustom : template '{name}' saved ({len(props)} properties)")
+    return (True, "saved")
+
+
 from aiohttp import web
 from server import PromptServer
 
 @PromptServer.instance.routes.get(f"/{API_PREFIX}/load_custompipe_templates")
 async def load_custompipe_templates_route(request):
     return web.json_response(load_custompipe_templates())
+
+@PromptServer.instance.routes.post(f"/{API_PREFIX}/save_custompipe_template")
+async def save_custompipe_template_route(request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    (ok, status) = save_custompipe_template(
+        data.get("name"), data.get("properties"), bool(data.get("overwrite", False)))
+    return web.json_response({"ok": ok, "status": status})
