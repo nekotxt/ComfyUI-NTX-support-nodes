@@ -65,16 +65,30 @@ async function reloadPromptsMap() {
         // the reload rebuilt the params too; pull the fresh copy
         const presp = await api.fetchApi(`/${API_PREFIX}/load_prompt_params`);
         promptsParams = (await presp.json()) || {};
+        updateIdComboOptions();
     } catch (err) {
         console.error("LoadPrompt : failed to reload prompts map", err);
     }
     return promptsMap;
 }
 
-// the id combo is a remote combo whose list rebuilds from disk on every fetch
-// (first open, its refresh button, the R key) — see /load_prompt_ids in
-// py/prompts.py. The maps cached here can therefore lag behind the combo; this
-// refetches them when the combo hands us an id they do not know yet.
+// the id combo is a standard combo whose options are baked into the node
+// definition, so after a reload the fresh id list is pushed into every
+// LoadPrompt* node here — otherwise the native dropdown would stay stale until
+// the node definitions are refreshed (page load / "Refresh Node Definitions").
+function updateIdComboOptions() {
+    const ids = Object.keys(promptsMap || {}).sort();
+    if (!ids.length) return;
+    for (const node of app.graph?._nodes ?? []) {
+        if (!PROMPT_NODE_IDS.has(node.comfyClass)) continue;
+        const idWidget = node.widgets?.find((w) => w.name === ID_WIDGET);
+        if (idWidget?.options) idWidget.options.values = ids;
+    }
+}
+
+// the id combo options rebuild from disk on every node-definitions fetch — see
+// id_input() in py/prompts.py. The maps cached here can therefore lag behind the
+// combo; this refetches them when the combo hands us an id they do not know yet.
 async function ensureIdKnown(id) {
     if (!promptsMap || id in promptsMap) return;
     promptsMap = null;
@@ -791,21 +805,6 @@ app.registerExtension({
         });
     },
 
-    // The frontend's remote-combo helper (useRemoteWidget.onFirstLoad) sets the
-    // widget to the first fetched id as soon as the id list arrives, without
-    // checking whether the node was just deserialized with a saved id — so a
-    // reopened workflow loses its selection. Remember the saved id here (after
-    // configure() restored it, before the fetch resolves) so the wrapped
-    // callback below can put it back when that spurious reset fires.
-    loadedGraphNode(node) {
-        if (!PROMPT_NODE_IDS.has(node.comfyClass)) return;
-        const idWidget = node.widgets?.find((w) => w.name === ID_WIDGET);
-        const saved = idWidget?.value;
-        if (typeof saved === "string" && saved && saved !== "Loading...") {
-            node.__lptSavedId = saved;
-        }
-    },
-
     async nodeCreated(node) {
         if (!PROMPT_NODE_IDS.has(node.comfyClass)) return;
 
@@ -822,29 +821,8 @@ app.registerExtension({
         // tracked so a manually edited prompt is not overwritten silently.
         let lastAppliedId = idWidget.value;
 
-        // if the remote combo's first-load reset already fired before this
-        // wrapper was installed, undo it now
-        if (node.__lptSavedId !== undefined && idWidget.value !== node.__lptSavedId) {
-            idWidget.value = node.__lptSavedId;
-            lastAppliedId = node.__lptSavedId;
-            delete node.__lptSavedId;
-            node.setDirtyCanvas(true, true);
-        }
-
         const originalCallback = idWidget.callback;
         idWidget.callback = function (value, ...args) {
-            // first callback after a workflow load: this is the remote combo's
-            // first-load reset, not a user selection — restore the saved id and
-            // leave the saved prompt/param texts exactly as they were saved
-            const savedId = node.__lptSavedId;
-            if (savedId !== undefined) {
-                delete node.__lptSavedId;
-                idWidget.value = savedId;
-                lastAppliedId = savedId;
-                node.setDirtyCanvas(true, true);
-                return originalCallback?.apply(this, [savedId, ...args]);
-            }
-
             const ret = originalCallback?.apply(this, [value, ...args]);
 
             const promptWidget = node.widgets?.find((w) => w.name === PROMPT_WIDGET);
@@ -853,7 +831,7 @@ app.registerExtension({
             const edited = current !== "" && current !== lastLib;
 
             (async () => {
-                // the remote combo can know ids newer than the cached maps
+                // the combo options can be newer than the cached maps
                 await ensureIdKnown(value);
                 if (!edited || window.confirm(
                     `The prompt text was edited manually.\nReplace it with the library text of "${value}"?`)) {

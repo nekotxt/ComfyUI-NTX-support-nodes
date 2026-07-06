@@ -179,28 +179,23 @@ def load_image_as_tensor(path):
 # ===== NODES ==============================================================================================================================
 
 class LoadPromptBase(io.ComfyNode):
-    """Shared behaviour of the LoadPrompt* nodes: the remote id combobox, the
-    library-text fallback and the per-id preview image lookup. Not registered
+    """Shared behaviour of the LoadPrompt* nodes: the library-backed id combobox,
+    the library-text fallback and the per-id preview image lookup. Not registered
     as a node itself."""
 
     @classmethod
     def id_input(cls):
-        # remote combo: the frontend fetches the id list from the backend route on
-        # first use and whenever the refresh button is pressed, so prompts added on
-        # disk show up without a backend restart. With a remote combo the schema
-        # carries no options list, so validation is relaxed by validate_inputs.
-        return io.Combo.Input(
-            "id",
-            remote=io.RemoteOptions(
-                route=f"/{API_PREFIX}/load_prompt_ids",
-                refresh_button=True,
-                control_after_refresh="first",
-            ),
-        )
+        # standard combo carrying the id list in its schema. define_schema() runs
+        # on every node-definitions fetch (page load, "Refresh Node Definitions"),
+        # so the library is re-read from disk here and prompts added on disk show
+        # up without a backend restart.
+        reload_prompts_map()
+        return io.Combo.Input("id", options=load_prompt_ids())
 
     @classmethod
     def validate_inputs(cls, id):
-        # the id list is dynamic (remote combo), so any string is accepted;
+        # ids come and go with the files on disk, so a saved workflow may carry a
+        # value no longer in the combo options; any string is accepted and
         # execute() falls back gracefully when an id is unknown
         return True
 
@@ -428,8 +423,8 @@ async def load_prompts_route(request):
 
 @PromptServer.instance.routes.get(f"/{API_PREFIX}/load_prompt_ids")
 async def load_prompt_ids_route(request):
-    # backing route of the remote id combobox: rebuild the maps from disk so the
-    # combo (first open, refresh button, R key) always reflects the current files
+    # plain id-list endpoint (the combo itself now ships its options in the node
+    # schema); rebuilds the maps from disk so callers always see the current files
     reload_prompts_map()
     return web.json_response(load_prompt_ids())
 
