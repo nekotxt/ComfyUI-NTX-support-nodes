@@ -504,3 +504,85 @@ image-processing chains.
 | Output | Type | Description |
 |---|---|---|
 | `output` | any | The value of the selected input (`None` if that slot is not connected). |
+
+---
+
+## PreviewAsText
+
+![PreviewAsText node](images/PreviewAsText.png)
+
+Shows any value as text on the node, like the core **Preview as Text** node — but it is **not
+an output node**, so placing it in a workflow never triggers an execution by itself. The node
+only runs when a downstream node actually consumes its `text` output; wire the value *through*
+it rather than dead-ending into it (or use the right-click queue entry below to run it on
+demand). The preview refreshes whenever the node executes.
+
+The value is converted to text as follows: strings are shown as-is; ints, floats and booleans
+via `str()`; anything else is serialised as indented JSON, falling back to `str()` (tensors are
+printed with 6 edge items per dimension), and finally to a
+`source exists, but could not be serialized.` message. A missing value shows `None`.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `source` | any | The value to preview. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `text` | STRING | The text representation of `source`, as shown in the preview. |
+
+### Frontend
+
+- The node body shows a read-only **Preview** area, filled with the text when the node
+  executes.
+- A **Markdown / Plaintext** toggle switches the preview between a rendered-markdown view and
+  a plain textarea (default: Plaintext). The toggle and the preview content are display-only
+  and are not saved into the workflow or the API prompt.
+
+Right-click menu option on the node:
+
+- **Queue (this node as output)** — queues the current workflow with this node as the only
+  execution target, as if it were an output node: exactly its branch runs (upstream
+  dependencies included), and every other output node in the workflow is skipped. The saved
+  workflow is not modified. Muted/bypassed nodes and nodes inside subgraphs cannot be queued
+  this way (a warning toast is shown). Note: a run forced this way is cached separately from a
+  normal run, so the node re-executes the first time it is reached through the regular queue
+  afterwards.
+
+---
+
+## PreviewImage
+
+![PreviewImage node](images/PreviewImage.png)
+
+Shows image previews on the node, like the core **Preview Image** node — but, as with
+**PreviewAsText**, it is **not an output node**: it never triggers an execution by itself and
+only runs when a downstream node consumes its `images` output. Unlike the core node it
+therefore has a pass-through output, so it can sit in the middle of an image chain and
+preview whatever flows through.
+
+The previews are written to ComfyUI's temporary folder (one PNG per image in the batch, low
+compression) and embed the prompt/workflow metadata, exactly like the core node (metadata is
+omitted when ComfyUI runs with `--disable-metadata`).
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `images` | IMAGE | The image batch to preview. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `images` | IMAGE | The input batch, passed through unchanged. |
+
+### Frontend
+
+Right-click menu option on the node:
+
+- **Queue (this node as output)** — same behaviour as on **PreviewAsText**: queues the
+  workflow with just this node's branch as the execution target.
