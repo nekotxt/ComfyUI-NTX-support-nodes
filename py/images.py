@@ -223,10 +223,40 @@ class ImageSize(io.ComfyNode):
 
         return io.NodeOutput(width, height, opt_image)
 
+class ExtractImageFromBatch(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}ExtractImageFromBatch",
+            display_name=f"{ADDON_PREFIX} Extract Image From Batch",
+            description="Extract the image at [index] from a batch of images; returns None if images is null or index is out of range",
+            category=f"{ADDON_CATEGORY}/images",
+            inputs=[
+                io.Image.Input("images", optional=True),
+                io.Int.Input("index", default=0, min=0),
+            ],
+            outputs=[
+                io.Image.Output("image"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, images=None, index=0) -> io.NodeOutput:
+        if images is None:
+            #logger.warning("ExtractImageFromBatch : images is null")
+            return io.NodeOutput(None)
+
+        if index >= images.shape[0]:
+            #logger.warning(f"ExtractImageFromBatch : index {index} exceeds batch size {images.shape[0]}")
+            return io.NodeOutput(None)
+
+        return io.NodeOutput(images[index:index + 1])
+
 # ===== INITIALIZATION =====================================================================================================================
 
 def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         SaveMultipleImages,
         ImageSize,
+        ExtractImageFromBatch,
     ]

@@ -1,8 +1,10 @@
-from comfy_api.latest import ComfyExtension, io
+from comfy_api.latest import ComfyExtension, io, ui
 
 import folder_paths
 
+import json
 import shutil
+import torch
 from pathlib import Path
 from typing_extensions import override
 
@@ -110,6 +112,43 @@ class LazySelectAny(io.ComfyNode):
     @classmethod
     def execute(cls, select, **kwargs) -> io.NodeOutput:
         return io.NodeOutput(kwargs.get("input%d" % select), select)
+
+class PreviewAsText(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}PreviewAsText",
+            display_name=f"{ADDON_PREFIX} Preview as Text",
+            description="Preview any value as text, like the core 'Preview as Text' node, "
+                        "but not an output node: it only runs when a downstream node needs its output.",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.AnyType.Input("source"),
+            ],
+            outputs=[
+                io.String.Output("text"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, source=None):
+        torch.set_printoptions(edgeitems=6)
+        value = 'None'
+        if isinstance(source, str):
+            value = source
+        elif isinstance(source, (int, float, bool)):
+            value = str(source)
+        elif source is not None:
+            try:
+                value = json.dumps(source, indent=4)
+            except Exception:
+                try:
+                    value = str(source)
+                except Exception:
+                    value = 'source exists, but could not be serialized.'
+
+        torch.set_printoptions()
+        return io.NodeOutput(value, ui=ui.PreviewText(value))
 
 class CollectModelNtxdata(io.ComfyNode):
     @classmethod
@@ -276,6 +315,7 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         SwitchAny,
         SelectAnyInput,
         LazySelectAny,
+        PreviewAsText,
         CollectModelNtxdata,
         #CLIPTextEncodeWithCutoff,
         DownloadModelsList,
