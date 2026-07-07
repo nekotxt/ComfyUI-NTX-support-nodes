@@ -150,6 +150,28 @@ class PreviewAsText(io.ComfyNode):
         torch.set_printoptions()
         return io.NodeOutput(value, ui=ui.PreviewText(value))
 
+class PreviewImage(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}PreviewImage",
+            display_name=f"{ADDON_PREFIX} Preview Image",
+            description="Preview images, like the core 'Preview Image' node, "
+                        "but not an output node: it only runs when a downstream node needs its output.",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.Image.Input("images"),
+            ],
+            outputs=[
+                io.Image.Output("images"),
+            ],
+            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
+        )
+
+    @classmethod
+    def execute(cls, images):
+        return io.NodeOutput(images, ui=ui.PreviewImage(images, cls=cls))
+
 class CollectModelNtxdata(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -316,6 +338,7 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         SelectAnyInput,
         LazySelectAny,
         PreviewAsText,
+        PreviewImage,
         CollectModelNtxdata,
         #CLIPTextEncodeWithCutoff,
         DownloadModelsList,
