@@ -3,6 +3,7 @@
 import { app } from "../../../scripts/app.js";
 
 import { ADDON_PREFIX, API_PREFIX } from './config.js';
+import { registerNodeMenu } from './menu.js';
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
@@ -1600,24 +1601,24 @@ function rebuildLoraUI(node, force = false) {
     });
 }
 
-// RMB menu entry to force a rebuild manually.
-function installRebuildMenu(node) {
-    if (node.__cllMenuInstalled) return;
-    node.__cllMenuInstalled = true;
+// ── Extension registration ────────────────────────────────────────────────────
 
-    const origGetExtraMenuOptions = node.getExtraMenuOptions;
-    node.getExtraMenuOptions = function(canvas, options) {
-        const r = origGetExtraMenuOptions?.apply(this, arguments);
-        options.push({
-            content: ADDON_PREFIX + " Rebuild LoraStack UI",
-            callback: () => rebuildLoraUI(this, true),
-        });
-        options.push({
-            content: ADDON_PREFIX + " Reload Lora List from disk",
+const LORA_STACK_NODE_ID = ADDON_PREFIX + "LoraStack"
+
+// RMB entries for LoraStack nodes, grouped into the addon submenu.
+registerNodeMenu((node) => {
+    if (node?.comfyClass !== LORA_STACK_NODE_ID) return [];
+    return [
+        {
+            content: "Rebuild LoraStack UI",
+            callback: () => rebuildLoraUI(node, true),
+        },
+        {
+            content: "Reload Lora List from disk",
             callback: () => {
                 reloadLoraList().then(() => {
                     // rebuild so the widget picks up the fresh list immediately
-                    rebuildLoraUI(this, true);
+                    rebuildLoraUI(node, true);
                     try {
                         app.extensionManager?.toast?.add({
                             severity: "success",
@@ -1628,14 +1629,9 @@ function installRebuildMenu(node) {
                     } catch { console.log("[LoraStack] LoRA list reloaded"); }
                 });
             },
-        });
-        return r;
-    };
-}
-
-// ── Extension registration ────────────────────────────────────────────────────
-
-const LORA_STACK_NODE_ID = ADDON_PREFIX + "LoraStack"
+        },
+    ];
+});
 app.registerExtension({
 	name: API_PREFIX + ".loras.lora_stack",
 
@@ -1678,7 +1674,6 @@ app.registerExtension({
         if (node.size[0] < 380) {
             node.setSize([380, node.size[1]]);
         }
-        installRebuildMenu(node);
     },
 
     // Called for every node each time a graph is (re)loaded — including when

@@ -3,7 +3,8 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
-import { ADDON_PREFIX, API_PREFIX } from "./config.js";
+import { ADDON_PREFIX } from "./config.js";
+import { registerNodeMenu } from "./menu.js";
 
 const NODE_ID = ADDON_PREFIX + "ModelInfo";
 const MODEL_NAME_WIDGET = "model_name";
@@ -109,20 +110,16 @@ async function saveModelInfo(node) {
     notify("success", "Save Model Info", data?.message ?? "OK");
 }
 
-app.registerExtension({
-    name: API_PREFIX + ".model.load_model_info",
-
-    getNodeMenuItems(node) {
-        if (node.comfyClass !== NODE_ID) return [];
-        return [
-            {
-                content: ADDON_PREFIX + " Load Model Info",
-                callback: () => loadModelInfo(node),
-            },
-            {
-                content: ADDON_PREFIX + " Save Model Info",
-                callback: () => saveModelInfo(node),
-            },
-        ];
-    },
+registerNodeMenu((node) => {
+    if (node?.comfyClass !== NODE_ID) return [];
+    return [
+        {
+            content: "Load Model Info",
+            callback: () => loadModelInfo(node),
+        },
+        {
+            content: "Save Model Info",
+            callback: () => saveModelInfo(node),
+        },
+    ];
 });

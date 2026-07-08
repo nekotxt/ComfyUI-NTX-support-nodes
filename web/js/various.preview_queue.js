@@ -10,7 +10,8 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
-import { ADDON_PREFIX, API_PREFIX } from "./config.js";
+import { ADDON_PREFIX } from "./config.js";
+import { registerNodeMenu } from "./menu.js";
 
 // our node id -> core OUTPUT_NODE class with an identical input signature
 const OUTPUT_TWIN = {
@@ -51,20 +52,11 @@ async function queueAsOutput(node) {
     }
 }
 
-app.registerExtension({
-    name: API_PREFIX + ".various.preview_queue",
-
-    async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (!(nodeData.name in OUTPUT_TWIN)) return;
-
-        const getExtraMenuOptions = nodeType.prototype.getExtraMenuOptions;
-        nodeType.prototype.getExtraMenuOptions = function (canvas, options) {
-            const r = getExtraMenuOptions?.apply(this, arguments);
-            options.push({
-                content: "▶️ " + ADDON_PREFIX + " Queue (this node as output)",
-                callback: () => { queueAsOutput(this); },
-            });
-            return r;
-        };
-    },
+// Grouped into the addon submenu; only shown on the nodes that have a twin.
+registerNodeMenu((node) => {
+    if (!node || !(node.comfyClass in OUTPUT_TWIN)) return [];
+    return [{
+        content: "▶️ Queue (this node as output)",
+        callback: () => { queueAsOutput(node); },
+    }];
 });

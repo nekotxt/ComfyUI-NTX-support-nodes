@@ -4,6 +4,7 @@ import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
 import { ADDON_PREFIX, API_PREFIX } from "./config.js";
+import { registerCanvasMenu } from "./menu.js";
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 // Subdirectory (inside the ComfyUI user "workflows" folder) that is scanned for
@@ -563,14 +564,12 @@ app.registerExtension({
         commandId: API_PREFIX + ".load_template_workflow.open",
         combo: { key: "w", alt: true },
     }],
-
-    // Canvas right-click menu entry
-    getCanvasMenuItems() {
-        return [{
-            content: "🧷 " + ADDON_PREFIX + " Load template workflow",
-            // Record the graph-space mouse position now (i.e. where the
-            // context menu was opened); the inserted nodes are dropped there.
-            callback: () => showTemplatePicker([...app.canvas.graph_mouse]),
-        }];
-    },
 });
+
+// Canvas right-click menu entry, grouped into the addon submenu.
+registerCanvasMenu(() => [{
+    content: "🧷 Load template workflow",
+    // Record the graph-space mouse position now (i.e. where the context menu
+    // was opened); the inserted nodes are dropped there.
+    callback: () => showTemplatePicker([...app.canvas.graph_mouse]),
+}]);

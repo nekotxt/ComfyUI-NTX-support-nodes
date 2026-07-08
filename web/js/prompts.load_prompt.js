@@ -4,6 +4,7 @@ import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
 import { ADDON_PREFIX, API_PREFIX } from "./config.js";
+import { registerNodeMenu, registerCanvasMenu } from "./menu.js";
 
 const NODE_ID = ADDON_PREFIX + "LoadPrompt";
 const ADV_NODE_ID = ADDON_PREFIX + "LoadPromptAdvanced";
@@ -833,64 +834,33 @@ function openClipboardPromptPicker(node) {
     }));
 }
 
-// Add the "Pick prompt" entry to every node's RMB menu and to the empty-canvas
-// RMB menu by patching the LiteGraph canvas menu builders once.
-function installGlobalMenus() {
-    const LGraphCanvas = window.LGraphCanvas || app.canvas?.constructor;
-    if (!LGraphCanvas?.prototype || LGraphCanvas.__lptPickMenuInstalled) return;
-    LGraphCanvas.__lptPickMenuInstalled = true;
+// ── RMB menus (grouped into the addon submenu) ───────────────────────────────────
 
-    const pickEntry = (node) => ({
-        content: "📝 " + ADDON_PREFIX + " Pick prompt",
-        callback: () => openClipboardPromptPicker(node),
-    });
+// "Pick prompt" on every node's RMB menu and on the empty-canvas RMB menu.
+const pickEntry = (node) => ({
+    content: "📝 Pick prompt",
+    callback: () => openClipboardPromptPicker(node),
+});
+registerNodeMenu((node) => pickEntry(node));
+registerCanvasMenu(() => pickEntry(null));
 
-    // every node's RMB menu
-    const origNodeMenu = LGraphCanvas.prototype.getNodeMenuOptions;
-    LGraphCanvas.prototype.getNodeMenuOptions = function (node) {
-        const options = origNodeMenu.apply(this, arguments);
-        options.push(null, pickEntry(node));
-        return options;
-    };
-
-    // empty-canvas RMB menu (no node)
-    const origCanvasMenu = LGraphCanvas.prototype.getCanvasMenuOptions;
-    LGraphCanvas.prototype.getCanvasMenuOptions = function () {
-        const options = origCanvasMenu.apply(this, arguments);
-        options.push(null, pickEntry(null));
-        return options;
-    };
-}
-
-// ── RMB node menu ────────────────────────────────────────────────────────────────
-
-// RMB menu entry on the prompt nodes to re-read the prompt files from disk —
-// same effect as the tree picker's Refresh button.
-function installReloadMenu(node) {
-    if (node.__lptMenuInstalled) return;
-    node.__lptMenuInstalled = true;
-
-    const origGetExtraMenuOptions = node.getExtraMenuOptions;
-    node.getExtraMenuOptions = function (canvas, options) {
-        const r = origGetExtraMenuOptions?.apply(this, arguments);
-        options.push({
-            content: "🔃 " + ADDON_PREFIX + " Rebuild Prompts List from disk",
-            callback: () => {
-                reloadPromptsMap().then(() => notifyPromptsReloaded());
-            },
-        });
-        return r;
-    };
-}
+// On the prompt nodes, an entry to re-read the prompt files from disk — same
+// effect as the tree picker's Refresh button.
+registerNodeMenu((node) => {
+    if (!node || !PROMPT_NODE_IDS.has(node.comfyClass)) return [];
+    return [{
+        content: "🔃 Rebuild Prompts List from disk",
+        callback: () => {
+            reloadPromptsMap().then(() => notifyPromptsReloaded());
+        },
+    }];
+});
 
 app.registerExtension({
     name: API_PREFIX + ".prompts.load_prompt",
 
     setup() {
         document.addEventListener("pointerdown", onCapturePointerDown, true);
-
-        // "Pick prompt" on every node + the empty canvas
-        installGlobalMenus();
 
         // show backend-sent toasts (e.g. SavePrompt overwrite warnings) to the user
         api.addEventListener(`${API_PREFIX}.toast`, (e) => {
@@ -910,8 +880,6 @@ app.registerExtension({
 
     async nodeCreated(node) {
         if (!PROMPT_NODE_IDS.has(node.comfyClass)) return;
-
-        installReloadMenu(node);
 
         const idWidget = node.widgets?.find((w) => w.name === ID_WIDGET);
         if (!idWidget) return;

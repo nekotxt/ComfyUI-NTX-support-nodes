@@ -4,6 +4,7 @@ import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
 import { ADDON_PREFIX, API_PREFIX } from "./config.js";
+import { registerNodeMenu } from "./menu.js";
 
 // data types selectable for PipeCustom inputs — edit to customize
 export const PIPE_DATA_TYPES = ["IMAGE", "MASK", "LATENT", "MODEL", "CLIP", "VAE", "CONDITIONING",
@@ -1437,38 +1438,34 @@ function mergeCustomPipes(node) {
     graph.setDirtyCanvas(true, true);
 }
 
-function installMenu(node) {
-    if (node.__cppMenuInstalled) return;
-    node.__cppMenuInstalled = true;
-
-    const origGetExtraMenuOptions = node.getExtraMenuOptions;
-    node.getExtraMenuOptions = function (canvas, options) {
-        const r = origGetExtraMenuOptions?.apply(this, arguments);
-        options.push({
-            content: ADDON_PREFIX + " Edit pipe inputs…",
+// RMB entries for PipeCustom nodes, grouped into the addon submenu.
+registerNodeMenu((node) => {
+    if (node?.comfyClass !== NODE_ID) return [];
+    return [
+        {
+            content: "Edit pipe inputs…",
             callback: () => {
-                const w = getPipeWidget(this);
-                if (w?.__isPipeUI) openEditDialog(this, w, "inputs");
+                const w = getPipeWidget(node);
+                if (w?.__isPipeUI) openEditDialog(node, w, "inputs");
             },
-        });
-        options.push({
-            content: ADDON_PREFIX + " Edit pipe outputs…",
+        },
+        {
+            content: "Edit pipe outputs…",
             callback: () => {
-                const w = getPipeWidget(this);
-                if (w?.__isPipeUI) openEditDialog(this, w, "outputs");
+                const w = getPipeWidget(node);
+                if (w?.__isPipeUI) openEditDialog(node, w, "outputs");
             },
-        });
-        options.push({
-            content: ADDON_PREFIX + " Split custom pipe",
-            callback: () => { splitCustomPipe(this); },
-        });
-        options.push({
-            content: ADDON_PREFIX + " Merge custom pipes",
-            callback: () => { mergeCustomPipes(this); },
-        });
-        return r;
-    };
-}
+        },
+        {
+            content: "Split custom pipe",
+            callback: () => { splitCustomPipe(node); },
+        },
+        {
+            content: "Merge custom pipes",
+            callback: () => { mergeCustomPipes(node); },
+        },
+    ];
+});
 
 // ── Extension registration ────────────────────────────────────────────────────
 
@@ -1506,7 +1503,6 @@ app.registerExtension({
         if (node.size[0] < 240) {
             node.setSize([240, node.size[1]]);
         }
-        installMenu(node);
         // self-heal: if the widget was built from an unpatched definition as a
         // raw-JSON STRING widget, replace it with the custom UI right away
         rebuildPipeUI(node);
