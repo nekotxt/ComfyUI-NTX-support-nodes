@@ -175,6 +175,15 @@ const CSS = `
     cursor: default;
     pointer-events: none;
 }
+
+.lwt-btn.refresh {
+    margin-right: auto;   /* push the confirm/cancel buttons to the right */
+}
+
+.lwt-btn.refresh.busy {
+    opacity: 0.6;
+    pointer-events: none;
+}
 `;
 
 let _stylesInjected = false;
@@ -194,8 +203,8 @@ function toast(severity, summary, detail) {
 
 let _templateListCache = null;
 
-async function fetchTemplateList() {
-    if (CACHE_LIST && _templateListCache) return _templateListCache;
+async function fetchTemplateList(force = false) {
+    if (CACHE_LIST && _templateListCache && !force) return _templateListCache;
 
     const dir = `workflows/${TEMPLATES_SUBDIR}`;
     const resp = await api.fetchApi(
@@ -299,7 +308,7 @@ function buildTree(paths) {
 // pre-selected again, with its parent folders expanded and scrolled into view.
 let _lastLoadedPath = null;
 
-function openTemplateDialog(paths, dropPos) {
+function openTemplateDialog(paths, dropPos, initialFilter = "") {
     injectStyles();
     document.querySelector(".lwt-overlay")?.remove();
 
@@ -336,6 +345,7 @@ function openTemplateDialog(paths, dropPos) {
     filterInput.type = "text";
     filterInput.placeholder = "Filter…";
     filterInput.setAttribute("autocomplete", "off");
+    filterInput.value = initialFilter;
     panel.appendChild(filterInput);
 
     const treeEl = document.createElement("div");
@@ -344,6 +354,11 @@ function openTemplateDialog(paths, dropPos) {
 
     const btns = document.createElement("div");
     btns.className = "lwt-btns";
+
+    const refreshBtn = document.createElement("button");
+    refreshBtn.className = "lwt-btn refresh";
+    refreshBtn.textContent = "↻ Refresh";
+    refreshBtn.title = "Rescan the templates folder (rebuild the cached list)";
 
     const cancelBtn = document.createElement("button");
     cancelBtn.className = "lwt-btn";
@@ -354,6 +369,7 @@ function openTemplateDialog(paths, dropPos) {
     loadBtn.textContent = "Load";
     loadBtn.disabled = !selectedPath;
 
+    btns.appendChild(refreshBtn);
     btns.appendChild(cancelBtn);
     btns.appendChild(loadBtn);
     panel.appendChild(btns);
@@ -484,7 +500,26 @@ function openTemplateDialog(paths, dropPos) {
         if (e.key === "Enter" && !loadBtn.disabled) { e.stopPropagation(); confirmLoad(); }
     };
 
+    // Rescan the templates folder, rebuilding the cached list, then reopen the
+    // dialog with the fresh paths. The current filter text is carried over; the
+    // most recently loaded template stays pre-selected (via _lastLoadedPath).
+    async function refresh() {
+        refreshBtn.classList.add("busy");
+        const term = filterInput.value;
+        try {
+            const fresh = await fetchTemplateList(true);
+            close();
+            openTemplateDialog(fresh, dropPos, term);
+        } catch (err) {
+            refreshBtn.classList.remove("busy");
+            console.error("[LoadWfTemplate] failed to refresh workflows:", err);
+            toast("error", "Refresh failed",
+                `Could not rescan workflows/${TEMPLATES_SUBDIR}: ${err.message ?? err}`);
+        }
+    }
+
     filterInput.addEventListener("input", render);
+    refreshBtn.addEventListener("click", refresh);
     cancelBtn.addEventListener("click", close);
     loadBtn.addEventListener("click", confirmLoad);
     overlay.addEventListener("pointerdown", e => { if (e.target === overlay) close(); });
@@ -532,7 +567,7 @@ app.registerExtension({
     // Canvas right-click menu entry
     getCanvasMenuItems() {
         return [{
-            content: ADDON_PREFIX + " Load template workflow",
+            content: "🧷 " + ADDON_PREFIX + " Load template workflow",
             // Record the graph-space mouse position now (i.e. where the
             // context menu was opened); the inserted nodes are dropped there.
             callback: () => showTemplatePicker([...app.canvas.graph_mouse]),

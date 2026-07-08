@@ -14,6 +14,40 @@ tuples, passed between the LoRA nodes below.
 
 ---
 
+## Global commands
+
+Addon-wide commands that are not tied to a specific node.
+
+### Load template workflow
+
+Inserts a template workflow — picked from a folder of ready-made workflows — into the current
+graph. Rather than replacing the open workflow, the template's nodes are **pasted** into it (at
+the mouse position) and left selected, so they can be dragged into place immediately; any nested
+subgraph definitions the template uses come along with them.
+
+The command is available from three places:
+
+- the **command palette** (and *Settings → Keybinding*, where its shortcut can be rebound), with
+  a default keybinding of **Alt+W** — the nodes are dropped where the mouse hovers;
+- the **canvas right-click menu** (*Load template workflow*) — the nodes are dropped where the
+  menu was opened.
+
+Templates are read from the `ntx/_templates` subfolder of the ComfyUI user **workflows** folder
+(`workflows/ntx/_templates`); every `.json` file found there, at any depth, is offered.
+
+Invoking the command opens a **tree picker** organised by subfolder:
+
+- a **filter box** narrows the list to files whose name matches the typed text;
+- folders can be expanded/collapsed; a file is chosen by clicking it, and confirmed with the
+  **Load** button, a **double-click**, or **Enter**;
+- the **Refresh** button re-scans the templates folder on disk (rebuilding the cached list), so
+  templates added, renamed or removed there show up without reloading the page;
+- **Cancel**, **Escape**, or a click outside the dialog closes it without loading;
+- the most recently loaded template is remembered and pre-selected (with its folders expanded)
+  the next time the picker is opened.
+
+---
+
 ## PipeCustom
 
 ![PipeCustom node](images/PipeCustom.png)
