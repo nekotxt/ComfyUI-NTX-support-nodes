@@ -103,6 +103,31 @@ class ModelInfoSimple(io.ComfyNode):
         (kwargs["model_type"], kwargs["model_name"]) = split_model_type_and_name(kwargs.get("model_name", "")) #kwargs.get("model_name", "").split(MODELTYPE_SEPARATOR, 1) # strip the model type prefix
         return io.NodeOutput(*kwargs.values())
 
+class KSamplerConfig(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}KSamplerConfig",
+            display_name=f"{ADDON_PREFIX} KSampler Config",
+            category=f"{ADDON_CATEGORY}/info",
+            inputs=[
+                io.Int.Input("steps", default=20, min=1, max=100, step=1),
+                io.Float.Input("cfg", default=1.0, min=0.0, max=20.0, step=0.1, round=0.1),
+                io.Combo.Input("sampler_name", options=load_list_samplers()),
+                io.Combo.Input("scheduler", options=load_list_schedulers()),
+            ],
+            outputs=[
+                io.Int.Output("steps"),
+                io.Float.Output("cfg"),
+                io.AnyType.Output("sampler_name"),
+                io.AnyType.Output("scheduler"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, **kwargs):
+        return io.NodeOutput(*kwargs.values())
+
 
 # ===== INITIALIZATION =====================================================================================================================
 
@@ -110,6 +135,7 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         ModelInfo,
         ModelInfoSimple,
+        KSamplerConfig,
     ]
 
 

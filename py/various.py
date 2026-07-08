@@ -305,6 +305,31 @@ class IsNull(io.ComfyNode):
     def execute(cls, value=None) -> io.NodeOutput:
         return io.NodeOutput(value == None)
 
+class IsEmpty(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}IsEmpty",
+            display_name=f"{ADDON_PREFIX} Is Empty",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.AnyType.Input("value", optional=True),
+            ],
+            outputs=[
+                io.Boolean.Output("is_empty")
+            ]
+        )
+
+    @classmethod
+    def execute(cls, value=None) -> io.NodeOutput:
+        if value == None:
+            io.NodeOutput(True)
+        if isinstance(value, (str)):
+            return io.NodeOutput(value.strip() == "")
+        if isinstance(value, (list, tuple, dict)):
+            return io.NodeOutput(len(value) == 0)
+        return io.NodeOutput(False)
+
 class CheckNotNull(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -343,5 +368,6 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         #CLIPTextEncodeWithCutoff,
         DownloadModelsList,
         IsNull,
+        IsEmpty,
         CheckNotNull,
     ]
