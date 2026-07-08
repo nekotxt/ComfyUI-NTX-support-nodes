@@ -61,7 +61,7 @@ app.registerExtension({
         nodeType.prototype.getExtraMenuOptions = function (canvas, options) {
             const r = getExtraMenuOptions?.apply(this, arguments);
             options.push({
-                content: ADDON_PREFIX + " Queue (this node as output)",
+                content: "▶️ " + ADDON_PREFIX + " Queue (this node as output)",
                 callback: () => { queueAsOutput(this); },
             });
             return r;

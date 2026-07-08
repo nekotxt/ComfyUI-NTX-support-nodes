@@ -375,11 +375,20 @@ from the library still runs (the prompt box keeps its saved text).
   text of the previously selected id), a confirmation dialog asks before replacing it —
   cancelling keeps the edited text while still switching the id.
 
-Right-click menu option on the node:
+Right-click menu options on the node:
 
 - **Rebuild Prompts List from disk** — same effect as the tree picker's **Refresh** button:
   the backend re-reads the prompt files, the cached maps are refreshed and the `id` dropdowns
   are updated.
+- **Pick prompt** — opens the same tree picker (filter, preview pane, double-click to confirm)
+  purely to copy a prompt's **library text** to the clipboard; nothing on the node is changed.
+  Unlike the other entry, this one is added to the right-click menu of **every node and of the
+  empty canvas**, not just LoadPrompt* nodes, so a prompt can be grabbed from anywhere in the
+  graph. When invoked on a LoadPrompt* node the picker starts on that node's current id;
+  elsewhere (another node or the empty canvas) it reopens on the **last prompt picked this
+  way**, so the previous selection is remembered across calls (until the page is reloaded). A
+  toast confirms the copy (and a hidden-textarea fallback is used when the browser clipboard
+  API is unavailable, e.g. over plain HTTP).
 
 The same frontend behaviour (tree picker, prompt auto-fill, RMB reload) is shared by the
 **LoadPromptAdvanced** and **LoadPromptChar** variants described below.

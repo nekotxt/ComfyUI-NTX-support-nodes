@@ -113,6 +113,31 @@ function notifyPromptsReloaded() {
     }
 }
 
+// copy text to the clipboard, falling back to a hidden textarea when the async
+// Clipboard API is unavailable (e.g. non-secure context). Returns true on success.
+async function copyToClipboard(text) {
+    try {
+        await navigator.clipboard.writeText(text);
+        return true;
+    } catch (err) {
+        try {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            const ok = document.execCommand("copy");
+            ta.remove();
+            return ok;
+        } catch (e) {
+            console.error("LoadPrompt : clipboard copy failed", e);
+            return false;
+        }
+    }
+}
+
 // fill the prompt textbox with the library text for the selected id
 function applyPrompt(node, id) {
     const promptWidget = node.widgets?.find((w) => w.name === PROMPT_WIDGET);
@@ -304,15 +329,26 @@ function subtreeMatches(node, q) {
     return false;
 }
 
-function openTreePicker(node) {
-    const idWidget = node.widgets?.find((w) => w.name === ID_WIDGET);
-    if (!idWidget) return;
+// node may be null when the picker is opened from a generic node / the empty
+// canvas (there is no id widget to preselect or write back to).
+// opts.title     — panel heading (defaults to "Select a prompt")
+// opts.currentId — id to preselect/expand when there is no id widget
+// opts.onConfirm — called with the chosen id instead of the default behaviour of
+//                  writing it into the node's id widget (used by the RMB
+//                  "Pick prompt" entry to copy the prompt text to the clipboard)
+function openTreePicker(node, opts = {}) {
+    const idWidget = node?.widgets?.find((w) => w.name === ID_WIDGET);
+    // the default confirm writes into the id widget, so that path needs one;
+    // callers that pass onConfirm (clipboard picker) do not.
+    if (!idWidget && !opts.onConfirm) return;
 
     ensureStyles();
 
     let ids = Object.keys(promptsMap || {});
     let tree = buildTree(ids);
-    const currentId = idWidget.value;
+    // the node's id widget wins; otherwise fall back to opts.currentId (used by
+    // the clipboard picker to reopen on the last selection)
+    const currentId = idWidget?.value ?? opts.currentId;
 
     // categories expanded by default: the ancestors of the current selection
     const expanded = new Set();
@@ -338,7 +374,7 @@ function openTreePicker(node) {
 
     const title = document.createElement("div");
     title.className = "lpt-title";
-    title.textContent = "Select a prompt";
+    title.textContent = opts.title || "Select a prompt";
     panel.appendChild(title);
 
     const filter = document.createElement("input");
@@ -404,7 +440,8 @@ function openTreePicker(node) {
     }
     function confirm() {
         if (!selectedId) return;
-        selectId(node, selectedId);
+        if (opts.onConfirm) opts.onConfirm(selectedId);
+        else selectId(node, selectedId);
         close();
     }
     async function refresh() {
@@ -762,6 +799,69 @@ function onCapturePointerDown(e) {
     getPromptsMap().then(() => picker(node));
 }
 
+// ── RMB "Pick prompt" (copy to clipboard) ───────────────────────────────────────
+
+// Last id confirmed through the clipboard picker. Used to reopen the picker on
+// the previous selection when it is not bound to a node's id widget.
+let lastClipboardPickId = null;
+
+// Open the tree picker purely to copy a prompt to the clipboard. `node` is
+// optional — when opened on a LoadPrompt node it preselects that node's current
+// id; otherwise it reopens on the last selection made here.
+function openClipboardPromptPicker(node) {
+    getPromptsMap().then(() => openTreePicker(node, {
+        title: "Pick a prompt to copy",
+        currentId: lastClipboardPickId,
+        onConfirm: (id) => {
+            lastClipboardPickId = id;
+            const text = promptsMap?.[id] ?? "";
+            copyToClipboard(text).then((ok) => {
+                try {
+                    app.extensionManager?.toast?.add({
+                        severity: ok ? "success" : "error",
+                        summary: ok ? "Prompt copied" : "Copy failed",
+                        detail: ok
+                            ? `"${id}" copied to the clipboard`
+                            : "Could not access the clipboard",
+                        life: 4000,
+                    });
+                } catch (err) {
+                    console.log(ok ? `"${id}" copied to the clipboard` : "clipboard copy failed");
+                }
+            });
+        },
+    }));
+}
+
+// Add the "Pick prompt" entry to every node's RMB menu and to the empty-canvas
+// RMB menu by patching the LiteGraph canvas menu builders once.
+function installGlobalMenus() {
+    const LGraphCanvas = window.LGraphCanvas || app.canvas?.constructor;
+    if (!LGraphCanvas?.prototype || LGraphCanvas.__lptPickMenuInstalled) return;
+    LGraphCanvas.__lptPickMenuInstalled = true;
+
+    const pickEntry = (node) => ({
+        content: "📝 " + ADDON_PREFIX + " Pick prompt",
+        callback: () => openClipboardPromptPicker(node),
+    });
+
+    // every node's RMB menu
+    const origNodeMenu = LGraphCanvas.prototype.getNodeMenuOptions;
+    LGraphCanvas.prototype.getNodeMenuOptions = function (node) {
+        const options = origNodeMenu.apply(this, arguments);
+        options.push(null, pickEntry(node));
+        return options;
+    };
+
+    // empty-canvas RMB menu (no node)
+    const origCanvasMenu = LGraphCanvas.prototype.getCanvasMenuOptions;
+    LGraphCanvas.prototype.getCanvasMenuOptions = function () {
+        const options = origCanvasMenu.apply(this, arguments);
+        options.push(null, pickEntry(null));
+        return options;
+    };
+}
+
 // ── RMB node menu ────────────────────────────────────────────────────────────────
 
 // RMB menu entry on the prompt nodes to re-read the prompt files from disk —
@@ -774,7 +874,7 @@ function installReloadMenu(node) {
     node.getExtraMenuOptions = function (canvas, options) {
         const r = origGetExtraMenuOptions?.apply(this, arguments);
         options.push({
-            content: ADDON_PREFIX + " Rebuild Prompts List from disk",
+            content: "🔃 " + ADDON_PREFIX + " Rebuild Prompts List from disk",
             callback: () => {
                 reloadPromptsMap().then(() => notifyPromptsReloaded());
             },
@@ -788,6 +888,9 @@ app.registerExtension({
 
     setup() {
         document.addEventListener("pointerdown", onCapturePointerDown, true);
+
+        // "Pick prompt" on every node + the empty canvas
+        installGlobalMenus();
 
         // show backend-sent toasts (e.g. SavePrompt overwrite warnings) to the user
         api.addEventListener(`${API_PREFIX}.toast`, (e) => {
