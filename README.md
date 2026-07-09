@@ -121,6 +121,15 @@ Right-click menu options on the node:
   outgoing links, the target is deleted and downstream nodes are shifted back). Requires the
   target to have no non-pipe inputs connected and the source no non-pipe outputs connected.
 
+Right-click menu option on the canvas (only shown while the selection contains at least one
+PipeCustom node):
+
+- **Merge all selected custom pipe nodes** — runs **Merge custom pipes** on every selected
+  PipeCustom node in a single pass. Nodes that do not meet the merge requirements above are
+  skipped silently (no per-node warnings); a final toast reports how many of the selected
+  nodes were merged. In a selected chain of three or more pipes a node skipped only because
+  its source still had connected outputs can be picked up by running the command again.
+
 ---
 
 ## LoraStack
