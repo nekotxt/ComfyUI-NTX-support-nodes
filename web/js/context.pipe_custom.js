@@ -4,7 +4,7 @@ import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
 import { ADDON_PREFIX, API_PREFIX } from "./config.js";
-import { registerNodeMenu } from "./menu.js";
+import { registerNodeMenu, registerCanvasMenu } from "./menu.js";
 
 // data types selectable for PipeCustom inputs — edit to customize
 export const PIPE_DATA_TYPES = ["IMAGE", "MASK", "LATENT", "MODEL", "CLIP", "VAE", "CONDITIONING",
@@ -1346,14 +1346,17 @@ function splitCustomPipe(node) {
 //   • source gets target's output list (its own custom outputs are replaced)
 //   • all outgoing links of target (pipe + custom) are moved to source
 //   • target is deleted
+// Returns true when the merge was performed, false otherwise. With
+// `suppressWarnings` the precondition warnings stay silent (batch mode).
 
-function mergeCustomPipes(node) {
+function mergeCustomPipes(node, suppressWarnings = false) {
     const graph = node.graph;
-    if (!graph) return;
+    if (!graph) return false;
 
     const target = node;
 
     function warn(message) {
+        if (suppressWarnings) return;
         const toast = app.extensionManager?.toast;
         if (toast?.add) {
             toast.add({ severity: "warn", summary: target.title || NODE_ID, detail: message, life: 6000 });
@@ -1367,24 +1370,24 @@ function mergeCustomPipes(node) {
     const source = pipeInLink ? graph.getNodeById(pipeInLink.origin_id) : null;
     if (!source || source.comfyClass !== NODE_ID) {
         warn("Select a node connected to another pipe node");
-        return;
+        return false;
     }
 
     // target must have no non-pipe inputs connected
     if ((target.inputs ?? []).some((slot, i) => i > 0 && slot.link != null)) {
         warn("Disconnect inputs from target (except pipe) before proceeding");
-        return;
+        return false;
     }
 
     // source must have no non-pipe outputs connected
     if ((source.outputs ?? []).some((slot, i) => i > 0 && (slot.links?.length ?? 0) > 0)) {
         warn("Disconnect outputs from source (except pipe) before proceeding");
-        return;
+        return false;
     }
 
     const targetWidget = getPipeWidget(target);
     const sourceWidget = getPipeWidget(source);
-    if (!targetWidget?.__isPipeUI || !sourceWidget?.__isPipeUI) return;
+    if (!targetWidget?.__isPipeUI || !sourceWidget?.__isPipeUI) return false;
 
     // Displacement that will be applied to downstream nodes: source pos − target pos
     const dx = source.pos[0] - target.pos[0];
@@ -1436,6 +1439,7 @@ function mergeCustomPipes(node) {
     }
 
     graph.setDirtyCanvas(true, true);
+    return true;
 }
 
 // RMB entries for PipeCustom nodes, grouped into the addon submenu.
@@ -1465,6 +1469,37 @@ registerNodeMenu((node) => {
             callback: () => { mergeCustomPipes(node); },
         },
     ];
+});
+
+// Global (empty-canvas) RMB entry: merge every selected PipeCustom node into
+// its upstream source in one go. Warnings are suppressed per node — nodes that
+// don't qualify are simply skipped and the final toast reports the tally.
+registerCanvasMenu(() => {
+    const selected = Object.values(app.canvas?.selected_nodes ?? {})
+        .filter(n => n?.comfyClass === NODE_ID);
+    if (!selected.length) return [];
+    return [{
+        content: "Merge all selected custom pipe nodes",
+        callback: () => {
+            let merged = 0;
+            for (const node of selected) {
+                // an earlier merge in this batch may have removed the node
+                if (node.graph && mergeCustomPipes(node, true)) merged++;
+            }
+            const message = `Merged ${merged} of ${selected.length} selected pipe ${selected.length === 1 ? "node" : "nodes"}.`;
+            const toast = app.extensionManager?.toast;
+            if (toast?.add) {
+                toast.add({
+                    severity: merged ? "success" : "warn",
+                    summary: "Merge custom pipes",
+                    detail: message,
+                    life: 5000,
+                });
+            } else {
+                alert(message);
+            }
+        },
+    }];
 });
 
 // ── Extension registration ────────────────────────────────────────────────────
