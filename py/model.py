@@ -1,8 +1,12 @@
 from comfy_api.latest import ComfyExtension, io
 
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
-from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX
+from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_DIR
 from .logging import logger
 from .utils import load_list_models, load_list_samplers, load_list_schedulers, find_model_file
 from ..scripts.ntxdata_file import NtxDataFile
@@ -257,3 +261,81 @@ async def save_modelinfo_data(request):
     ntx_data.save(new_data_file_path)
 
     return web.json_response({"message": f"Saved to {new_data_file_path}"})
+
+# ----- "Edit model info" (web/js/model.edit_model_info.js) -------------------------------------------------------------------------------
+
+# Model branches shown in the frontend tree, in display order.
+EDIT_MODEL_INFO_TYPES = ["checkpoints", "diffusion_models", "loras", "vae", "text_encoders"]
+
+# Templates offered when a model has no side-car .txt yet (flat *.txt files).
+MODELDATA_TEMPLATES_DIR = SETTINGS_DIR / "modeldata"
+
+def _open_in_default_editor(path: Path):
+    # Open a file with the OS default application for its type.
+    if sys.platform.startswith("win"):
+        os.startfile(str(path))
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
+
+@PromptServer.instance.routes.get(f"/{API_PREFIX}/edit_model_info/models")
+async def edit_model_info_models(request):
+    # Returns the .safetensors models of every branch in EDIT_MODEL_INFO_TYPES:
+    # { "checkpoints": ["subdir/model.safetensors", ...], ... }
+    # Paths are relative to the branch and use "/" separators.
+    branches = {}
+    for model_type in EDIT_MODEL_INFO_TYPES:
+        names = load_list_models(model_type)
+        branches[model_type] = sorted(
+            (name.replace("\\", "/") for name in names if name.lower().endswith(".safetensors")),
+            key=str.lower,
+        )
+    return web.json_response(branches)
+
+@PromptServer.instance.routes.post(f"/{API_PREFIX}/edit_model_info/open")
+async def edit_model_info_open(request):
+    # Opens the side-car .txt of a model in the OS default editor.
+    # Payload: { model_type, model_name, template? }
+    # - .txt exists                    -> open it, respond {status:"opened"}
+    # - .txt missing, no template yet  -> respond {status:"missing", templates:[...]}
+    #   (the frontend then asks the user to pick one and calls again)
+    # - .txt missing, template given   -> copy the template next to the model, open it
+    data = await request.json()
+    model_type = data.get("model_type", "")
+    model_name = data.get("model_name", "")
+    template = data.get("template", None)
+
+    if model_type not in EDIT_MODEL_INFO_TYPES or not model_name:
+        return web.json_response({"status": "error", "message": "Invalid model_type or model_name"}, status=400)
+
+    (model_name, model_path) = find_model_file(model_type, model_name)
+    if model_path is None:
+        return web.json_response({"status": "error", "message": f"Model file not found: {model_name}"}, status=404)
+
+    txt_path = Path(model_path).with_suffix(".txt")
+
+    if not txt_path.is_file():
+        if template is None:
+            templates = []
+            if MODELDATA_TEMPLATES_DIR.is_dir():
+                templates = sorted((p.name for p in MODELDATA_TEMPLATES_DIR.glob("*.txt")), key=str.lower)
+            return web.json_response({"status": "missing", "templates": templates})
+        # bare file name only: no path components allowed
+        if Path(template).name != template:
+            return web.json_response({"status": "error", "message": f"Invalid template name: {template}"}, status=400)
+        template_path = MODELDATA_TEMPLATES_DIR / template
+        if not template_path.is_file():
+            return web.json_response({"status": "error", "message": f"Template not found: {template}"}, status=404)
+        try:
+            shutil.copyfile(template_path, txt_path)
+        except Exception as e:
+            return web.json_response({"status": "error", "message": f"Could not create {txt_path}: {e}"}, status=500)
+        logger.info(f"Created model info file {txt_path} from template {template}")
+
+    try:
+        _open_in_default_editor(txt_path)
+    except Exception as e:
+        return web.json_response({"status": "error", "message": f"Could not open editor: {e}"}, status=500)
+
+    return web.json_response({"status": "opened", "path": str(txt_path)})

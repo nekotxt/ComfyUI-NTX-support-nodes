@@ -1,0 +1,6 @@
+download:
+  - name: HUGGINGFACE
+    url: downloadlink
+    web: webpage
+hash:
+  sha256: value

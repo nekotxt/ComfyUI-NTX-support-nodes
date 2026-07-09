@@ -3,7 +3,7 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
-import { ADDON_PREFIX } from "./config.js";
+import { ADDON_PREFIX, API_PREFIX } from "./config.js";
 import { registerNodeMenu } from "./menu.js";
 
 const NODE_ID = ADDON_PREFIX + "ModelInfo";
