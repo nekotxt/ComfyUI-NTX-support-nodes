@@ -20,10 +20,11 @@ Addon-wide commands that are not tied to a specific node.
 
 ### Load template workflow
 
-Inserts a template workflow — picked from a folder of ready-made workflows — into the current
-graph. Rather than replacing the open workflow, the template's nodes are **pasted** into it (at
-the mouse position) and left selected, so they can be dragged into place immediately; any nested
-subgraph definitions the template uses come along with them.
+Inserts one or more template workflows — picked from a folder of ready-made workflows — into
+the current graph. Rather than replacing the open workflow, each template's nodes are **pasted**
+into it (at the mouse position) and left selected — when several templates are loaded at once,
+the last one's nodes remain selected — so they can be dragged into place immediately; any
+nested subgraph definitions the templates use come along with them.
 
 The command is available from three places:
 
@@ -40,8 +41,18 @@ Invoking the command opens a **tree picker** organised by subfolder:
 - a **filter box** narrows the list to files whose name matches the typed text;
 - folders can be expanded/collapsed; a file is chosen by clicking it, and confirmed with the
   **Load** button, a **double-click**, or **Enter**;
+- **Ctrl+click** (or Cmd+click) adds/removes files to a **multi-selection** instead. The selected
+  templates are inserted in the order they were picked, side by side from left to right (aligned
+  to the same top edge, with a small gap between them); when two or more files are selected, each
+  row shows a numbered badge with its position in that order, and the **Load** button becomes
+  **Load (n)**. To change the order, Ctrl+click an entry off and back on; a plain click collapses
+  the selection back to the single clicked file;
+- the multi-selection survives filter changes — files picked under one filter term stay selected
+  (and counted on the **Load** button) while a different term is typed, so a selection can be
+  built across several searches;
 - the **Refresh** button re-scans the templates folder on disk (rebuilding the cached list), so
-  templates added, renamed or removed there show up without reloading the page;
+  templates added, renamed or removed there show up without reloading the page; the current
+  filter text and selection are kept (entries that no longer exist are dropped);
 - **Cancel**, **Escape**, or a click outside the dialog closes it without loading;
 - the most recently loaded template is remembered and pre-selected (with its folders expanded)
   the next time the picker is opened.

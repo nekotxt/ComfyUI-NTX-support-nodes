@@ -21,6 +21,9 @@ const TEMP_TAB_NAME = "__wftemplate_temp__";
 // the page is reloaded). When false, the list is fetched on every menu open.
 const CACHE_LIST = true;
 
+// Horizontal spacing between templates when several are inserted at once.
+const STACK_GAP = 60;
+
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const CSS = `
@@ -127,6 +130,23 @@ const CSS = `
     color: #c9a44a;
 }
 
+.lwt-row .lwt-ord {
+    flex: 0 0 auto;
+    margin-left: auto;
+    min-width: 14px;
+    padding: 0 4px;
+    border-radius: 7px;
+    background: #4a90d9;
+    color: #fff;
+    font-size: 9px;
+    line-height: 14px;
+    text-align: center;
+}
+
+.lwt-row .lwt-ord:empty {
+    display: none;
+}
+
 .lwt-children {
     margin-left: 14px;
     border-left: 1px solid #333;
@@ -229,6 +249,31 @@ async function fetchTemplateList(force = false) {
 // temporary tab, and paste. The paste remaps node/link/subgraph ids (so nothing
 // collides with existing content) and leaves the pasted items selected.
 
+// Bounding-box width of a serialized clipboard payload, used to place several
+// templates side by side. Serialized pos/size survive the JSON round-trip
+// either as arrays or as {"0": x, "1": y} objects; numeric index access covers
+// both.
+function itemsWidth(items) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    const grow = (left, right) => {
+        if (left < minX) minX = left;
+        if (right > maxX) maxX = right;
+    };
+    for (const n of items.nodes ?? []) {
+        if (n.pos) grow(+n.pos[0], +n.pos[0] + (+(n.size?.[0]) || 0));
+    }
+    for (const r of items.reroutes ?? []) {
+        if (r.pos) grow(+r.pos[0], +r.pos[0]);
+    }
+    for (const g of items.groups ?? []) {
+        if (g.bounding) grow(+g.bounding[0], +g.bounding[0] + (+g.bounding[2] || 0));
+    }
+    return maxX > minX ? maxX - minX : 0;
+}
+
+// Returns the width of the inserted items, so multiple templates can be
+// placed one to the right of the other.
 async function loadTemplate(relPath, dropPos) {
     const fullPath = `workflows/${TEMPLATES_SUBDIR}/${relPath}`;
     const resp = await api.fetchApi(`/userdata/${encodeURIComponent(fullPath)}`);
@@ -281,7 +326,9 @@ async function loadTemplate(relPath, dropPos) {
     //    lands at the canvas' current graph_mouse.
     if (copiedItems) {
         app.canvas._deserializeItems(copiedItems, dropPos ? { position: dropPos } : {});
+        return itemsWidth(copiedItems);
     }
+    return 0;
 }
 
 // ── Tree model ────────────────────────────────────────────────────────────────
@@ -309,18 +356,20 @@ function buildTree(paths) {
 // pre-selected again, with its parent folders expanded and scrolled into view.
 let _lastLoadedPath = null;
 
-function openTemplateDialog(paths, dropPos, initialFilter = "") {
+function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected = null) {
     injectStyles();
     document.querySelector(".lwt-overlay")?.remove();
 
     const tree = buildTree(paths);
     const expanded = new Set();        // folder paths currently expanded
-    let selectedPath = paths.includes(_lastLoadedPath) ? _lastLoadedPath : null;
+    // Selected template paths, in click order — templates are inserted in this
+    // order. Plain click selects one; Ctrl/Cmd+click adds/removes.
+    let selected = (initialSelected ?? [_lastLoadedPath]).filter(p => paths.includes(p));
     let lastClick = { path: null, time: 0 };   // manual double-click detection
 
-    // Expand the folders on the way to the remembered selection.
-    if (selectedPath) {
-        const parts = selectedPath.split("/");
+    // Expand the folders on the way to the pre-selected entries.
+    for (const sel of selected) {
+        const parts = sel.split("/");
         let dirPath = "";
         for (let i = 0; i < parts.length - 1; i++) {
             dirPath = dirPath ? `${dirPath}/${parts[i]}` : parts[i];
@@ -338,7 +387,8 @@ function openTemplateDialog(paths, dropPos, initialFilter = "") {
     const title = document.createElement("div");
     title.className = "lwt-title";
     title.innerHTML = `Load template workflow<small></small>`;
-    title.querySelector("small").textContent = `workflows/${TEMPLATES_SUBDIR}`;
+    title.querySelector("small").textContent =
+        `workflows/${TEMPLATES_SUBDIR} · Ctrl+click to select multiple`;
     panel.appendChild(title);
 
     const filterInput = document.createElement("input");
@@ -368,7 +418,7 @@ function openTemplateDialog(paths, dropPos, initialFilter = "") {
     const loadBtn = document.createElement("button");
     loadBtn.className = "lwt-btn primary";
     loadBtn.textContent = "Load";
-    loadBtn.disabled = !selectedPath;
+    loadBtn.disabled = !selected.length;
 
     btns.appendChild(refreshBtn);
     btns.appendChild(cancelBtn);
@@ -380,25 +430,40 @@ function openTemplateDialog(paths, dropPos, initialFilter = "") {
         document.removeEventListener("keydown", onKey, true);
     }
 
+    // Load every selected template, in selection order, each one placed to the
+    // right of the previous one's bounding box.
     async function confirmLoad() {
-        if (!selectedPath) return;
-        const path = selectedPath;
-        selectedPath = null;           // re-entry guard: confirm only once
+        if (!selected.length) return;
+        const batch = selected;
+        selected = [];                 // re-entry guard: confirm only once
         close();
-        try {
-            await loadTemplate(path, dropPos);
-            _lastLoadedPath = path;    // remember for the next dialog open
-        } catch (err) {
-            console.error("[LoadWfTemplate] failed to load workflow:", err);
-            toast("error", "Load failed", `Could not load "${path}": ${err.message ?? err}`);
+        const pos = dropPos ? [...dropPos] : null;
+        const failed = [];
+        for (const path of batch) {
+            try {
+                const width = await loadTemplate(path, pos);
+                _lastLoadedPath = path;    // remember for the next dialog open
+                if (pos) pos[0] += width + STACK_GAP;
+            } catch (err) {
+                console.error(`[LoadWfTemplate] failed to load workflow "${path}":`, err);
+                failed.push(path);
+            }
+        }
+        if (failed.length) {
+            toast("error", "Load failed", `Could not load: ${failed.join(", ")}`);
         }
     }
 
-    function select(path, rowEl) {
-        selectedPath = path;
-        loadBtn.disabled = false;
-        treeEl.querySelector(".lwt-row.selected")?.classList.remove("selected");
-        rowEl.classList.add("selected");
+    // Sync the row highlights, order badges and Load button with `selected`.
+    function updateSelectionUI() {
+        loadBtn.disabled = !selected.length;
+        loadBtn.textContent = selected.length > 1 ? `Load (${selected.length})` : "Load";
+        for (const row of treeEl.querySelectorAll(".lwt-row[data-path]")) {
+            const idx = selected.indexOf(row.dataset.path);
+            row.classList.toggle("selected", idx !== -1);
+            row.querySelector(".lwt-ord").textContent =
+                idx !== -1 && selected.length > 1 ? String(idx + 1) : "";
+        }
     }
 
     // Render one directory level; returns the element, or null when the filter
@@ -446,21 +511,33 @@ function openTemplateDialog(paths, dropPos, initialFilter = "") {
             any = true;
             const row = document.createElement("div");
             row.className = "lwt-row";
-            row.innerHTML = `<span class="lwt-ico">▤</span><span></span>`;
-            row.querySelector("span:last-child").textContent = file.name.replace(/\.json$/i, "");
+            row.dataset.path = file.path;
+            row.innerHTML = `<span class="lwt-ico">▤</span><span></span><span class="lwt-ord"></span>`;
+            row.querySelector("span:nth-child(2)").textContent = file.name.replace(/\.json$/i, "");
             row.title = file.path;
-            if (file.path === selectedPath) row.classList.add("selected");
 
-            // Manual double-click detection: two clicks on the same file
-            // within 400 ms confirm the load. More reliable than the native
-            // "dblclick" event, which the browser suppresses when the mouse
-            // drifts slightly between clicks.
-            row.addEventListener("click", () => {
-                const now = Date.now();
-                const isDouble = lastClick.path === file.path && now - lastClick.time < 400;
-                lastClick = { path: file.path, time: now };
-                select(file.path, row);
-                if (isDouble) confirmLoad();
+            // Plain click selects a single file; a second click on it within
+            // 400 ms confirms the load (manual double-click detection — more
+            // reliable than the native "dblclick" event, which the browser
+            // suppresses when the mouse drifts slightly between clicks).
+            // Ctrl/Cmd+click toggles the file in the multi-selection instead.
+            row.addEventListener("click", e => {
+                if (e.ctrlKey || e.metaKey) {
+                    const idx = selected.indexOf(file.path);
+                    if (idx === -1) selected.push(file.path);
+                    else selected.splice(idx, 1);
+                    lastClick = { path: null, time: 0 };
+                } else {
+                    const now = Date.now();
+                    const isDouble = lastClick.path === file.path && now - lastClick.time < 400;
+                    lastClick = { path: file.path, time: now };
+                    selected = [file.path];
+                    if (isDouble) {
+                        confirmLoad();
+                        return;
+                    }
+                }
+                updateSelectionUI();
             });
 
             frag.appendChild(row);
@@ -477,12 +554,6 @@ function openTemplateDialog(paths, dropPos, initialFilter = "") {
         const term = filterInput.value.trim().toLowerCase();
         treeEl.innerHTML = "";
 
-        // Drop the selection if filtering hid the selected file.
-        if (selectedPath && term && !selectedPath.toLowerCase().includes(term)) {
-            selectedPath = null;
-            loadBtn.disabled = true;
-        }
-
         const content = paths.length ? renderDir(tree, "", term, !!term) : null;
         if (content) {
             treeEl.appendChild(content);
@@ -494,6 +565,11 @@ function openTemplateDialog(paths, dropPos, initialFilter = "") {
                 : `No workflows found in workflows/${TEMPLATES_SUBDIR}`;
             treeEl.appendChild(empty);
         }
+
+        // Filtering keeps the selection (so entries picked under different
+        // filter terms can be combined); hidden picks still count — the Load
+        // button label shows how many templates are queued.
+        updateSelectionUI();
     }
 
     const onKey = e => {
@@ -502,15 +578,15 @@ function openTemplateDialog(paths, dropPos, initialFilter = "") {
     };
 
     // Rescan the templates folder, rebuilding the cached list, then reopen the
-    // dialog with the fresh paths. The current filter text is carried over; the
-    // most recently loaded template stays pre-selected (via _lastLoadedPath).
+    // dialog with the fresh paths. The current filter text and selection are
+    // carried over (entries that no longer exist are dropped).
     async function refresh() {
         refreshBtn.classList.add("busy");
         const term = filterInput.value;
         try {
             const fresh = await fetchTemplateList(true);
             close();
-            openTemplateDialog(fresh, dropPos, term);
+            openTemplateDialog(fresh, dropPos, term, [...selected]);
         } catch (err) {
             refreshBtn.classList.remove("busy");
             console.error("[LoadWfTemplate] failed to refresh workflows:", err);
