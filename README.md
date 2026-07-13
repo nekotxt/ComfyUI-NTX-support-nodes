@@ -9,9 +9,11 @@ Configuration and data files (prompt library, custom pipe templates, `config.jso
 from `input/ntx_data/` inside the ComfyUI folder (falling back to the `ntx_data/` folder
 bundled with the addon).
 
-Recurring data type: **LORA_STACK** — a list of `(lora_name, strength_model, strength_clip)`
-tuples, passed between the LoRA nodes below.
-This is the same data type used by usual lora stacks in other extensions.
+Recurring data type:
+- **LORA_STACK**: a list of `(lora_name, strength_model, strength_clip)`
+  tuples, passed between the LoRA nodes below.
+  This is the same data type used by usual lora stacks in other extensions;
+- **DICT**: a dictionary of key:value pairs;
 
 ---
 
