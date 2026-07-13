@@ -819,39 +819,6 @@ def main_loop(models_dir:str, lists_dir:str, ntxdata_dir:str, catalogue_path:str
             for line in result:
                 print(line)
 
-if __name__ == "__main__":
-
-    if (len(sys.argv) == 1) or (str(sys.argv[1]).upper() == "LOCAL"):
-        models_dir     = r"N:\StableDiffusion\ComfyUI\models"
-        lists_dir      = r"N:\StableDiffusion\ComfyUI\input\ntx_data\lists"
-        ntxdata_dir    = r"N:\StableDiffusion\ComfyUI\input\ntx_data\downloads"
-        catalogue_path = r"N:\StableDiffusion\ComfyUI\input\ntx_data\catalogue_of_ntxdata.json"
-        config_path    = r"N:\StableDiffusion\ComfyUI\input\ntx_data\config.json"
-    elif (str(sys.argv[1]).upper() == "POD"):
-        models_dir     = r"/workspace/ComfyUI/models"
-        lists_dir      = r"/workspace/ComfyUI/input/ntx_data/lists"
-        ntxdata_dir    = r"/workspace/ComfyUI/input/ntx_data/downloads"
-        catalogue_path = r"/workspace/ComfyUI/input/ntx_data/catalogue_of_ntxdata.json"
-        config_path    = r"/workspace/ComfyUI/input/ntx_data/config.json"
-    else:
-        print(f"Unrecognized execution mode {sys.argv[1]}")
-        sys.exit(0)
-
-    with open(config_path) as f:
-        configuration = json.load(f)
-    tokens = configuration.get("tokens", {})
-
-    main_loop(
-        models_dir = models_dir,
-        lists_dir = lists_dir,
-        ntxdata_dir = ntxdata_dir,
-        catalogue_path = catalogue_path,
-        tokens = tokens,
-        cloud_storage_id = "pcloud",
-        max_workers = 1,
-        simulation_only = False
-    )
-
 def download_models_from_text_list(text:str, models_dir:str, tokens:dict):
     models_dir = Path(models_dir)
     models_list = parse_list_text(text)
