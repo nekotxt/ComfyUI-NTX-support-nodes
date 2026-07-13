@@ -11,6 +11,7 @@ bundled with the addon).
 
 Recurring data type: **LORA_STACK** — a list of `(lora_name, strength_model, strength_clip)`
 tuples, passed between the LoRA nodes below.
+This is the same data type used by usual lora stacks in other extensions.
 
 ---
 
