@@ -97,10 +97,10 @@ class FileNameTemplate(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         autogrow_template = io.Autogrow.TemplatePrefix(
-            input=io.AnyType.Input("param"),  # template for each input
-            prefix="param",                   # prefix for generated input names
-            min=1,                            # minimum number of inputs shown
-            max=10,                           # maximum number of inputs allowed
+            input=io.AnyType.Input("p"),  # template for each input
+            prefix="p",                   # prefix for generated input names
+            min=1,                        # minimum number of inputs shown
+            max=10,                       # maximum number of inputs allowed
         )
         return io.Schema(
             node_id=f"{ADDON_PREFIX}FileNameTemplate",
@@ -109,19 +109,25 @@ class FileNameTemplate(io.ComfyNode):
             inputs=[
                 io.String.Input("template", default=""),
                 io.Autogrow.Input("params", template=autogrow_template),
+                io.String.Input("model_name", default=""),
+                io.Int.Input("model_name_max_length", default=100),
                 DICT_TYPE.Input("opt_textparams", optional=True)
             ],
             outputs=[io.String.Output("filename")],
         )
 
     @classmethod
-    def execute(cls, template, params: io.Autogrow.Type, opt_textparams=None) -> io.NodeOutput:
+    def execute(cls, template, params: io.Autogrow.Type, model_name, model_name_max_length, opt_textparams=None) -> io.NodeOutput:
         param_list = list(params.values())
 
         opt_textparams = {} if opt_textparams is None else clone_data(opt_textparams)
 
+        model_name = model_name.strip()
+        if model_name != "":
+            opt_textparams["model_name"] = Path(model_name).stem[:model_name_max_length].replace(" ", "_")
+
         for i in range(0, len(param_list)):
-            opt_textparams[f"param{i}"] = param_list[i]
+            opt_textparams[f"p{i}"] = param_list[i]
 
         filename = _replace_parameters(template, opt_textparams)
 

@@ -1,5 +1,5 @@
 # TITLE : download models specified in download dir, or from list
-# VER 1.0
+# VER 1.0 (without _main_)
 
 import hashlib
 import json
