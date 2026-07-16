@@ -659,7 +659,7 @@ Right-click menu option on the node:
 
 ![Reroute node](images/Reroute.png)
 
-A family of pass-through nodes (under **CustomTest/reroute** in the node menu), one per data
+A family of pass-through nodes (under **reroute** in the node menu), one per data
 type, used to organise the wires of a workflow. Each node has a single input and a single
 output and forwards whatever it receives, unchanged. The input is optional: when it is left
 disconnected the node outputs a type-appropriate default value instead, so a reroute can also
@@ -722,3 +722,112 @@ Right-click menu option on the node:
 - **Slot sides** — submenu listing every valid input→output side combination (**Left to
   Right**, **Left to Top**, …, 12 in total; same-side combinations are not offered). The
   current layout is marked with a ✓; clicking an entry applies both sides at once.
+
+---
+
+## GlobalSet
+
+![GlobalSet node](images/GlobalSet.png)
+
+One half of a wireless connection pair (found under **reroute**, together with
+**GlobalGet**): it stores any number of connections under unique names, and GlobalGet nodes
+read them back anywhere on the canvas — subgraphs included — without a cable. The set of
+inputs is defined per node through an editor dialog (same style as the PipeCustom editor),
+each entry with its own name and data type.
+
+Both nodes are **virtual**: they exist only in the editor and are removed from the prompt when
+the workflow is queued — every GlobalGet output resolves directly to the node feeding the
+same-named GlobalSet input, so the pair never executes, adds no cost and cannot change the
+result. Muting or bypassing them has no effect on a run for the same reason.
+
+Names are **global**: a name may be defined by only one GlobalSet in the whole workflow
+(nested subgraphs included) — the editor rejects a name already defined by another GlobalSet,
+and a **pasted or cloned** GlobalSet automatically renames its conflicting entries
+(`foo` → `foo_2`, `foo_3`, …).
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| *custom inputs* | user-defined | One slot per configured entry, with the chosen name and type. Whatever is wired in is readable under that name by every GlobalGet. A slot left unconnected stores nothing — GlobalGet outputs with that name resolve to no value (the downstream input behaves as unconnected). |
+
+### Outputs
+
+The node has no outputs — values are read back with **GlobalGet** nodes.
+
+Up to **30** entries per node.
+
+### Frontend
+
+The node body shows an **Edit inputs…** button opening the editor dialog:
+
+- **+ Add input** appends a new entry; each row has a name field and a type dropdown (same
+  type list as the PipeCustom editor: IMAGE, MASK, LATENT, MODEL, CLIP, VAE, CONDITIONING,
+  INT, FLOAT, STRING, BOOLEAN, LORA_STACK, CONTROL_NET_STACK, DICT, LIST, `*`).
+- Rows can be **drag-reordered** with the handle and removed with **✕**.
+- **Renaming** a row keeps its slot and wire; changing a row's **type** keeps the slot but
+  drops the wire. Names are validated on **OK**: non-empty, no duplicates on the node, not
+  defined by another GlobalSet.
+- Changes are propagated to the GlobalGet nodes on **OK**: a renamed entry renames the
+  matching Get outputs everywhere (their slots and wires are kept), a type change retypes
+  them (their wires are dropped, as they are no longer valid), and a removed entry leaves
+  the Get outputs in place but a warning toast lists the orphaned names.
+- **Enter** (while editing a name) confirms, **Escape** cancels.
+
+Right-click menu options on the node:
+
+- **Edit global inputs…** — same as the button.
+- **Select its Get nodes (n)** — selects every GlobalGet in the same graph that reads at
+  least one of this node's names.
+
+---
+
+## GlobalGet
+
+![GlobalGet node](images/GlobalGet.png)
+
+The other half of the pair: exposes values stored by **GlobalSet** nodes as outputs, with no
+cable. The set of outputs is defined through the same editor dialog — but only names defined
+by a GlobalSet can be used, and each output automatically takes the defining entry's data
+type. Any number of GlobalGet nodes may read the same name, so one value can fan out across
+the whole workflow, including into or out of subgraphs.
+
+Like GlobalSet, the node is virtual (see above): at queue time each output resolves straight
+to the real node feeding the same-named GlobalSet input. An output whose name is no longer
+defined, or whose GlobalSet slot is unconnected, resolves to no value — a downstream node
+with that required input then fails prompt validation, exactly as if the input were
+unconnected.
+
+### Inputs
+
+The node has no inputs — values are stored with **GlobalSet** nodes.
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| *custom outputs* | taken from the Set | One slot per configured entry; carries the value wired into the same-named GlobalSet input, with that entry's type. |
+
+Up to **30** entries per node.
+
+### Frontend
+
+The node body shows an **Edit outputs…** button opening the editor dialog:
+
+- Rows work as on GlobalSet (add, drag-reorder, remove, rename keeps the wires), with two
+  differences: the name field **autocompletes** with the names defined by the GlobalSet
+  nodes, and the type dropdown is **locked** to the defining entry's type as soon as the
+  name is recognised.
+- **Add all Set names** appends one entry for every defined name not already on the node.
+- Names are validated on **OK**: non-empty, no duplicates on the node, and every name must
+  be defined by a GlobalSet.
+- Renames made on the GlobalSet side follow automatically (see GlobalSet above); an entry
+  whose name was removed on the Set side stays on the node (with its warning toast) until
+  it is fixed or removed here.
+
+Right-click menu options on the node:
+
+- **Edit global outputs…** — same as the button.
+- **Jump to Global Set** — submenu with one entry per output name; centers the view on the
+  GlobalSet defining that name, switching into its graph when it lives in a different
+  subgraph.
