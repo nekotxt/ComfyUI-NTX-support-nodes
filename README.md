@@ -652,3 +652,73 @@ Right-click menu option on the node:
 
 - **Queue (this node as output)** — same behaviour as on **PreviewAsText**: queues the
   workflow with just this node's branch as the execution target.
+
+---
+
+## Reroute nodes
+
+![Reroute node](images/Reroute.png)
+
+A family of pass-through nodes (under **CustomTest/reroute** in the node menu), one per data
+type, used to organise the wires of a workflow. Each node has a single input and a single
+output and forwards whatever it receives, unchanged. The input is optional: when it is left
+disconnected the node outputs a type-appropriate default value instead, so a reroute can also
+serve as a source of an "empty" value.
+
+Available variants (slot name — default output when the input is disconnected):
+
+- **RerouteAny** — `value`, accepts any type (`None`)
+- **RerouteBoolean** — `boolean` (`False`)
+- **RerouteFloat** — `float` (`0.0`)
+- **RerouteInteger** — `integer` (`0`)
+- **RerouteString** — `string` (`""`)
+- **RerouteModel** — `model` (`None`)
+- **RerouteClip** — `clip` (`None`)
+- **RerouteClipVision** — `clip_vision` (`None`)
+- **RerouteVae** — `vae` (`None`)
+- **RerouteImage** — `image` (`None`)
+- **RerouteMask** — `mask` (`None`)
+- **RerouteLatent** — `latent` (`None`)
+- **RerouteConditioning** — `conditioning` (`None`)
+- **RerouteDict** — `dict` (`{}`)
+- **RerouteList** — `list` (`[]`)
+- **RerouteLoraStack** — `lora_stack` (`[]`)
+- **RerouteControlNetStack** — `control_net_stack` (`[]`)
+
+The primitive variants (`boolean`, `float`, `integer`, `string`) only accept a link — they
+never show an editable widget.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| *(slot name from the list above)* | matches the variant (optional) | The value to pass through. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| *(slot name from the list above)* | matches the variant | The input value, unchanged; the variant's default when the input is disconnected. |
+
+### Frontend
+
+**Repositionable slots.** By default the input sits on the left edge and the output on the
+right edge, but each of them can be moved to any of the four sides of the node — with the
+constraint that the input and the output never share a side. Wires bend accordingly, leaving
+or entering the node in the direction of the side their slot sits on, and the slots keep
+their side when the node is resized. The chosen layout is saved with the workflow (in the
+node properties `input_side` / `output_side`); picking **Left to Right** returns the node to
+the standard layout. A collapsed node uses the usual collapsed connection points until it is
+expanded again.
+
+**Free resizing.** Reroute nodes can be resized down to **80 px** wide (standard nodes stop
+at about 140 px), so they can be kept compact. Two side effects of shrinking below the text
+width: the title and slot labels may visually overflow the node (renaming the node to
+something short avoids it), and the native **Resize** right-click action snaps the node
+straight to the minimal width.
+
+Right-click menu option on the node:
+
+- **Slot sides** — submenu listing every valid input→output side combination (**Left to
+  Right**, **Left to Top**, …, 12 in total; same-side combinations are not offered). The
+  current layout is marked with a ✓; clicking an entry applies both sides at once.
