@@ -161,6 +161,32 @@ class PromptChainer(io.ComfyNode):
         else:
             return io.NodeOutput(prev_prompt + "\n" + prompt)
 
+class DoublePrompt(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}DoublePrompt",
+            display_name=f"{ADDON_PREFIX} Double Prompt",
+            description="""
+    Two multiline prompt fields (positive and negative), returned unchanged.
+    Drag the divider between the two fields to change how the node height is
+    shared between them (double-click the divider to restore the even split).
+    """,
+            category=f"{ADDON_CATEGORY}/prompts",
+            inputs=[
+                io.String.Input("prompt_positive", multiline=True, dynamic_prompts=True, default=""),
+                io.String.Input("prompt_negative", multiline=True, dynamic_prompts=True, default=""),
+            ],
+            outputs=[
+                io.String.Output("prompt_positive"),
+                io.String.Output("prompt_negative"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, prompt_positive, prompt_negative):
+        return io.NodeOutput(prompt_positive, prompt_negative)
+
 class ComplexPrompt(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -234,5 +260,6 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         ReplaceTextParameters,
         FileNameTemplate,
         PromptChainer,
+        DoublePrompt,
         ComplexPrompt,
     ]
