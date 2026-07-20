@@ -847,7 +847,7 @@ function registerGlobalSetNode() {
     const LGraphNode = LiteGraph.LGraphNode;
 
     class GlobalSetNode extends LGraphNode {
-        static title = "Global Set";
+        static title = ADDON_PREFIX + " Global Set";
         static category = CATEGORY;
 
         constructor(title) {
@@ -892,7 +892,7 @@ function registerGlobalGetNode() {
     const LGraphNode = LiteGraph.LGraphNode;
 
     class GlobalGetNode extends LGraphNode {
-        static title = "Global Get";
+        static title = ADDON_PREFIX + " Global Get";
         static category = CATEGORY;
 
         constructor(title) {

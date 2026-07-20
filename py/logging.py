@@ -90,16 +90,16 @@ logging.Logger.node_name = node_name # Add the method to the Logger class
 
 class LevelFormatter(logging.Formatter):
     FORMATS = {
-        logging.DEBUG:    f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["RED"]         }[DEBUG] %(message)s{COLORS["RESET"]}",
-        logging.INFO:     f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["CYAN"]        }[INFO] %(message)s{COLORS["RESET"]}",
-        SUCCESS:          f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["BRIGHT_GREEN"]}[SUCCESS] %(message)s{COLORS["RESET"]}",
-        MODEL_DOWNLOADED: f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["BRIGHT_BLUE"] }[DOWNLOAD] %(message)s{COLORS["RESET"]}",
-        MODEL_LOADED:     f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["MAGENTA"]     }[LOAD] %(message)s{COLORS["RESET"]}",
-        MODEL_APPLIED:    f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["YELLOW"]      }[APPLY] %(message)s{COLORS["RESET"]}",
-        NODE_NAME:        f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["CYAN"]        }[INFO] %(message)s{COLORS["RESET"]}",
-        logging.WARNING:  f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["RED"]         }[WARN] %(message)s{COLORS["RESET"]}",
-        logging.ERROR:    f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["BRIGHT_RED"]  }[ERROR] %(filename)s:%(lineno)d - %(message)s{COLORS["RESET"]}",
-        logging.CRITICAL: f"{COLORS["CYAN"]}{ADDON_NAME} %(asctime)s {COLORS["BRIGHT_RED"]  }[CRIT] %(filename)s:%(lineno)d - %(message)s{COLORS["RESET"]}",
+        logging.DEBUG:    f"{COLORS["RED"]         }[DEBUG] [{ADDON_NAME}] %(message)s{COLORS["RESET"]}",
+        logging.INFO:     f"{COLORS["CYAN"]        }[INFO] [{ADDON_NAME}] %(message)s{COLORS["RESET"]}",
+        SUCCESS:          f"{COLORS["BRIGHT_GREEN"]}[SUCCESS] [{ADDON_NAME}] %(message)s{COLORS["RESET"]}",
+        MODEL_DOWNLOADED: f"{COLORS["BRIGHT_BLUE"] }[DOWNLOAD] [{ADDON_NAME}] %(message)s{COLORS["RESET"]}",
+        MODEL_LOADED:     f"{COLORS["MAGENTA"]     }[LOAD] [{ADDON_NAME}] %(message)s{COLORS["RESET"]}",
+        MODEL_APPLIED:    f"{COLORS["YELLOW"]      }[APPLY] [{ADDON_NAME}] %(message)s{COLORS["RESET"]}",
+        NODE_NAME:        f"{COLORS["CYAN"]        }[INFO] [{ADDON_NAME}] %(message)s{COLORS["RESET"]}",
+        logging.WARNING:  f"{COLORS["RED"]         }[WARN] [{ADDON_NAME}] %(message)s{COLORS["RESET"]}",
+        logging.ERROR:    f"{COLORS["BRIGHT_RED"]  }[ERROR] [{ADDON_NAME}] %(filename)s:%(lineno)d - %(message)s{COLORS["RESET"]}",
+        logging.CRITICAL: f"{COLORS["BRIGHT_RED"]  }[CRIT] [{ADDON_NAME}] %(filename)s:%(lineno)d - %(message)s{COLORS["RESET"]}",
     }
 
     def format(self, record):

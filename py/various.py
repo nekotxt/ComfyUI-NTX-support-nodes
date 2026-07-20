@@ -113,6 +113,9 @@ class LazySelectAny(io.ComfyNode):
     def execute(cls, select, **kwargs) -> io.NodeOutput:
         return io.NodeOutput(kwargs.get("input%d" % select), select)
 
+class LazySelectAny15(LazySelectAny):
+    MAX_INPUTS = 15
+
 class PreviewAsText(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -362,6 +365,7 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         SwitchAny,
         SelectAnyInput,
         LazySelectAny,
+        LazySelectAny15,
         PreviewAsText,
         PreviewImage,
         CollectModelNtxdata,

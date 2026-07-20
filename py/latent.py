@@ -2,6 +2,8 @@ from comfy_api.latest import ComfyExtension, io
 
 import comfy.utils
 
+import torch
+
 from pathlib import Path
 from typing_extensions import override
 
@@ -123,10 +125,56 @@ class CreateImageLatent(io.ComfyNode):
 
         return io.NodeOutput(width, height, batch_size, latent, opt_image)
 
+class CreateEmptyImageLatent(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}CreateEmptyImageLatent",
+            display_name=f"{ADDON_PREFIX} Create Empty Image Latent",
+            description="""Build an empty latent for an image model (4D latent: no temporal axis)""",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.Combo.Input("image_size", options=["custom"] + load_list_image_sizes(), default="custom"),
+                io.Int.Input("width", default=0, min=0, max=4096, step=1),
+                io.Int.Input("height", default=0, min=0, max=4096, step=1),
+                io.Int.Input("batch_size", default=1, min=1, max=24),
+                io.Vae.Input("vae"),
+            ],
+            outputs=[
+                io.Latent.Output("latent"),
+                io.Int.Output("width"),
+                io.Int.Output("height"),
+                io.Int.Output("batch_size"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, image_size, width, height, batch_size, vae):
+
+        if image_size != "custom": # decode standard image size if any
+            width, height = extract_image_size(image_size)
+
+        import comfy.model_management
+
+        # Generic empty latent, given a VAE input
+        b  = batch_size
+        c  = vae.latent_channels
+        ds = vae.spacial_compression_encode()    # 8, 16, 32, ... (unwraps per-axis tuples)
+        width, height = max(ds, (width // ds) * ds), max(ds, (height // ds) * ds)
+        device, dtype = comfy.model_management.intermediate_device(), comfy.model_management.intermediate_dtype()
+
+        # image VAE: [B, C, H, W]
+        logger.info(f"CreateEmtpyLatent: batch={b} channels={c} w_latent={width // ds} h_latent={height // ds} compression={ds} width={width} height={height}")
+        samples = torch.zeros([b, c, height // ds, width // ds], device=device, dtype=dtype)
+        latent = {"samples": samples, "downscale_ratio_spacial": ds}
+
+        return io.NodeOutput(latent, width, height, batch_size)
+
 # ===== INITIALIZATION =====================================================================================================================
 
 def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         LoadCustomVae,
         CreateImageLatent,
+        CreateEmptyImageLatent,
     ]
