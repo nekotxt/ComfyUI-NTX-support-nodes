@@ -950,3 +950,54 @@ slightly from the source.
 | `mask` | MASK | The resized (or passed-through) mask; empty when `mask` is not connected. |
 | `width` | INT | The final width, measured on the output image (or the output mask when no image is connected; `0` when neither is). |
 | `height` | INT | The final height, measured the same way. |
+
+---
+
+## ImageResolution
+
+![ImageResolution node](images/ImageResolution.png)
+
+Outputs a `width` / `height` pair, computed with a selectable strategy: entered directly,
+picked from the size presets, derived from an aspect ratio and/or a pixel budget, or copied
+from an existing image or mask. The `mode` widget is a dynamic combo: selecting a mode shows
+only the widgets (and, for `match image`, the extra input slot) that the mode actually uses.
+
+Whatever the mode, the resulting width and height are rounded with `divisible_by` (nearest
+multiple, never below the divisor). Where a mode computes a side from an aspect ratio or a
+pixel count, this rounding may make the result deviate slightly from the exact target.
+
+The preset and aspect ratio lists are read from `image_sizes.txt` and
+`image_aspect_ratios.txt` in the addon's data folder (one entry per line).
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `mode` | dynamic COMBO | How the resolution is produced; see the mode list below. Default `custom`. |
+| `divisible_by` | INT | The width and height are rounded to the nearest multiple of this value (1–1024, default `8`; `1` = no rounding). |
+
+### Modes
+
+- **`custom`** — widgets `width` and `height` (1–16384, default 512). The values are used
+  as-is (then rounded with `divisible_by`).
+- **`preset`** — widget `image_size`, a combo of the preset sizes (e.g. `832x1216`); the
+  width and height are extracted from the selected entry.
+- **`resolution`** — widgets `aspect_ratio` (a combo of the aspect ratio presets, e.g.
+  `3:2 (Photo)`) and `megapixel` (FLOAT 0.01–256.0, default 1.0; 1 megapixel = 1024×1024
+  pixels). The size is computed so that the total pixel count matches the requested
+  megapixels while keeping the chosen aspect ratio.
+- **`resolution and width`** — widgets `width` (1–16384, default 1024) and `megapixel`. The
+  width is fixed and the height is computed to reach the requested pixel count.
+- **`resolution and height`** — widgets `height` (1–16384, default 1024) and `megapixel`.
+  The mirror of the above: the height is fixed and the width is computed.
+- **`match image`** — an extra **`match` input slot**, which accepts an IMAGE or a MASK and
+  is required while this mode is selected. The width and height are read from that input.
+  The size is still rounded with `divisible_by`, so set it to `1` when the output must match
+  the reference exactly.
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `width` | INT | The computed width, rounded with `divisible_by`. |
+| `height` | INT | The computed height, rounded with `divisible_by`. |

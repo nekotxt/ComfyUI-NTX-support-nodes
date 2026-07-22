@@ -17,7 +17,7 @@ from typing_extensions import override
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY
 from .logging import logger
-from .utils import  load_list_image_sizes, extract_image_size, image_crop, image_rescale_keeping_aspect_ratio
+from .utils import  load_list_image_sizes, extract_image_size, image_crop, image_rescale_keeping_aspect_ratio, load_list_image_aspect_ratios, extract_image_aspect_ratio
 
 # ===== Custom types ===========================================================================================================================
 
@@ -370,6 +370,74 @@ class ImageSize(io.ComfyNode):
 
         return io.NodeOutput(width, height, opt_image)
 
+class ImageResolution(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}ImageResolution",
+            display_name=f"{ADDON_PREFIX} Image Resolution",
+            description="Output a (width, height) resolution, either custom or picked from the image size presets, rounded with divisible_by",
+            category=f"{ADDON_CATEGORY}/images",
+            inputs=[
+                io.DynamicCombo.Input("mode", options=[
+                    io.DynamicCombo.Option("custom", [
+                        io.Int.Input("width", default=512, min=1, max=16384, step=1),
+                        io.Int.Input("height", default=512, min=1, max=16384, step=1),
+                    ]),
+                    io.DynamicCombo.Option("preset", [
+                        io.Combo.Input("image_size", options=load_list_image_sizes()),
+                    ]),
+                    io.DynamicCombo.Option("resolution", [
+                        io.Combo.Input("aspect_ratio", options=load_list_image_aspect_ratios()),
+                        io.Float.Input("megapixel", default=1.0, min=0.01, max=256.0, step=0.05),
+                    ]),
+                    io.DynamicCombo.Option("resolution and width", [
+                        io.Int.Input("width", default=1024, min=1, max=16384, step=1),
+                        io.Float.Input("megapixel", default=1.0, min=0.01, max=256.0, step=0.05),
+                    ]),
+                    io.DynamicCombo.Option("resolution and height", [
+                        io.Int.Input("height", default=1024, min=1, max=16384, step=1),
+                        io.Float.Input("megapixel", default=1.0, min=0.01, max=256.0, step=0.05),
+                    ]),
+                    io.DynamicCombo.Option("match image", [
+                        io.MultiType.Input("match", types=[io.Image, io.Mask]),
+                    ]),
+                ]),
+                io.Int.Input("divisible_by", default=8, min=1, max=1024, step=1),
+            ],
+            outputs=[
+                io.Int.Output("width"),
+                io.Int.Output("height"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, mode: io.DynamicCombo.Type, divisible_by) -> io.NodeOutput:
+        if mode["mode"] == "custom":
+            width, height = mode["width"], mode["height"]
+        elif mode["mode"] == "resolution":
+            # size with the requested pixel count (1 megapixel = 1024x1024) and aspect ratio
+            ratio_w, ratio_h = extract_image_aspect_ratio(mode["aspect_ratio"])
+            pixels = mode["megapixel"] * 1024 * 1024
+            width = max(1, round(math.sqrt(pixels * ratio_w / ratio_h)))
+            height = max(1, round(width * ratio_h / ratio_w))
+        elif mode["mode"] == "resolution and width":
+            # height giving the requested pixel count (1 megapixel = 1024x1024) at the given width
+            width = mode["width"]
+            height = max(1, round(mode["megapixel"] * 1024 * 1024 / width))
+        elif mode["mode"] == "resolution and height":
+            # width giving the requested pixel count (1 megapixel = 1024x1024) at the given height
+            height = mode["height"]
+            width = max(1, round(mode["megapixel"] * 1024 * 1024 / height))
+        elif mode["mode"] == "match image":
+            # both IMAGE [B, H, W, C] and MASK [B, H, W] have width and height at the same indices
+            match = mode["match"]
+            width, height = match.shape[2], match.shape[1]
+        else:  # "preset"
+            width, height = extract_image_size(mode["image_size"])
+
+        return io.NodeOutput(round_to_multiple(width, divisible_by), round_to_multiple(height, divisible_by))
+
 class ExtractImageFromBatch(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -592,6 +660,7 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         SaveMultipleImages,
         ImageSize,
+        ImageResolution,
         ExtractImageFromBatch,
         ResizeImageMask,
     ]

@@ -174,6 +174,21 @@ def image_rescale_keeping_aspect_ratio(image, width:int, height:int, rescaler:st
 
     return final_image
 
+image_aspect_ratios_file = SETTINGS_DIR / "image_aspect_ratios.txt"
+if image_aspect_ratios_file.is_file():
+    IMAGE_ASPECT_RATIOS = image_aspect_ratios_file.read_text(encoding="utf-8").splitlines()
+else:
+    IMAGE_ASPECT_RATIOS = ["1:1 (Square)"]
+def load_list_image_aspect_ratios():
+    global IMAGE_ASPECT_RATIOS
+    return IMAGE_ASPECT_RATIOS
+def extract_image_aspect_ratio(image_aspect_ratio):
+    match = re.search(r'([\d]+):([\d]+)', image_aspect_ratio)
+    if match is None:
+        return (1, 1)
+    else:
+        return (int(match[1]), int(match[2]))
+
 # ===== RETRIVE ACTUAL POSITION OF A MODEL =================================================================================================
 
 LIST_OF_MODEL_DIRS = {}
