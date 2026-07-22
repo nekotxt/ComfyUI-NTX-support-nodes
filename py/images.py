@@ -654,6 +654,58 @@ class ResizeImageMask(io.ComfyNode):
         final_width, final_height = cls.get_final_size(out_image, out_mask)
         return io.NodeOutput(out_image, out_mask, final_width, final_height)
 
+class MaskOverlay(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}MaskOverlay",
+            display_name=f"{ADDON_PREFIX} Mask Overlay",
+            description="Preview a mask overlaid on an image as a colored layer; with only one input connected, preview that input as-is",
+            category=f"{ADDON_CATEGORY}/images",
+            is_output_node=True,
+            inputs=[
+                io.Float.Input("mask_opacity", default=0.5, min=0.0, max=1.0, step=0.01, tooltip="Opacity of the mask overlay (0.0-1.0)"),
+                io.Color.Input("mask_color", default="#0000FF", tooltip="Color of the mask overlay"),
+                io.Image.Input("image", optional=True, tooltip="Input image (RGBA will be converted to RGB)"),
+                io.Mask.Input("mask", optional=True, tooltip="Input mask"),
+            ],
+            outputs=[
+                io.Image.Output("image"),
+                io.Mask.Output("mask"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, mask_opacity, mask_color, image=None, mask=None) -> io.NodeOutput:
+
+        logger.node_name("MaskOverlay")
+
+        if image is not None and image.shape[-1] == 4:  # RGBA -> RGB
+            image = image[..., :3]
+
+        if mask is not None:
+            mask = mask.reshape((-1, mask.shape[-2], mask.shape[-1]))  # normalize to [B, H, W]
+
+        if image is None and mask is None:
+            preview = torch.zeros((1, 64, 64, 3))
+        elif image is None:
+            preview = mask.unsqueeze(-1).expand(-1, -1, -1, 3)  # grayscale preview of the mask alone
+        elif mask is None:
+            preview = image
+        else:
+            # blend a solid mask_color layer over the image, weighted by mask * mask_opacity
+            blend_mask = mask
+            if blend_mask.shape[-2:] != image.shape[1:3]:
+                blend_mask = resize_mask_plain(blend_mask, image.shape[2], image.shape[1], "bilinear")
+            weight = (blend_mask * mask_opacity).clamp(0.0, 1.0).unsqueeze(-1)  # [B, H, W, 1]
+            color = torch.tensor(parse_hex_color(mask_color), dtype=image.dtype, device=image.device)
+            preview = image * (1.0 - weight) + color * weight
+
+        if mask is None:
+            mask = torch.zeros((1, 64, 64))
+
+        return io.NodeOutput(preview, mask, ui=ui.PreviewImage(preview, cls=cls))
+
 # ===== INITIALIZATION =====================================================================================================================
 
 def get_nodes_list() -> list[type[io.ComfyNode]]:
@@ -663,4 +715,5 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         ImageResolution,
         ExtractImageFromBatch,
         ResizeImageMask,
+        MaskOverlay,
     ]

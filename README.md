@@ -1001,3 +1001,42 @@ The preset and aspect ratio lists are read from `image_sizes.txt` and
 |---|---|---|
 | `width` | INT | The computed width, rounded with `divisible_by`. |
 | `height` | INT | The computed height, rounded with `divisible_by`. |
+
+---
+
+## MaskOverlay
+
+![MaskOverlay node](images/MaskOverlay.png)
+
+Previews a mask overlaid on an image as a colored, semi-transparent layer — useful for
+checking segmentation or inpainting masks against the picture they belong to. The composited
+preview is shown on the node (it is an **output node**, so it runs as soon as it is reached)
+and is also emitted on the `image` output for further processing.
+
+Both inputs are optional, and the preview adapts to what is connected:
+
+- **image + mask** — the mask area is tinted with `mask_color` at `mask_opacity` strength
+  (the blend weight is `mask × mask_opacity`, so soft mask edges fade smoothly). A mask whose
+  size differs from the image is rescaled (bilinear) to fit for the blend only — the `mask`
+  output keeps the original resolution;
+- **image only** — the image is shown unchanged;
+- **mask only** — the mask is shown as a grayscale image;
+- **nothing connected** — a 64×64 black placeholder.
+
+An RGBA input image is converted to RGB (the alpha channel is dropped).
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `mask_opacity` | FLOAT | Opacity of the color overlay (0.0–1.0, step 0.01, default `0.5`). `0` shows the image untouched, `1` paints the masked area with the solid color. |
+| `mask_color` | COLOR | Color of the overlay (color picker, default `#0000FF`). |
+| `image` | IMAGE (optional) | The image to overlay onto (RGBA is converted to RGB). |
+| `mask` | MASK (optional) | The mask to visualise. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `image` | IMAGE | The composited preview (or the fallback described above). |
+| `mask` | MASK | The input mask, unchanged; a 64×64 zero mask when no mask is connected. |
