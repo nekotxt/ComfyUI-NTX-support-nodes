@@ -1,5 +1,6 @@
 from comfy_api.latest import ComfyExtension, io, ui
 
+import comfy.utils
 import folder_paths
 
 import json
@@ -31,6 +32,152 @@ def tensor_to_pillow(image: typing.Any) -> Image.Image:
 # encode image into tensor
 def pillow_to_tensor(image: Image.Image) -> typing.Any:
     return torch.from_numpy(np.array(image).astype(np.float32) / 255.0).unsqueeze(0)
+
+# round a dimension so that it is a multiple of divisor (nearest multiple, never below divisor)
+def round_to_multiple(value: int, divisor: int) -> int:
+    if divisor <= 1:
+        return value
+    return max(divisor, int(round(value / divisor)) * divisor)
+
+# crop a [B, C, H, W] tensor to the aspect ratio of (width, height), keeping the excess
+# according to crop_position (center, top, bottom, left, right). Returns a view (no copy).
+def crop_to_aspect(samples, width: int, height: int, crop_position: str):
+    old_width = samples.shape[-1]
+    old_height = samples.shape[-2]
+    old_aspect = old_width / old_height
+    new_aspect = width / height
+
+    if old_aspect > new_aspect:  # source is wider than the target -> crop left/right excess
+        crop_w = max(1, round(old_height * new_aspect))
+        excess = old_width - crop_w
+        if crop_position == "left":
+            x = 0
+        elif crop_position == "right":
+            x = excess
+        else:  # center, top, bottom
+            x = excess // 2
+        samples = samples.narrow(-1, x, crop_w)
+    elif old_aspect < new_aspect:  # source is taller than the target -> crop top/bottom excess
+        crop_h = max(1, round(old_width / new_aspect))
+        excess = old_height - crop_h
+        if crop_position == "top":
+            y = 0
+        elif crop_position == "bottom":
+            y = excess
+        else:  # center, left, right
+            y = excess // 2
+        samples = samples.narrow(-2, y, crop_h)
+
+    return samples
+
+# rescale an IMAGE tensor [B, H, W, C] to (width, height), cropping the excess by crop_position
+def resize_image_cover(image, width: int, height: int, upscale_method: str, crop_position: str):
+    samples = image.movedim(-1, 1)  # [B, H, W, C] -> [B, C, H, W]
+    samples = crop_to_aspect(samples, width, height, crop_position)
+    samples = comfy.utils.common_upscale(samples, width, height, upscale_method, "disabled")
+    return samples.movedim(1, -1)  # [B, C, H, W] -> [B, H, W, C]
+
+# rescale a MASK tensor [B, H, W] to (width, height), cropping the excess by crop_position
+def resize_mask_cover(mask, width: int, height: int, upscale_method: str, crop_position: str):
+    samples = mask.unsqueeze(1)  # [B, H, W] -> [B, 1, H, W]
+    samples = crop_to_aspect(samples, width, height, crop_position)
+    samples = comfy.utils.common_upscale(samples, width, height, upscale_method, "disabled")
+    # common_upscale drops the channel dim for single-channel lanczos, keeps it otherwise
+    if samples.ndim == 4:
+        samples = samples.squeeze(1)
+    return samples  # [B, H, W]
+
+# parse a "#rrggbb" (or "#rgb") hex color string into (r, g, b) floats in [0, 1]
+def parse_hex_color(color: str) -> tuple[float, float, float]:
+    color = color.lstrip("#")
+    try:
+        if len(color) == 3:
+            return tuple(int(c * 2, 16) / 255.0 for c in color)
+        return (int(color[0:2], 16) / 255.0, int(color[2:4], 16) / 255.0, int(color[4:6], 16) / 255.0)
+    except (ValueError, IndexError):
+        return (0.0, 0.0, 0.0)
+
+# rescale an IMAGE tensor [B, H, W, C] to exactly (width, height), no cropping or padding
+def resize_image_plain(image, width: int, height: int, upscale_method: str):
+    samples = image.movedim(-1, 1)  # [B, H, W, C] -> [B, C, H, W]
+    samples = comfy.utils.common_upscale(samples, width, height, upscale_method, "disabled")
+    return samples.movedim(1, -1)  # [B, C, H, W] -> [B, H, W, C]
+
+# rescale a MASK tensor [B, H, W] to exactly (width, height), no cropping or padding
+def resize_mask_plain(mask, width: int, height: int, upscale_method: str):
+    samples = mask.unsqueeze(1)  # [B, H, W] -> [B, 1, H, W]
+    samples = comfy.utils.common_upscale(samples, width, height, upscale_method, "disabled")
+    if samples.ndim == 4:  # single-channel lanczos drops the channel dim
+        samples = samples.squeeze(1)
+    return samples  # [B, H, W]
+
+# position the scaled content (new_width, new_height) on the (width, height) canvas
+# according to pad_position (center, top, bottom, left, right); returns (x, y) offsets.
+# The axis not addressed by pad_position is always centered (evenly split padding).
+def pad_offsets(width: int, height: int, new_width: int, new_height: int, pad_position: str) -> tuple[int, int]:
+    excess_x = width - new_width
+    excess_y = height - new_height
+
+    if pad_position == "left":
+        x = 0
+    elif pad_position == "right":
+        x = excess_x
+    else:  # center, top, bottom
+        x = excess_x // 2
+
+    if pad_position == "top":
+        y = 0
+    elif pad_position == "bottom":
+        y = excess_y
+    else:  # center, left, right
+        y = excess_y // 2
+
+    return (x, y)
+
+# rescale an IMAGE tensor [B, H, W, C] to fit inside (width, height) keeping aspect ratio,
+# then place it on a (width, height) canvas filled with pad_color (hex string)
+def resize_image_pad(image, width: int, height: int, upscale_method: str, pad_color: str, pad_position: str="center"):
+    samples = image.movedim(-1, 1)  # [B, H, W, C] -> [B, C, H, W]
+
+    old_width = samples.shape[-1]
+    old_height = samples.shape[-2]
+    ratio = min(width / old_width, height / old_height)
+    new_width = max(1, round(old_width * ratio))
+    new_height = max(1, round(old_height * ratio))
+
+    samples = comfy.utils.common_upscale(samples, new_width, new_height, upscale_method, "disabled")
+
+    batch, channels = samples.shape[0], samples.shape[1]
+    fill = list(parse_hex_color(pad_color)) + [1.0]  # extra channel (alpha) padded opaque
+    fill_tensor = torch.tensor(fill[:channels], dtype=samples.dtype, device=samples.device).view(1, channels, 1, 1)
+    canvas = fill_tensor.expand(batch, channels, height, width).clone()
+
+    x, y = pad_offsets(width, height, new_width, new_height, pad_position)
+    canvas[:, :, y:y + new_height, x:x + new_width] = samples
+
+    return canvas.movedim(1, -1)  # [B, C, H, W] -> [B, H, W, C]
+
+# rescale a MASK tensor [B, H, W] to fit inside (width, height) keeping aspect ratio,
+# then place it on a (width, height) canvas filled with pad_value
+def resize_mask_pad(mask, width: int, height: int, upscale_method: str, pad_value: float, pad_position: str="center"):
+    samples = mask.unsqueeze(1)  # [B, H, W] -> [B, 1, H, W]
+
+    old_width = samples.shape[-1]
+    old_height = samples.shape[-2]
+    ratio = min(width / old_width, height / old_height)
+    new_width = max(1, round(old_width * ratio))
+    new_height = max(1, round(old_height * ratio))
+
+    samples = comfy.utils.common_upscale(samples, new_width, new_height, upscale_method, "disabled")
+    if samples.ndim == 3:  # single-channel lanczos drops the channel dim
+        samples = samples.unsqueeze(1)
+
+    canvas = torch.full((samples.shape[0], 1, height, width), pad_value, dtype=samples.dtype, device=samples.device)
+
+    x, y = pad_offsets(width, height, new_width, new_height, pad_position)
+    canvas[:, :, y:y + new_height, x:x + new_width] = samples
+
+    return canvas.squeeze(1)  # [B, 1, H, W] -> [B, H, W]
 
 # utility function to calculate the optimal number of columns for an image grid
 def calculate_number_of_columns(numOfImages):
@@ -252,6 +399,193 @@ class ExtractImageFromBatch(io.ComfyNode):
 
         return io.NodeOutput(images[index:index + 1])
 
+class ResizeImageMask(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}ResizeImageMask",
+            display_name=f"{ADDON_PREFIX} Resize Image Mask",
+            description="Resize an image and/or mask with a selectable strategy: pass-through, crop or pad to a size (or to match another input), or scale by multiplier, side, or total pixels; the final size is rounded with divisible_by",
+            category=f"{ADDON_CATEGORY}/images",
+            inputs=[
+                io.Image.Input("image", optional=True),
+                io.Mask.Input("mask", optional=True),
+                io.DynamicCombo.Input("mode", options=[
+                    io.DynamicCombo.Option("do nothing", []),
+                    io.DynamicCombo.Option("round", []),
+                    io.DynamicCombo.Option("crop to size", [
+                        io.Int.Input("width", default=512, min=1, max=16384, step=1),
+                        io.Int.Input("height", default=512, min=1, max=16384, step=1),
+                        io.Combo.Input("crop", options=["center", "top", "bottom", "left", "right"], default="center"),
+                    ]),
+                    io.DynamicCombo.Option("pad to size", [
+                        io.Int.Input("width", default=512, min=1, max=16384, step=1),
+                        io.Int.Input("height", default=512, min=1, max=16384, step=1),
+                        io.Combo.Input("pad", options=["center", "top", "bottom", "left", "right"], default="center"),
+                        io.Color.Input("pad_color", default="#000000"),
+                    ]),
+                    io.DynamicCombo.Option("scale by multiplier", [
+                        io.Float.Input("multiplier", default=1.0, min=0.01, max=16.0, step=0.05),
+                    ]),
+                    io.DynamicCombo.Option("scale longer dimension", [
+                        io.Int.Input("longer_side", default=1024, min=1, max=16384, step=1),
+                    ]),
+                    io.DynamicCombo.Option("scale shorter dimension", [
+                        io.Int.Input("shorter_side", default=1024, min=1, max=16384, step=1),
+                    ]),
+                    io.DynamicCombo.Option("scale width", [
+                        io.Int.Input("width", default=1024, min=1, max=16384, step=1),
+                    ]),
+                    io.DynamicCombo.Option("scale height", [
+                        io.Int.Input("height", default=1024, min=1, max=16384, step=1),
+                    ]),
+                    io.DynamicCombo.Option("scale total pixels", [
+                        io.Float.Input("megapixels", default=1.0, min=0.01, max=256.0, step=0.05),
+                    ]),
+                    io.DynamicCombo.Option("crop to match input", [
+                        io.MultiType.Input("match", types=[io.Image, io.Mask]),
+                        io.Combo.Input("crop", options=["center", "top", "bottom", "left", "right"], default="center"),
+                    ]),
+                    io.DynamicCombo.Option("pad to match input", [
+                        io.MultiType.Input("match", types=[io.Image, io.Mask]),
+                        io.Combo.Input("pad", options=["center", "top", "bottom", "left", "right"], default="center"),
+                        io.Color.Input("pad_color", default="#000000"),
+                    ]),
+                ]),
+                io.Combo.Input("upscale_method", options=["nearest-exact", "bilinear", "area", "bicubic", "lanczos"], default="nearest-exact"),
+                io.Int.Input("divisible_by", default=1, min=1, max=1024, step=1),
+            ],
+            outputs=[
+                io.Image.Output("image"),
+                io.Mask.Output("mask"),
+                io.Int.Output("width"),
+                io.Int.Output("height"),
+            ],
+        )
+
+    # final size of the image (or of the mask if the image is null); both are [B, H, W, ...]
+    @classmethod
+    def get_final_size(cls, image, mask) -> tuple[int, int]:
+        reference = image if image is not None else mask
+        if reference is None:
+            return (0, 0)
+        return (reference.shape[2], reference.shape[1])
+
+    @classmethod
+    def execute(cls, mode: io.DynamicCombo.Type, upscale_method, divisible_by, image=None, mask=None) -> io.NodeOutput:
+
+        logger.node_name("ResizeImageMask")
+
+        # if both inputs are provided, they must share the exact same size (batch, height, width)
+        if image is not None and mask is not None:
+            image_size = (image.shape[0], image.shape[1], image.shape[2])   # [B, H, W, C]
+            mask_size = (mask.shape[0], mask.shape[1], mask.shape[2])        # [B, H, W]
+            if image_size != mask_size:
+                raise ValueError(
+                    f"ResizeImageMask: image and mask must have the same size, "
+                    f"got image (batch={image_size[0]}, {image_size[2]}x{image_size[1]}) "
+                    f"and mask (batch={mask_size[0]}, {mask_size[2]}x{mask_size[1]})"
+                )
+
+        # "do nothing" : pass the inputs through unchanged (divisible_by is ignored)
+        if mode["mode"] == "do nothing":
+            final_width, final_height = cls.get_final_size(image, mask)
+            return io.NodeOutput(image, mask, final_width, final_height)
+
+        out_image = None
+        out_mask = None
+
+        if mode["mode"] == "scale by multiplier":
+            # scale the input size by the multiplier, then round with divisible_by
+            source_width, source_height = cls.get_final_size(image, mask)
+            multiplier = mode["multiplier"]
+            target_width = round_to_multiple(max(1, round(source_width * multiplier)), divisible_by)
+            target_height = round_to_multiple(max(1, round(source_height * multiplier)), divisible_by)
+            if image is not None:
+                out_image = resize_image_plain(image, target_width, target_height, upscale_method)
+            if mask is not None:
+                out_mask = resize_mask_plain(mask, target_width, target_height, upscale_method)
+
+        elif mode["mode"] == "round":
+            # round with divisible_by
+            source_width, source_height = cls.get_final_size(image, mask)
+            target_width = round_to_multiple(source_width, divisible_by)
+            target_height = round_to_multiple(source_height, divisible_by)
+            if image is not None:
+                out_image = resize_image_plain(image, target_width, target_height, upscale_method)
+            if mask is not None:
+                out_mask = resize_mask_plain(mask, target_width, target_height, upscale_method)
+
+        elif mode["mode"] in ("scale longer dimension", "scale shorter dimension", "scale width", "scale height"):
+            # scale the chosen side to the given value (rounded with divisible_by),
+            # the other side follows the aspect ratio (also rounded with divisible_by)
+            source_width, source_height = cls.get_final_size(image, mask)
+            if mode["mode"] == "scale longer dimension":
+                target_side = round_to_multiple(mode["longer_side"], divisible_by)
+                source_side = max(source_width, source_height)
+            elif mode["mode"] == "scale shorter dimension":
+                target_side = round_to_multiple(mode["shorter_side"], divisible_by)
+                source_side = min(source_width, source_height)
+            elif mode["mode"] == "scale width":
+                target_side = round_to_multiple(mode["width"], divisible_by)
+                source_side = source_width
+            else:  # "scale height"
+                target_side = round_to_multiple(mode["height"], divisible_by)
+                source_side = source_height
+            if source_side > 0:
+                scale = target_side / source_side
+                target_width = round_to_multiple(max(1, round(source_width * scale)), divisible_by)
+                target_height = round_to_multiple(max(1, round(source_height * scale)), divisible_by)
+                if image is not None:
+                    out_image = resize_image_plain(image, target_width, target_height, upscale_method)
+                if mask is not None:
+                    out_mask = resize_mask_plain(mask, target_width, target_height, upscale_method)
+
+        elif mode["mode"] == "scale total pixels":
+            # scale both sides by the same factor so that the total pixel count matches
+            # the requested megapixels (1 megapixel = 1024x1024), then round with divisible_by
+            source_width, source_height = cls.get_final_size(image, mask)
+            if source_width > 0 and source_height > 0:
+                scale = math.sqrt(mode["megapixels"] * 1024 * 1024 / (source_width * source_height))
+                target_width = round_to_multiple(max(1, round(source_width * scale)), divisible_by)
+                target_height = round_to_multiple(max(1, round(source_height * scale)), divisible_by)
+                if image is not None:
+                    out_image = resize_image_plain(image, target_width, target_height, upscale_method)
+                if mask is not None:
+                    out_mask = resize_mask_plain(mask, target_width, target_height, upscale_method)
+
+        else:
+            # "crop/pad to size" : the target dimensions come from the width/height widgets
+            # "crop/pad to match input" : the target dimensions come from the "match" input (IMAGE or MASK, both are [B, H, W, ...])
+            if mode["mode"] in ("crop to match input", "pad to match input"):
+                match = mode["match"]
+                target_width = round_to_multiple(match.shape[2], divisible_by)
+                target_height = round_to_multiple(match.shape[1], divisible_by)
+            else:
+                target_width = round_to_multiple(mode["width"], divisible_by)
+                target_height = round_to_multiple(mode["height"], divisible_by)
+
+            if mode["mode"] in ("crop to size", "crop to match input"):
+                # rescale to the target size, cropping the excess at the position given by "crop"
+                crop = mode["crop"]
+                if image is not None:
+                    out_image = resize_image_cover(image, target_width, target_height, upscale_method, crop)
+                if mask is not None:
+                    out_mask = resize_mask_cover(mask, target_width, target_height, upscale_method, crop)
+
+            else:  # "pad to size" / "pad to match input"
+                # rescale to fit the target size, padding the empty parts with pad_color (the mask is always padded with 0)
+                # at the position given by "pad" (the axis not addressed by "pad" gets evenly split padding)
+                pad = mode["pad"]
+                pad_color = mode["pad_color"]
+                if image is not None:
+                    out_image = resize_image_pad(image, target_width, target_height, upscale_method, pad_color, pad)
+                if mask is not None:
+                    out_mask = resize_mask_pad(mask, target_width, target_height, upscale_method, 0.0, pad)
+
+        final_width, final_height = cls.get_final_size(out_image, out_mask)
+        return io.NodeOutput(out_image, out_mask, final_width, final_height)
+
 # ===== INITIALIZATION =====================================================================================================================
 
 def get_nodes_list() -> list[type[io.ComfyNode]]:
@@ -259,4 +593,5 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         SaveMultipleImages,
         ImageSize,
         ExtractImageFromBatch,
+        ResizeImageMask,
     ]

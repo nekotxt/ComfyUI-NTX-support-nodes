@@ -874,3 +874,79 @@ negative prompt (a long positive prompt next to a one-line negative, for instanc
 - The split is stored as a **proportion** of the node body (node property `split_ratio`,
   saved with the workflow), so resizing the node itself keeps the chosen balance between the
   two fields.
+
+---
+
+## ResizeImageMask
+
+![ResizeImageMask node](images/ResizeImageMask.png)
+
+Resizes an image and/or a mask with a selectable strategy: pass-through, crop to a target
+size, pad to a target size, several aspect-preserving scales, or matching the size of another
+input. The `mode` widget is a dynamic combo: selecting a mode shows only the widgets (and, for
+the match modes, the extra input slot) that the mode actually uses.
+
+Both `image` and `mask` are optional and are processed together with the same target size, so
+they stay aligned. If both are connected they must have the **exact same size** (batch size,
+width and height) — otherwise the node raises an error. Whichever of the two is missing is
+simply skipped and its output is empty.
+
+Every mode except `do nothing` rounds the final width and height with `divisible_by` (e.g.
+with `divisible_by` = `16`, both sides of the result are multiples of 16). Where a mode
+computes a side from the aspect ratio, the rounding may make the final aspect ratio deviate
+slightly from the source.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `image` | IMAGE (optional) | The image to resize. |
+| `mask` | MASK (optional) | The mask to resize. |
+| `mode` | dynamic COMBO | The resize strategy; see the mode list below. Default `do nothing`. |
+| `upscale_method` | COMBO | Interpolation used for every rescale: `nearest-exact`, `bilinear`, `area`, `bicubic`, `lanczos`. |
+| `divisible_by` | INT | The final width and height are rounded to the nearest multiple of this value (1–1024, default `1` = no rounding). Ignored by `do nothing`. |
+
+### Modes
+
+- **`do nothing`** — passes `image` and `mask` through unchanged (`divisible_by` included:
+  no rounding is applied).
+- **`round`** — the size is rounded with `divisible_by`.
+- **`crop to size`** — widgets `width`, `height` (1–16384, default 512) and `crop`
+  (`center`, `top`, `bottom`, `left`, `right`). The input is rescaled to fill the target
+  size completely and the excess is cropped away; `crop` picks which part is kept — e.g.
+  `top` keeps the top of a too-tall result. When the excess falls on the axis the position
+  does not address (e.g. `top` with excess on the sides), the crop is centered.
+- **`pad to size`** — widgets `width`, `height`, `pad` (`center`, `top`, `bottom`, `left`,
+  `right`) and `pad_color` (color picker, default black). The input is rescaled to fit
+  entirely inside the target size and the leftover area is filled with `pad_color`; `pad`
+  picks where the content sits — e.g. `top` anchors it to the top edge, putting all the
+  padding at the bottom. Padding on the axis the position does not address is split evenly.
+  The **mask is always padded with 0** (`pad_color` only affects the image).
+- **`scale by multiplier`** — widget `multiplier` (FLOAT 0.01–16.0, default 1.0). Both sides
+  are multiplied by the value, then rounded with `divisible_by`.
+- **`scale longer dimension`** / **`scale shorter dimension`** — widget `longer_side` /
+  `shorter_side` (1–16384, default 1024). The longer (resp. shorter) side of the input is
+  scaled to the given value and the other side follows the aspect ratio. The chosen side is
+  rounded with `divisible_by` *before* computing the scale, so it always lands exactly on the
+  requested multiple; the other side is rounded after.
+- **`scale width`** / **`scale height`** — widget `width` / `height` (1–16384, default
+  1024). Same as above, but the anchored side is explicitly the width (resp. the height).
+- **`scale total pixels`** — widget `megapixels` (FLOAT 0.01–256.0, default 1.0; 1 megapixel
+  = 1024×1024 pixels). Both sides are scaled by the same factor so that the total pixel
+  count matches the requested megapixels, then rounded with `divisible_by` — because the
+  rounding happens after the match, the final pixel count is close to, not exactly on, the
+  target.
+- **`crop to match input`** / **`pad to match input`** — same behaviour as `crop to size` /
+  `pad to size` (including the `crop` / `pad` + `pad_color` widgets), but the target width
+  and height are taken from an extra **`match` input slot**, which accepts an IMAGE or a
+  MASK and is required while one of these modes is selected. The match size is still rounded
+  with `divisible_by`, so leave it at `1` when the output must match the reference exactly.
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `image` | IMAGE | The resized (or passed-through) image; empty when `image` is not connected. |
+| `mask` | MASK | The resized (or passed-through) mask; empty when `mask` is not connected. |
+| `width` | INT | The final width, measured on the output image (or the output mask when no image is connected; `0` when neither is). |
+| `height` | INT | The final height, measured the same way. |
