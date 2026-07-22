@@ -1,4 +1,4 @@
-from comfy_api.latest import ComfyExtension, io
+from comfy_api.latest import ComfyExtension, io, ui
 
 import datetime
 import re
@@ -91,7 +91,8 @@ class ReplaceTextParameters(io.ComfyNode):
         if parameters is None:
             parameters = {}
 
-        return io.NodeOutput(_replace_parameters(text, parameters))
+        result = _replace_parameters(text, parameters)
+        return io.NodeOutput(result, ui=ui.PreviewText(result))
 
 class FileNameTemplate(io.ComfyNode):
     @classmethod

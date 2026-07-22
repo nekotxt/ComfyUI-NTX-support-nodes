@@ -859,6 +859,20 @@ registerNodeMenu((node) => {
 app.registerExtension({
     name: API_PREFIX + ".prompts.load_prompt",
 
+    // Registered command: shows up in the command palette and in
+    // Settings → Keybinding, where the default shortcut can be rebound.
+    commands: [{
+        id: API_PREFIX + ".prompts.load_prompt",
+        label: ADDON_PREFIX + " Pick prompt",
+        icon: "pi pi-folder-open",
+        function: () => openClipboardPromptPicker(null),
+    }],
+
+    keybindings: [{
+        commandId: API_PREFIX + ".prompts.load_prompt",
+        combo: { key: "p", alt: true },
+    }],
+
     setup() {
         document.addEventListener("pointerdown", onCapturePointerDown, true);
 

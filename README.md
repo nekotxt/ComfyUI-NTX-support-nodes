@@ -545,6 +545,13 @@ dictionary containing `{"artist": "anime"}`, the output is
 |---|---|---|
 | `text` | STRING | The text with all placeholders replaced. |
 
+### Frontend
+
+- The node body shows a read-only **result** area under the `text` widget, filled with the
+  replaced text whenever the node executes. The content is display-only and is not saved into
+  the workflow or the API prompt; if the node is skipped because its inputs are unchanged
+  (cached), the area keeps its previous content.
+
 ---
 
 ## LazySelectAny
