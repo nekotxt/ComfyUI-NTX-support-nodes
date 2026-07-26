@@ -253,6 +253,54 @@ class ComplexPrompt(io.ComfyNode):
 
         return io.NodeOutput(clean_prompt_positive, prompt_negative, final_lora_stack, text_params)
 
+class TextConcat(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}TextConcat",
+            display_name=f"{ADDON_PREFIX} Text Concat",
+            description="""
+    Concatenate up to 10 prompts into a single prompt.
+    Missing (unconnected) inputs count as empty strings, each prompt is stripped
+    of its leading/trailing whitespace, and empty prompts are skipped.
+    comma_separator / newline_separator insert a ',' and/or a newline between the
+    prompts, unless the text already ends with that separator.
+    """,
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                io.Autogrow.Input("prompts", optional=True, template=io.Autogrow.TemplatePrefix(
+                    input=io.String.Input("prompt", optional=True),   # optional: unconnected slots are allowed
+                    prefix="prompt_",
+                    min=2,
+                    max=10,
+                )),
+                io.Boolean.Input("comma_separator", default=True),
+                io.Boolean.Input("newline_separator", default=True),
+            ],
+            outputs=[
+                io.String.Output("prompt"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, prompts: io.Autogrow.Type=None, comma_separator=False, newline_separator=False):
+
+        result = ""
+        for prompt in ([] if prompts is None else list(prompts.values())):
+            prompt = "" if prompt is None else str(prompt).strip()
+            if prompt == "":
+                continue
+
+            if result != "":
+                if comma_separator and not result.endswith(","):
+                    result += ","
+                if newline_separator and not result.endswith("\n"):
+                    result += "\n"
+
+            result += prompt
+
+        return io.NodeOutput(result)
+
 
 # ===== INITIALIZATION =====================================================================================================================
 
@@ -263,4 +311,5 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         PromptChainer,
         DoublePrompt,
         ComplexPrompt,
+        TextConcat,
     ]

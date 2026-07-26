@@ -1040,3 +1040,41 @@ An RGBA input image is converted to RGB (the alpha channel is dropped).
 |---|---|---|
 | `image` | IMAGE | The composited preview (or the fallback described above). |
 | `mask` | MASK | The input mask, unchanged; a 64×64 zero mask when no mask is connected. |
+
+---
+
+## TextConcat
+
+![TextConcat node](images/TextConcat.png)
+
+Joins several prompts into a single one. The prompt inputs are a **growing** set of slots
+named `prompt_0`, `prompt_1`, … : two are shown to start with, and a new empty slot appears
+each time the last one is connected, up to **10**. They are connection-only slots (no text
+field on the node) and all of them are optional, so any slot can be left unconnected.
+
+Each prompt is stripped of its leading and trailing whitespace before being appended, and
+prompts that are empty — unconnected, or containing only whitespace — are **skipped
+entirely**, so they never leave a stray separator behind. The two separator switches control
+what is inserted between the prompts already collected and the next one:
+
+- `comma_separator` adds a `,`, unless the text collected so far already ends with a comma
+  (a prompt that itself ends with `,` is therefore not doubled);
+- `newline_separator` adds a line break, unless the text already ends with one.
+
+Both switches are independent: with both enabled the prompts are joined by `,` followed by a
+newline; with both disabled the prompts are appended **directly, with no separator at all**.
+Nothing is added in front of the first prompt, and no separator is left at the end.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `prompt_0` … `prompt_9` | STRING (optional, connection only) | The prompts to join, in slot order. Slots grow on demand from 2 up to 10; an unconnected slot counts as an empty string and is skipped. |
+| `comma_separator` | BOOLEAN | Insert a `,` between two prompts (default `false`). |
+| `newline_separator` | BOOLEAN | Insert a newline between two prompts (default `true`). |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `prompt` | STRING | The concatenated prompts. An empty string when no prompt is connected or all of them are empty. |
