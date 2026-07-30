@@ -330,9 +330,7 @@ function pipeSlotIndex(node, kind) {
     const slots = (kind === "input" ? node.inputs : node.outputs) ?? [];
     const idx = slots.findIndex(s => s && slotLabel(s) === PIPE_SLOT_NAME);
     if (idx === -1) return -1;
-    if (node.comfyClass === PIPE_NODE_ID) return idx;
-    if (node.isSubgraphNode?.() &&
-        String(slots[idx].type).toUpperCase() === PIPE_SLOT_TYPE) return idx;
+    if (String(slots[idx].type).toUpperCase() === PIPE_SLOT_TYPE) return idx;
     return -1;
 }
 
@@ -538,7 +536,7 @@ function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected 
         "From the second template on, wire a pipe output of the previous template to a " +
         "pipe input of this one: the rightmost column of the previous template and the " +
         "leftmost column of this one are each scanned top to bottom for the first node " +
-        `that is a ${PIPE_NODE_ID} node or a subgraph with a ${PIPE_SLOT_TYPE} "${PIPE_SLOT_NAME}" slot`;
+        `that has a ${PIPE_SLOT_TYPE} "${PIPE_SLOT_NAME}" slot`;
     autoConnectLabel.prepend(autoConnectInput);
     opts.appendChild(autoConnectLabel);
     panel.appendChild(opts);

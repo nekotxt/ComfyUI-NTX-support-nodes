@@ -299,7 +299,7 @@ class PipeMerge(io.ComfyNode):
             inputs=[
                 io.Autogrow.Input("inputs", template=autogrow_template),
             ],
-            outputs=[io.AnyType.Output("pipe")],
+            outputs=[DICT_TYPE.Output("pipe")],
         )
 
     @classmethod
