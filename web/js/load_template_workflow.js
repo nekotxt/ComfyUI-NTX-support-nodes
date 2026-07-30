@@ -24,6 +24,18 @@ const CACHE_LIST = true;
 // Horizontal spacing between templates when several are inserted at once.
 const STACK_GAP = 60;
 
+// ── Auto-connect ──────────────────────────────────────────────────────────────
+// Node class and slot signature used to chain consecutive templates together
+// (see autoConnectTemplate).
+const PIPE_NODE_ID = ADDON_PREFIX + "PipeCustom";
+const PIPE_SLOT_NAME = "pipe";
+const PIPE_SLOT_TYPE = "DICT";
+
+// How far apart (graph units) two nodes' edges may be and still count as the
+// same column when looking for the pipe endpoints. Absorbs hand-placement slop;
+// keep it well below the width of a node so neighbouring columns stay separate.
+const COLUMN_TOLERANCE = 20;
+
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const CSS = `
@@ -157,6 +169,29 @@ const CSS = `
     display: none;
 }
 
+.lwt-opts {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    background: #252525;
+    border-top: 1px solid #444;
+    user-select: none;
+}
+
+.lwt-opts label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.lwt-opts input {
+    margin: 0;
+    accent-color: #4a90d9;
+    cursor: pointer;
+}
+
 .lwt-btns {
     display: flex;
     justify-content: flex-end;
@@ -272,8 +307,87 @@ function itemsWidth(items) {
     return maxX > minX ? maxX - minX : 0;
 }
 
-// Returns the width of the inserted items, so multiple templates can be
-// placed one to the right of the other.
+// ── Auto-connect ──────────────────────────────────────────────────────────────
+// Optional chaining of consecutively inserted templates: a pipe output in the
+// rightmost column of the previous template is wired to a pipe input in the
+// leftmost column of the template that was just pasted.
+
+// The name shown next to a slot on the canvas, following the same precedence
+// litegraph renders with (NodeSlot.renderingLabel). Slots are matched on this
+// rather than on `name`: a subgraph promotes its interior slot names ("dict",
+// "value", …) and carries the user-facing name in `label`, and conversely a
+// PipeCustom pipe relabelled "text_params" is carrying something other than the
+// pipe, so it is deliberately not a match.
+function slotLabel(slot) {
+    return String(slot.label || slot.localized_name || slot.name || "").toLowerCase();
+}
+
+// Index of the "pipe" slot to wire on `node`, or -1 when the node is not a valid
+// pipe endpoint. PipeCustom nodes qualify through their fixed slot 0; a subgraph
+// node qualifies when the slot is a DICT.
+function pipeSlotIndex(node, kind) {
+    if (!node) return -1;
+    const slots = (kind === "input" ? node.inputs : node.outputs) ?? [];
+    const idx = slots.findIndex(s => s && slotLabel(s) === PIPE_SLOT_NAME);
+    if (idx === -1) return -1;
+    if (node.comfyClass === PIPE_NODE_ID) return idx;
+    if (node.isSubgraphNode?.() &&
+        String(slots[idx].type).toUpperCase() === PIPE_SLOT_TYPE) return idx;
+    return -1;
+}
+
+// The nodes of the outermost column — leftmost for an input, rightmost for an
+// output — ordered top to bottom. Each side is grouped by the edge its slots
+// live on: inputs by the nodes' left edge, outputs by their right edge (so a
+// narrow node tucked under a wide one still shares the column when they end
+// flush, which is how the templates are laid out).
+function extremeColumn(nodes, kind) {
+    const edge = kind === "input"
+        ? n => +n.pos[0]
+        : n => +n.pos[0] + (+(n.size?.[0]) || 0);
+    const candidates = nodes.filter(n => n?.pos?.[0] != null);
+    if (!candidates.length) return [];
+    const edges = candidates.map(edge);
+    const columnEdge = kind === "input" ? Math.min(...edges) : Math.max(...edges);
+    return candidates
+        .filter(n => Math.abs(edge(n) - columnEdge) <= COLUMN_TOLERANCE)
+        .sort((a, b) => (+a.pos[1]) - (+b.pos[1]));
+}
+
+// First node of that column exposing a pipe slot of the requested kind, as
+// [node, slotIndex]; [null, -1] when none does. The search never leaves the
+// column: the templates are meant to be chained edge to edge, so a pipe further
+// in is not a connection point.
+function findPipeEndpoint(nodes, kind) {
+    for (const node of extremeColumn(nodes, kind)) {
+        const slot = pipeSlotIndex(node, kind);
+        if (slot !== -1) return [node, slot];
+    }
+    return [null, -1];
+}
+
+// `pastedNodes` are the nodes of the template that was just inserted,
+// `previousIds` the node ids of the template inserted before it. Ids rather than
+// node objects: loading a template reloads the target tab (see loadTemplate), so
+// the node objects of earlier templates are replaced by equivalent ones carrying
+// the same ids. Both ends must expose a pipe slot, otherwise nothing happens.
+// Returns true when a link was created.
+function autoConnectTemplate(pastedNodes, previousIds) {
+    const [target, inSlot] = findPipeEndpoint(pastedNodes, "input");
+    if (!target) return false;
+
+    const graph = app.canvas.graph;
+    const previous = previousIds.map(id => graph?.getNodeById(id)).filter(Boolean);
+    const [source, outSlot] = findPipeEndpoint(previous, "output");
+    if (!source) return false;
+
+    if (!source.connect(outSlot, target, inSlot)) return false;
+    app.canvas.setDirty(true, true);
+    return true;
+}
+
+// Returns the width of the inserted items (so multiple templates can be placed
+// one to the right of the other) along with the created nodes, in graph order.
 async function loadTemplate(relPath, dropPos) {
     const fullPath = `workflows/${TEMPLATES_SUBDIR}/${relPath}`;
     const resp = await api.fetchApi(`/userdata/${encodeURIComponent(fullPath)}`);
@@ -325,10 +439,13 @@ async function loadTemplate(relPath, dropPos) {
     //    position (where the context menu was opened); without it the paste
     //    lands at the canvas' current graph_mouse.
     if (copiedItems) {
-        app.canvas._deserializeItems(copiedItems, dropPos ? { position: dropPos } : {});
-        return itemsWidth(copiedItems);
+        const pasted = app.canvas._deserializeItems(
+            copiedItems, dropPos ? { position: dropPos } : {});
+        // `pasted.nodes` maps the serialised ids to the live nodes just added to
+        // the graph, with their final (offset) positions already applied.
+        return { width: itemsWidth(copiedItems), nodes: [...(pasted?.nodes?.values() ?? [])] };
     }
-    return 0;
+    return { width: 0, nodes: [] };
 }
 
 // ── Tree model ────────────────────────────────────────────────────────────────
@@ -356,7 +473,12 @@ function buildTree(paths) {
 // pre-selected again, with its parent folders expanded and scrolled into view.
 let _lastLoadedPath = null;
 
-function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected = null) {
+// State of the "automatically connect added templates" checkbox — off by
+// default, then remembered for the rest of the session.
+let _autoConnect = false;
+
+function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected = null,
+                           initialAutoConnect = _autoConnect) {
     injectStyles();
     document.querySelector(".lwt-overlay")?.remove();
 
@@ -403,6 +525,24 @@ function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected 
     treeEl.className = "lwt-tree";
     panel.appendChild(treeEl);
 
+    // Wrapping the checkbox in its <label> makes the text clickable without
+    // needing a document-wide id.
+    const opts = document.createElement("div");
+    opts.className = "lwt-opts";
+    const autoConnectInput = document.createElement("input");
+    autoConnectInput.type = "checkbox";
+    autoConnectInput.checked = !!initialAutoConnect;
+    const autoConnectLabel = document.createElement("label");
+    autoConnectLabel.textContent = "Automatically connect added templates";
+    autoConnectLabel.title =
+        "From the second template on, wire a pipe output of the previous template to a " +
+        "pipe input of this one: the rightmost column of the previous template and the " +
+        "leftmost column of this one are each scanned top to bottom for the first node " +
+        `that is a ${PIPE_NODE_ID} node or a subgraph with a ${PIPE_SLOT_TYPE} "${PIPE_SLOT_NAME}" slot`;
+    autoConnectLabel.prepend(autoConnectInput);
+    opts.appendChild(autoConnectLabel);
+    panel.appendChild(opts);
+
     const btns = document.createElement("div");
     btns.className = "lwt-btns";
 
@@ -431,19 +571,26 @@ function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected 
     }
 
     // Load every selected template, in selection order, each one placed to the
-    // right of the previous one's bounding box.
+    // right of the previous one's bounding box. With auto-connect on, every
+    // template after the first is also wired to the one inserted before it.
     async function confirmLoad() {
         if (!selected.length) return;
         const batch = selected;
         selected = [];                 // re-entry guard: confirm only once
+        const autoConnect = autoConnectInput.checked;
+        _autoConnect = autoConnect;    // remember for the next dialog open
         close();
         const pos = dropPos ? [...dropPos] : null;
         const failed = [];
+        let previousIds = null;         // node ids of the template inserted last
         for (const path of batch) {
             try {
-                const width = await loadTemplate(path, pos);
+                const { width, nodes } = await loadTemplate(path, pos);
                 _lastLoadedPath = path;    // remember for the next dialog open
                 if (pos) pos[0] += width + STACK_GAP;
+                // Starting from the second template, hook it up to the previous one.
+                if (autoConnect && previousIds) autoConnectTemplate(nodes, previousIds);
+                previousIds = nodes.map(n => n.id);
             } catch (err) {
                 console.error(`[LoadWfTemplate] failed to load workflow "${path}":`, err);
                 failed.push(path);
@@ -578,15 +725,15 @@ function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected 
     };
 
     // Rescan the templates folder, rebuilding the cached list, then reopen the
-    // dialog with the fresh paths. The current filter text and selection are
-    // carried over (entries that no longer exist are dropped).
+    // dialog with the fresh paths. The current filter text, selection and
+    // options are carried over (entries that no longer exist are dropped).
     async function refresh() {
         refreshBtn.classList.add("busy");
         const term = filterInput.value;
         try {
             const fresh = await fetchTemplateList(true);
             close();
-            openTemplateDialog(fresh, dropPos, term, [...selected]);
+            openTemplateDialog(fresh, dropPos, term, [...selected], autoConnectInput.checked);
         } catch (err) {
             refreshBtn.classList.remove("busy");
             console.error("[LoadWfTemplate] failed to refresh workflows:", err);
