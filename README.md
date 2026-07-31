@@ -1124,3 +1124,96 @@ Nothing is added in front of the first prompt, and no separator is left at the e
 | Output | Type | Description |
 |---|---|---|
 | `prompt` | STRING | The concatenated prompts. An empty string when no prompt is connected or all of them are empty. |
+
+---
+
+## DownloadModelsList
+
+![DownloadModelsList node](images/DownloadModelsList.png)
+
+Downloads a list of model files from the internet into the ComfyUI models folder. The list is
+typed (or assembled with the **Append models** picker, see *Frontend*) in the `models_list`
+textbox, one **block** per model: the model subpath, an optional hash, and one or more download
+urls — the format described in the *Example* below.
+
+Each model is processed in turn:
+
+- if the file **already exists** it is skipped — the lookup goes through ComfyUI's own model
+  paths, so a model found in any folder configured for its type counts as present, not only in
+  `models_dir`. When the block declares a hash, the existing file is verified against it and
+  reported as a hash mismatch when it differs;
+- otherwise the urls are tried **in the order they are listed**, until one download succeeds;
+  the downloaded file is then checked against the declared hash, if any.
+
+Models are downloaded **one at a time**. The node is an **output node**, so it runs when the
+workflow is queued even if its `result` output is left unconnected; like every other node it is
+also cached, so queueing again without changing any input does nothing until the list (or one of
+the other inputs) changes.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `models_list` | STRING (multiline) | The models to download, as blocks separated by empty lines (see *Example*). Lines starting with `#` are ignored. |
+| `models_dir` | STRING | Base folder the subpaths are resolved against. When left **empty** (the default), the ComfyUI `models` folder is used. |
+| `civitai_api_key` | STRING | Civitai API token, used for downloads that require an account. Optional, and never written to the log (the log only shows its length as asterisks). |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `result` | STRING | The execution report: totals (processed / downloaded / skipped / failed), the errors, the list of newly downloaded files, and a final status line. |
+
+### Example
+
+```
+checkpoints/FLUX/flux1-dev-fp8.safetensors
+hash:8E91B68084B53A7FC44ED2A3756D821E355AC1A7B6FE29BE760C1DB532F3D88A
+https://civitai.com/api/download/models/1434485
+
+loras/PONY/chars/Zhurong_Dynasty_warriors.safetensors
+https://civitai.com/api/download/models/1102934
+```
+
+| Line | Meaning |
+|---|---|
+| first line of a block | The model subpath, relative to `models_dir` (e.g. `checkpoints/FLUX/flux1-dev-fp8.safetensors`). Both `/` and `\` work as separators. |
+| `hash:…` / `sha256:…` | Optional SHA-256 of the file, used to verify it before and after downloading. |
+| any other line | A download url. Several urls can be listed for the same model and are tried in order. |
+
+Blocks are separated by **empty lines**; the hash line may be omitted, but at least one url is
+needed for a model that is not on disk yet.
+
+### Frontend
+
+Right-click menu options on the node:
+
+- **Append models** — opens a picker listing the models of a **catalogue file**, and appends the
+  chosen ones to the `models_list` textbox. The catalogue is
+  `input/ntx_data/list_of_downloadable_models.txt` and uses exactly the format above, so a block picked there
+  is copied to the node as-is.
+
+The picker organises the catalogue by model subpath, split on `/` and `\`, into a **tree** of
+folders (`checkpoints`, `loras/PONY/chars`, …) with the model files as leaves; folders are
+listed before files, both alphabetically. Its controls:
+
+- a **checkbox** on every row selects models: ticking a **folder** selects (or clears) everything
+  under it, and a folder whose contents are only partly selected shows a mixed-state box.
+  Clicking a file row toggles it as well, while clicking a folder row expands or collapses it;
+- a **filter box** narrows the tree to the models whose subpath matches the typed text — matching
+  entries stay visible with their folders expanded;
+- hovering a model shows its **full block** (subpath, hash, urls) as a tooltip;
+- a line under the tree counts the current selection and the size of the catalogue, and
+  **Clear selection** unticks everything;
+- **Append** (disabled while nothing is selected) confirms, and so does **Enter**; **Cancel**,
+  **Escape**, or a click outside the dialog closes it without touching the node.
+
+The catalogue file is re-read from disk **every time the dialog is opened**, so models added to
+it show up without reloading the page or restarting ComfyUI; a warning toast is shown when the
+file is missing or holds no model.
+
+On confirmation the selected blocks are appended to the end of `models_list` — in the order they
+appear in the catalogue, not the order they were ticked — separated by empty lines and keeping
+whatever the textbox already contained. Models that the list **already declares** are skipped
+rather than added twice (subpaths are compared ignoring case and separator style), and a toast
+reports how many models were appended and how many were left out as already listed.

@@ -11,7 +11,6 @@ from typing_extensions import override
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, SETTINGS_DIR, MODELS_DIR
 from .logging import logger
 from .utils import LORA_STACK_TYPE, notify_user
-from ..scripts.ms_download_models import download_models_from_text_list
 
 # ===== NODES ==============================================================================================================================
 
@@ -256,39 +255,6 @@ class CLIPTextEncodeWithCutoff(io.ComfyNode):
             (conditioning,) = CLIPTextEncode().encode(clip=clip, text=prompt)
             return io.NodeOutput(conditioning)
 
-class DownloadModelsList(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id=f"{ADDON_PREFIX}DownloadModelsList",
-            display_name=f"{ADDON_PREFIX} Download Models List",
-            description="",
-            category=f"{ADDON_CATEGORY}/utils",
-            is_output_node=True,
-            inputs=[
-                io.String.Input("models_list", multiline=True, dynamic_prompts=False, default=""),
-                io.String.Input("models_dir", multiline=False, dynamic_prompts=False, default=""),
-                io.String.Input("civitai_api_key", multiline=False, dynamic_prompts=False, default=""),
-            ],
-            outputs=[
-                io.String.Output("result")
-            ],
-        )
-
-    @classmethod
-    def execute(cls, models_list="", models_dir="", civitai_api_key=""):
-        if models_dir == "":
-            global MODELS_DIR
-            models_dir = MODELS_DIR
-
-        logger.info("Attempt to download models:")
-        logger.info(f"- models dir: {models_dir}")
-        logger.info(f"- civitai api key: {str(len(civitai_api_key)*'*')}")
-
-        result = download_models_from_text_list(text=models_list, models_dir=str(models_dir), tokens={"civitai": civitai_api_key})
-
-        return io.NodeOutput(result)
-
 class IsNull(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -370,7 +336,6 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         PreviewImage,
         CollectModelNtxdata,
         #CLIPTextEncodeWithCutoff,
-        DownloadModelsList,
         IsNull,
         IsEmpty,
         CheckNotNull,
