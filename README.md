@@ -60,6 +60,52 @@ Invoking the command opens a **tree picker** organised by subfolder:
 - the most recently loaded template is remembered and pre-selected (with its folders expanded)
   the next time the picker is opened.
 
+Two checkboxes sit at the bottom of the picker:
+
+- **Automatically connect added templates** — from the second template on, wires a `pipe`
+  output of the previously inserted template to a `pipe` input of the one just inserted (the
+  previous template's rightmost column and the new one's leftmost column are each scanned top
+  to bottom for the first node exposing a DICT `pipe` slot). On by default, then remembered for
+  the rest of the session;
+- **Save as preset** — see below. Always unchecked when the picker opens.
+
+#### Presets
+
+A **preset** is a named, ordered set of templates. Instead of picking the same files one by one
+every time, choosing a preset from the combobox at the bottom of the picker **drops the current
+selection** and selects the preset's templates in the order the preset lists them — which is also
+the order they are inserted and chained. The selection can then still be adjusted by hand
+(clicking any entry afterwards resets the combobox to *— none —*).
+
+Presets are stored in `input/ntx_data/workflow_template_presets.yaml`: one entry per preset,
+the key being the name shown in the combobox and the list holding the template paths relative to
+the templates folder. The `.json` extension is optional, so the file stays readable:
+
+```yaml
+Anima:
+    - model Anima diffusion
+    - prompt
+    - image size
+    - prepare conditionings
+    - sampler
+    - save images
+```
+
+- templates listed in a preset but **not found** in the templates folder are skipped, and a
+  warning toast names them — a preset keeps working after a template is renamed or removed;
+- the file is re-read by the **Refresh** button (together with the folder re-scan), so it can be
+  hand-edited while ComfyUI is running;
+- ticking **Save as preset** before pressing **Load** stores the current selection as a preset:
+  a name is asked for first (pre-filled with the selected preset's name, if any), and if that
+  name is already taken the **Save** button becomes **Overwrite**, requiring a second click to
+  replace it. Cancelling that prompt (**Cancel**, **Escape**, or a click outside it) **aborts the
+  whole action** — nothing is saved and nothing is added to the canvas, and the picker stays open
+  with the selection untouched. Once saved, the templates are loaded as usual.
+
+Saving rewrites the yaml file in place, keeping its comments, its entry order and the spelling of
+an overwritten preset's name (names are matched case-insensitively, so saving `anima` over
+`Anima` updates that preset instead of adding a second one).
+
 ---
 
 ## PipeCustom

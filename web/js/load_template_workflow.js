@@ -169,6 +169,39 @@ const CSS = `
     display: none;
 }
 
+.lwt-preset {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    background: #252525;
+    border-top: 1px solid #444;
+    user-select: none;
+}
+
+.lwt-preset select {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 4px 6px;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 3px;
+    color: #ccc;
+    font-family: inherit;
+    font-size: 11px;
+    outline: none;
+    cursor: pointer;
+}
+
+.lwt-preset select:focus {
+    border-color: #4a90d9;
+}
+
+.lwt-preset select:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
 .lwt-opts {
     display: flex;
     align-items: center;
@@ -184,6 +217,10 @@ const CSS = `
     align-items: center;
     gap: 6px;
     cursor: pointer;
+}
+
+.lwt-opts label + label {
+    margin-left: 14px;
 }
 
 .lwt-opts input {
@@ -240,6 +277,23 @@ const CSS = `
     opacity: 0.6;
     pointer-events: none;
 }
+
+/* "Save as preset" name prompt, stacked on top of the picker */
+
+.lwt-overlay.sub {
+    z-index: 99999;
+}
+
+.lwt-panel.small {
+    width: 340px;
+}
+
+.lwt-msg {
+    padding: 2px 12px 8px;
+    min-height: 13px;
+    font-size: 11px;
+    color: #d0913a;
+}
 `;
 
 let _stylesInjected = false;
@@ -275,6 +329,32 @@ async function fetchTemplateList(force = false) {
         .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
     if (CACHE_LIST) _templateListCache = paths;
     return paths;
+}
+
+// ── Presets ───────────────────────────────────────────────────────────────────
+// Named sets of templates, maintained by the user in
+// input/ntx_data/workflow_template_presets.yaml and served by
+// py/load_template_workflow.py as [{ name, templates: [relPath, …] }, …].
+// Picking one replaces the tree selection with the preset's templates.
+
+let _presetListCache = null;
+
+async function fetchPresetList(force = false) {
+    if (CACHE_LIST && _presetListCache && !force) return _presetListCache;
+
+    const resp = await api.fetchApi(`/${API_PREFIX}/load_template_workflow_presets`);
+    if (!resp.ok) throw new Error(`presets HTTP ${resp.status}`);
+    const presets = (await resp.json()).filter(p => p?.name && p.templates?.length);
+    if (CACHE_LIST) _presetListCache = presets;
+    return presets;
+}
+
+// A preset entry as it would appear in the scanned template list: separators
+// normalised, no leading "./", ".json" optional (the yaml is meant to be typed
+// by hand).
+function normalizeTemplateRef(ref) {
+    const path = String(ref).trim().replaceAll("\\", "/").replace(/^\.?\//, "");
+    return /\.json$/i.test(path) ? path : `${path}.json`;
 }
 
 // ── Workflow loading ──────────────────────────────────────────────────────────
@@ -471,12 +551,12 @@ function buildTree(paths) {
 // pre-selected again, with its parent folders expanded and scrolled into view.
 let _lastLoadedPath = null;
 
-// State of the "automatically connect added templates" checkbox — off by
+// State of the "automatically connect added templates" checkbox — on by
 // default, then remembered for the rest of the session.
-let _autoConnect = false;
+let _autoConnect = true;
 
-function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected = null,
-                           initialAutoConnect = _autoConnect) {
+function openTemplateDialog(paths, presets, dropPos, initialFilter = "", initialSelected = null,
+                           initialAutoConnect = _autoConnect, initialPreset = "") {
     injectStyles();
     document.querySelector(".lwt-overlay")?.remove();
 
@@ -487,15 +567,18 @@ function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected 
     let selected = (initialSelected ?? [_lastLoadedPath]).filter(p => paths.includes(p));
     let lastClick = { path: null, time: 0 };   // manual double-click detection
 
-    // Expand the folders on the way to the pre-selected entries.
-    for (const sel of selected) {
-        const parts = sel.split("/");
+    // Expand every folder on the way to `path`, so a selection made outside the
+    // tree (remembered entry, preset) is visible without hunting for it.
+    function expandTo(path) {
+        const parts = path.split("/");
         let dirPath = "";
         for (let i = 0; i < parts.length - 1; i++) {
             dirPath = dirPath ? `${dirPath}/${parts[i]}` : parts[i];
             expanded.add(dirPath);
         }
     }
+
+    for (const sel of selected) expandTo(sel);
 
     const overlay = document.createElement("div");
     overlay.className = "lwt-overlay";
@@ -523,6 +606,34 @@ function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected 
     treeEl.className = "lwt-tree";
     panel.appendChild(treeEl);
 
+    // Preset picker: selecting an entry replaces the whole tree selection with
+    // the templates the preset lists (see applyPreset).
+    const presetRow = document.createElement("div");
+    presetRow.className = "lwt-preset";
+    const presetLabel = document.createElement("span");
+    presetLabel.textContent = "Preset";
+    const presetSelect = document.createElement("select");
+    presetSelect.title = presets.length
+        ? "Replace the selection with the templates of a predefined set"
+        : "No presets defined in workflow_template_presets.yaml";
+    presetSelect.disabled = !presets.length;
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = presets.length ? "— none —" : "— no presets —";
+    presetSelect.appendChild(placeholder);
+    for (const preset of presets) {
+        const opt = document.createElement("option");
+        opt.value = preset.name;
+        opt.textContent = preset.name;
+        opt.title = preset.templates.join("\n");
+        presetSelect.appendChild(opt);
+    }
+    // Only keep the carried-over pick when that preset still exists.
+    presetSelect.value = presets.some(p => p.name === initialPreset) ? initialPreset : "";
+    presetRow.appendChild(presetLabel);
+    presetRow.appendChild(presetSelect);
+    panel.appendChild(presetRow);
+
     // Wrapping the checkbox in its <label> makes the text clickable without
     // needing a document-wide id.
     const opts = document.createElement("div");
@@ -539,6 +650,18 @@ function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected 
         `that has a ${PIPE_SLOT_TYPE} "${PIPE_SLOT_NAME}" slot`;
     autoConnectLabel.prepend(autoConnectInput);
     opts.appendChild(autoConnectLabel);
+
+    // Deliberately not remembered between openings (unlike auto-connect): saving
+    // a preset is a one-off action, not a mode.
+    const savePresetInput = document.createElement("input");
+    savePresetInput.type = "checkbox";
+    const savePresetLabel = document.createElement("label");
+    savePresetLabel.textContent = "Save as preset";
+    savePresetLabel.title =
+        "On Load, ask for a name and store the selected templates, in selection order, " +
+        "as a preset in workflow_template_presets.yaml";
+    savePresetLabel.prepend(savePresetInput);
+    opts.appendChild(savePresetLabel);
     panel.appendChild(opts);
 
     const btns = document.createElement("div");
@@ -568,12 +691,136 @@ function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected 
         document.removeEventListener("keydown", onKey, true);
     }
 
+    // Ask for a name and store `batch` under it as a preset. Resolves to true
+    // once the preset is saved and false when the user backs out — the caller
+    // then loads nothing, so cancelling here cancels the whole action. Like the
+    // custom-pipe template dialog, an existing name is not overwritten silently:
+    // the Save button turns into an explicit Overwrite step.
+    function askSavePreset(batch) {
+        return new Promise(resolve => {
+            const subOverlay = document.createElement("div");
+            subOverlay.className = "lwt-overlay sub";
+
+            const subPanel = document.createElement("div");
+            subPanel.className = "lwt-panel small";
+            subOverlay.appendChild(subPanel);
+
+            const subTitle = document.createElement("div");
+            subTitle.className = "lwt-title";
+            subTitle.innerHTML = `Save as preset<small></small>`;
+            subTitle.querySelector("small").textContent =
+                `${batch.length} template${batch.length === 1 ? "" : "s"}, in selection order`;
+            subPanel.appendChild(subTitle);
+
+            const nameInput = document.createElement("input");
+            nameInput.className = "lwt-filter";
+            nameInput.type = "text";
+            nameInput.placeholder = "Preset name…";
+            nameInput.setAttribute("autocomplete", "off");
+            // Editing an existing preset without renaming it is the common case.
+            nameInput.value = presetSelect.value;
+            subPanel.appendChild(nameInput);
+
+            const msg = document.createElement("div");
+            msg.className = "lwt-msg";
+            subPanel.appendChild(msg);
+
+            const subBtns = document.createElement("div");
+            subBtns.className = "lwt-btns";
+            const subCancel = document.createElement("button");
+            subCancel.className = "lwt-btn";
+            subCancel.textContent = "Cancel";
+            const subSave = document.createElement("button");
+            subSave.className = "lwt-btn primary";
+            subSave.textContent = "Save";
+            subBtns.appendChild(subCancel);
+            subBtns.appendChild(subSave);
+            subPanel.appendChild(subBtns);
+
+            let overwrite = false;
+
+            // While this overlay is up the picker's own key handler is suspended,
+            // so Esc/Enter act on the name prompt only.
+            function finish(saved) {
+                document.removeEventListener("keydown", onSubKey, true);
+                subOverlay.remove();
+                document.addEventListener("keydown", onKey, true);
+                resolve(saved);
+            }
+
+            const onSubKey = e => {
+                if (e.key === "Escape") { e.stopPropagation(); finish(false); }
+                if (e.key === "Enter") { e.stopPropagation(); doSave(); }
+            };
+
+            async function doSave() {
+                const name = nameInput.value.trim();
+                if (!name) { msg.textContent = "The preset name cannot be empty."; return; }
+                subSave.disabled = true;
+                let result;
+                try {
+                    const resp = await api.fetchApi(`/${API_PREFIX}/save_template_workflow_preset`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ name, overwrite, templates: batch }),
+                    });
+                    result = await resp.json();
+                } catch (err) {
+                    console.error("[LoadWfTemplate] failed to save preset:", err);
+                    result = null;
+                }
+                subSave.disabled = false;
+
+                if (result?.ok) {
+                    _presetListCache = null;   // the picker rebuilds its list on the next open
+                    toast("success", "Preset saved",
+                        `"${result.name}" now holds ${batch.length} template(s)`);
+                    finish(true);
+                } else if (result?.status === "exists") {
+                    overwrite = true;
+                    subSave.textContent = "Overwrite";
+                    msg.textContent = `"${result.name}" already exists — press Overwrite to replace it.`;
+                } else {
+                    msg.textContent = `Could not save: ${result?.status ?? "unknown error"}`;
+                }
+            }
+
+            // a different name needs its own overwrite confirmation
+            nameInput.addEventListener("input", () => {
+                overwrite = false;
+                subSave.textContent = "Save";
+                msg.textContent = "";
+            });
+
+            subCancel.addEventListener("click", () => finish(false));
+            subSave.addEventListener("click", doSave);
+            subOverlay.addEventListener("pointerdown", e => {
+                if (e.target === subOverlay) finish(false);
+            });
+
+            document.removeEventListener("keydown", onKey, true);
+            document.addEventListener("keydown", onSubKey, true);
+            document.body.appendChild(subOverlay);
+            nameInput.focus();
+            nameInput.select();
+        });
+    }
+
     // Load every selected template, in selection order, each one placed to the
     // right of the previous one's bounding box. With auto-connect on, every
     // template after the first is also wired to the one inserted before it.
+    // With "Save as preset" ticked the selection is stored first; cancelling that
+    // prompt aborts the whole thing and leaves the picker open, untouched.
+    let confirming = false;
     async function confirmLoad() {
-        if (!selected.length) return;
-        const batch = selected;
+        if (!selected.length || confirming) return;
+        const batch = [...selected];
+        if (savePresetInput.checked) {
+            confirming = true;             // re-entry guard while the prompt is up
+            const saved = await askSavePreset(batch);
+            confirming = false;
+            if (!saved) return;
+        }
         selected = [];                 // re-entry guard: confirm only once
         const autoConnect = autoConnectInput.checked;
         _autoConnect = autoConnect;    // remember for the next dialog open
@@ -596,6 +843,35 @@ function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected 
         }
         if (failed.length) {
             toast("error", "Load failed", `Could not load: ${failed.join(", ")}`);
+        }
+    }
+
+    // Replace the current selection with the templates of `preset`, in the order
+    // the yaml lists them. Entries that no longer exist in the scanned folder are
+    // skipped and reported; a template listed twice is selected once (the tree
+    // selection is a set of paths).
+    function applyPreset(preset) {
+        const byLowerPath = new Map(paths.map(p => [p.toLowerCase(), p]));
+        const found = [];
+        const missing = [];
+        for (const ref of preset.templates) {
+            const path = byLowerPath.get(normalizeTemplateRef(ref).toLowerCase());
+            if (!path) missing.push(ref);
+            else if (!found.includes(path)) found.push(path);
+        }
+
+        selected = found;
+        lastClick = { path: null, time: 0 };
+        for (const path of found) expandTo(path);
+        render();
+        treeEl.querySelector(".lwt-row.selected")?.scrollIntoView({ block: "center" });
+
+        if (missing.length) {
+            toast("warn", `Preset "${preset.name}"`,
+                `${missing.length} template(s) not found and skipped: ${missing.join(", ")}`);
+        }
+        if (!found.length) {
+            toast("error", `Preset "${preset.name}"`, "None of its templates exist");
         }
     }
 
@@ -667,6 +943,8 @@ function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected 
             // suppresses when the mouse drifts slightly between clicks).
             // Ctrl/Cmd+click toggles the file in the multi-selection instead.
             row.addEventListener("click", e => {
+                // the selection no longer is the preset's one
+                presetSelect.value = "";
                 if (e.ctrlKey || e.metaKey) {
                     const idx = selected.indexOf(file.path);
                     if (idx === -1) selected.push(file.path);
@@ -722,16 +1000,21 @@ function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected 
         if (e.key === "Enter" && !loadBtn.disabled) { e.stopPropagation(); confirmLoad(); }
     };
 
-    // Rescan the templates folder, rebuilding the cached list, then reopen the
-    // dialog with the fresh paths. The current filter text, selection and
-    // options are carried over (entries that no longer exist are dropped).
+    // Rescan the templates folder and reread the presets file, rebuilding the
+    // cached lists, then reopen the dialog with the fresh paths. The current
+    // filter text, selection and options are carried over (entries that no
+    // longer exist are dropped).
     async function refresh() {
         refreshBtn.classList.add("busy");
         const term = filterInput.value;
         try {
-            const fresh = await fetchTemplateList(true);
+            const [fresh, freshPresets] = await Promise.all([
+                fetchTemplateList(true),
+                fetchPresetList(true),
+            ]);
             close();
-            openTemplateDialog(fresh, dropPos, term, [...selected], autoConnectInput.checked);
+            openTemplateDialog(fresh, freshPresets, dropPos, term, [...selected],
+                autoConnectInput.checked, presetSelect.value);
         } catch (err) {
             refreshBtn.classList.remove("busy");
             console.error("[LoadWfTemplate] failed to refresh workflows:", err);
@@ -741,6 +1024,10 @@ function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected 
     }
 
     filterInput.addEventListener("input", render);
+    presetSelect.addEventListener("change", () => {
+        const preset = presets.find(p => p.name === presetSelect.value);
+        if (preset) applyPreset(preset);
+    });
     refreshBtn.addEventListener("click", refresh);
     cancelBtn.addEventListener("click", close);
     loadBtn.addEventListener("click", confirmLoad);
@@ -757,7 +1044,13 @@ function openTemplateDialog(paths, dropPos, initialFilter = "", initialSelected 
 async function showTemplatePicker(dropPos) {
     try {
         const paths = await fetchTemplateList();
-        openTemplateDialog(paths, dropPos);
+        // A broken/absent presets endpoint must not keep the picker closed: the
+        // manual tree selection is the primary way in.
+        const presets = await fetchPresetList().catch(err => {
+            console.error("[LoadWfTemplate] failed to load presets:", err);
+            return [];
+        });
+        openTemplateDialog(paths, presets, dropPos);
     } catch (err) {
         console.error("[LoadWfTemplate] failed to list workflows:", err);
         toast("error", "Scan failed",
