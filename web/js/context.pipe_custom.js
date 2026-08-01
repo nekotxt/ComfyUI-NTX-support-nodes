@@ -585,7 +585,7 @@ function openEditDialog(node, widget, kind) {
     copyBtn.textContent = `Copy from ${otherKind}`;
     panel.appendChild(copyBtn);
 
-    // add a set of pre-defined properties from input/ntx_data/custompipe_configs.txt
+    // add a set of pre-defined properties from input/ntx_data/custom_pipe_presets.yaml
     const tplBtn = document.createElement("button");
     tplBtn.className = "cpp-add";
     tplBtn.textContent = "Load template…";

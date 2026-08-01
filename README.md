@@ -158,7 +158,7 @@ dialog for the corresponding side. In the dialog:
   the propagated renames. Propagation is skipped if the new name is already taken on that side.
 - **Copy from inputs/outputs** replaces the list with the entries of the other side.
 - **Load template…** opens a picker with predefined property sets loaded from
-  `input/ntx_data/custompipe_configs.txt`; the chosen template's properties are appended,
+  `input/ntx_data/custom_pipe_presets.yaml`; the chosen template's properties are appended,
   skipping names already present. Ticking **Replace current entries** in the picker clears the
   list before the template is applied instead of appending to it (nothing is committed until
   the editor dialog is confirmed with **OK**).
@@ -168,6 +168,24 @@ dialog for the corresponding side. In the dialog:
 - Names are validated on OK (non-empty, no duplicates, no reserved names). If a name exists on
   both sides with different types, a warning toast is shown.
 - **Enter** (while editing a name) confirms, **Escape** cancels.
+
+Templates are stored in `input/ntx_data/custom_pipe_presets.yaml`: one entry per template, the
+key being the name shown in the picker and its mapping holding the properties in order, as
+`name: type` pairs. A missing (empty) type, or the quoted `'*'` wildcard, means *any type*:
+
+```yaml
+Image:
+    width: INT
+    height: INT
+    latent: LATENT
+    model_name: '*'
+```
+
+The file is re-read every time the picker is opened, so it can be hand-edited while ComfyUI is
+running; an entry that is not a mapping of properties is skipped with a warning in the log.
+Saving rewrites the whole file with the four standard comment lines at the top — any other
+comment it contained is dropped — and refuses to write if the file exists but cannot be parsed,
+rather than replacing what it failed to read.
 
 Right-click menu options on the node:
 

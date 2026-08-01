@@ -4,6 +4,10 @@ from typing_extensions import override
 
 import json
 import textwrap
+from io import StringIO
+
+from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap
 
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_DIR
 from .logging import logger
@@ -526,56 +530,104 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
 # ===== JAVASCRIPT API =====================================================================================================================
 
 # Pre-defined property sets the frontend editor can load. Stored in
-# input/ntx_data/custompipe_configs.txt: each template starts with a name line,
-# followed by "- name:type" property lines; a blank line separates templates.
-CUSTOMPIPE_TEMPLATES_FILE = SETTINGS_DIR / "custompipe_configs.txt"
+# input/ntx_data/custom_pipe_presets.yaml: every top-level key is a template
+# name and its mapping holds the properties in order, e.g.
+#
+#   Image:
+#       width: INT
+#       height: INT
+#       model_name: '*'
+#
+# The value is the property type; an empty one (or the '*' wildcard, which YAML
+# needs quoted) means "any type".
+CUSTOMPIPE_TEMPLATES_FILE = SETTINGS_DIR / "custom_pipe_presets.yaml"
 
-def load_custompipe_templates():
-    """Parse the templates file into a list of
-    [{"name": <template>, "properties": [{"name":..., "type":...}, ...]}, ...]."""
-    templates = []
+# Written at the top of the file every time it is saved. Comments already in the
+# file are not kept : a save always ends up with exactly these four lines.
+CUSTOMPIPE_TEMPLATES_HEADER = (
+    '# Property sets the PipeCustom editor can load ("Load template").\n'
+    "# Every key is a template name, and its mapping holds \"property: TYPE\" entries\n"
+    "# in the order the properties are added to the node. A missing (empty) type, or\n"
+    "# the quoted '*' wildcard, means \"any type\".\n"
+)
+
+def _custompipe_yaml():
+    # round-trip mode, indented the way the file is written by hand
+    yaml = YAML(typ="rt")
+    yaml.indent(mapping=4, sequence=6, offset=4)
+    return yaml
+
+def _read_custompipe_yaml():
+    """The raw parsed presets file, as (ok, mapping). ok is False when the file is
+    there but could not be read or makes no sense; the mapping is None when there
+    is nothing in it (no file, or an empty one)."""
     if not CUSTOMPIPE_TEMPLATES_FILE.is_file():
-        return templates
+        return (True, None)
 
-    current = None
     try:
         with open(CUSTOMPIPE_TEMPLATES_FILE, "r", encoding="utf-8") as f:
-            for raw in f:
-                line = raw.strip()
-                if not line:
-                    continue
-                if line.startswith("-"):
-                    if current is None:
-                        continue   # property line before any template name — skip
-                    name, sep, ptype = line[1:].partition(":")
-                    name = name.strip()
-                    ptype = ptype.strip() if sep else ""
-                    if name:
-                        current["properties"].append({"name": name, "type": ptype or "*"})
-                else:
-                    current = {"name": line, "properties": []}
-                    templates.append(current)
-    except OSError as e:
-        logger.warning(f"PipeCustom : could not read custom pipe templates : {e}")
+            data = _custompipe_yaml().load(f)
+    except Exception as e:
+        logger.warning(f"PipeCustom : could not read {CUSTOMPIPE_TEMPLATES_FILE.name} : {e}")
+        return (False, None)
+
+    if data is not None and not isinstance(data, dict):
+        logger.warning(f"PipeCustom : {CUSTOMPIPE_TEMPLATES_FILE.name} must map template names to property mappings")
+        return (False, None)
+    return (True, data)
+
+def load_custompipe_templates():
+    """Parse the presets file into a list of
+    [{"name": <template>, "properties": [{"name":..., "type":...}, ...]}, ...].
+
+    Read from disk on every call so hand edits show up without a restart. A
+    missing file or a malformed entry is not an error, it just yields fewer
+    templates; a file that cannot be parsed at all yields none."""
+    (_ok, data) = _read_custompipe_yaml()
+    if not isinstance(data, dict):
         return []
+
+    templates = []
+    for name, properties in data.items():
+        name = str(name).strip()
+        if not name:
+            continue
+        if not isinstance(properties, dict):
+            logger.warning(f"PipeCustom : template '{name}' is not a mapping of properties, skipped")
+            continue
+        props = []
+        for pname, ptype in properties.items():
+            pname = str(pname).strip()
+            if not pname:
+                continue
+            # an empty type is the natural way to write the wildcard by hand
+            ptype = "" if ptype is None else str(ptype).strip()
+            props.append({"name": pname, "type": ptype or "*"})
+        if props:
+            templates.append({"name": name, "properties": props})
+
     return templates
 
 def format_custompipe_templates(templates):
-    """Serialize a template list back into the custompipe_configs.txt format."""
-    lines = []
+    """Serialize a template list into the YAML text of the presets file, always
+    under the standard CUSTOMPIPE_TEMPLATES_HEADER comment."""
+    data = CommentedMap()
     for tpl in templates:
-        lines.append(tpl["name"])
+        props = CommentedMap()
         for prop in tpl["properties"]:
-            lines.append(f"- {prop['name']}:{prop['type']}")
-        lines.append("")
-    return "\n".join(lines)
+            props[prop["name"]] = prop["type"]
+        data[tpl["name"]] = props
+
+    buffer = StringIO()
+    _custompipe_yaml().dump(data, buffer)
+    return CUSTOMPIPE_TEMPLATES_HEADER + buffer.getvalue()
 
 def save_custompipe_template(name, properties, overwrite=False):
     """Add (or replace) one named template in CUSTOMPIPE_TEMPLATES_FILE, keeping
     the others. Returns (ok, status); status is "saved", "exists" (name taken and
     overwrite not set) or an error message."""
     name = str(name or "").strip()
-    if not name or name.startswith("-") or any(c in name for c in "\r\n"):
+    if not name or any(c in name for c in "\r\n"):
         return (False, "invalid template name")
 
     props = []
@@ -585,8 +637,7 @@ def save_custompipe_template(name, properties, overwrite=False):
             continue
         pname = str(prop.get("name", "")).strip()
         ptype = str(prop.get("type", "*")).strip() or "*"
-        # ":" separates name and type in the file format, so neither part may contain it
-        if not pname or any(c in pname + ptype for c in ":\r\n"):
+        if not pname or any(c in pname + ptype for c in "\r\n"):
             return (False, f"invalid property : {pname or '(unnamed)'}")
         if pname in RESERVED_PIPE_NAMES or pname in seen:
             continue
@@ -594,6 +645,11 @@ def save_custompipe_template(name, properties, overwrite=False):
         props.append({"name": pname, "type": ptype})
     if not props:
         return (False, "no valid properties")
+
+    (ok, _data) = _read_custompipe_yaml()
+    if not ok:
+        # unreadable file: refuse rather than overwrite something we failed to parse
+        return (False, f"could not read {CUSTOMPIPE_TEMPLATES_FILE.name}")
 
     templates = load_custompipe_templates()
     existing = next((tpl for tpl in templates if tpl["name"] == name), None)
@@ -607,7 +663,7 @@ def save_custompipe_template(name, properties, overwrite=False):
     try:
         CUSTOMPIPE_TEMPLATES_FILE.parent.mkdir(parents=True, exist_ok=True)
         CUSTOMPIPE_TEMPLATES_FILE.write_text(format_custompipe_templates(templates), encoding="utf-8")
-    except OSError as e:
+    except Exception as e:
         logger.warning(f"PipeCustom : could not save custom pipe template : {e}")
         return (False, f"could not save : {e}")
 
