@@ -1,5 +1,5 @@
 # TITLE : download models specified in download dir, or from list
-# VER 1.0 (without _main_)
+# VER 1.1 (without _main_)
 
 import hashlib
 import json
@@ -164,7 +164,6 @@ def load_modeldata_from_ntxdata_file(path: Path) -> ModelData:
 
     return ModelData(subpath=file_subpath, file_hash=file_hash, urls=urls, ntxdata_path=path)
 
-
 def select_from_ntxdata_catalogue(catalogue_path: Path) -> List[ModelData]:
 
     with open(catalogue_path,'r', encoding='utf-8') as f:
@@ -226,7 +225,7 @@ def select_from_ntxdata_catalogue(catalogue_path: Path) -> List[ModelData]:
 
         if choice.upper() == "M":
             selected_models = []
-            model_indexes = input("Specify the model numbers: ").strip()
+            model_indexes = input("Specify the model numbers (separated by space, e.g. 1 5 7): ").strip()
             for model_index in model_indexes.split(" "):
                 model_index = model_index.strip()
                 if not model_index.isdigit() or not (1 <= int(model_index) <= len(models_list)):

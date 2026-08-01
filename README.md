@@ -1207,8 +1207,12 @@ Right-click menu options on the node:
 
 - **Append models** — opens a picker listing the models of a **catalogue file**, and appends the
   chosen ones to the `models_list` textbox. The catalogue is
-  `input/ntx_data/list_of_downloadable_models.txt` and uses exactly the format above, so a block picked there
-  is copied to the node as-is.
+  `input/ntx_data/downloads/_full_list.txt` and uses exactly the format above, so a block picked there
+  is copied to the node as-is. The same dialog can also append a whole **preset list** at once
+  (see *Download list combobox* below).
+- **Save current list as preset** — writes the current content of `models_list` to
+  `input/ntx_data/downloads/` as a preset, under a name asked for in a dialog (see *Saving a
+  preset* below).
 
 The picker organises the catalogue by model subpath, split on `/` and `\`, into a **tree** of
 folders (`checkpoints`, `loras/PONY/chars`, …) with the model files as leaves; folders are
@@ -1220,17 +1224,57 @@ listed before files, both alphabetically. Its controls:
 - a **filter box** narrows the tree to the models whose subpath matches the typed text — matching
   entries stay visible with their folders expanded;
 - hovering a model shows its **full block** (subpath, hash, urls) as a tooltip;
-- a line under the tree counts the current selection and the size of the catalogue, and
-  **Clear selection** unticks everything;
-- **Append** (disabled while nothing is selected) confirms, and so does **Enter**; **Cancel**,
-  **Escape**, or a click outside the dialog closes it without touching the node.
+- a **Download list** combobox under the tree picks a whole preset list (see below);
+- a line under the tree counts the current selection and names the picked list, if any, and
+  **Clear selection** unticks everything and sets the combobox back to `— none —`;
+- **Append** (disabled while nothing is selected and no list is picked) confirms, and so does
+  **Enter**; **Cancel**, **Escape**, or a click outside the dialog closes it without touching the
+  node.
 
 The catalogue file is re-read from disk **every time the dialog is opened**, so models added to
-it show up without reloading the page or restarting ComfyUI; a warning toast is shown when the
-file is missing or holds no model.
+it show up without reloading the page or restarting ComfyUI; a warning toast is shown when
+neither the catalogue nor any preset list holds anything to append.
 
 On confirmation the selected blocks are appended to the end of `models_list` — in the order they
 appear in the catalogue, not the order they were ticked — separated by empty lines and keeping
 whatever the textbox already contained. Models that the list **already declares** are skipped
 rather than added twice (subpaths are compared ignoring case and separator style), and a toast
 reports how many models were appended and how many were left out as already listed.
+
+#### Download list combobox
+
+Beside the catalogue, the picker offers the ready-made lists stored in
+`input/ntx_data/downloads/` as `.dwlst` files. Each file is a plain list in the format described
+above, and each one becomes an entry of the **Download list** combobox, named after the file
+without its extension and followed by the number of models it holds — `anima.dwlst` is shown as
+`anima (5)`. The combobox starts on `— none —`, and reads `— no list found —` and stays disabled
+when the folder holds no `.dwlst` file.
+
+Picking a list appends **its whole content**, *in addition to* whatever is ticked in the tree:
+tree selection and list are not exclusive, and either one alone is enough to enable **Append**.
+The tree blocks are written first, then the models of the list in their file order. Both go
+through the same duplicate check, so a model that the textbox already declares — or that the
+tree selection and the picked list both contain — is written only once, and the toast counts
+models actually added, not files.
+
+The `downloads` folder is scanned **every time the dialog is opened**, so a list saved with
+**Save current list as preset** is offered on the next opening, without reloading the page.
+
+#### Saving a preset
+
+**Save current list as preset** turns the current `models_list` into a new `.dwlst` file in
+`input/ntx_data/downloads/`, ready to be picked again from the combobox. A warning toast is
+shown instead when the textbox is empty.
+
+The dialog asks for the preset name — its title recalls how many models are about to be saved —
+and **Save** (or **Enter**) writes the file; **Cancel**, **Escape**, or a click outside closes
+it without writing anything. The `.dwlst` extension is added automatically, and typing it is
+harmless. Names that no filesystem accepts are refused: an empty name, one containing
+`\ / : * ? " < > |`, or one starting or ending with a dot or a space.
+
+When a preset of that name **already exists**, nothing is written yet: the dialog warns that the
+file exists and the button becomes **Overwrite**, which replaces the file when pressed again.
+Editing the name turns the button back into **Save**, so a confirmation is never carried over to
+another file. Names are compared **ignoring case**, so saving `Anima` over an existing
+`anima.dwlst` replaces that file — keeping its original spelling — instead of adding a
+near-duplicate.
