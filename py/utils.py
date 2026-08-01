@@ -9,6 +9,9 @@ import re
 import subprocess
 from pathlib import Path
 
+from ruamel.yaml import YAML
+yaml = YAML(typ='safe', pure=True)
+
 from ..config_variables import ADDON_NAME, ADDON_PREFIX, API_PREFIX, ADDON_CATEGORY, SETTINGS_DIR
 from .logging import logger
 
@@ -136,11 +139,20 @@ def load_list_schedulers():
 
 # ===== UTILITY FUNCTIONS FOR IMAGES ======================================================================================================
 
-image_sizes_file = SETTINGS_DIR / "image_sizes.txt"
-if image_sizes_file.is_file():
-    IMAGE_SIZES = image_sizes_file.read_text(encoding="utf-8").splitlines()
-else:
-    IMAGE_SIZES = ["512x512", "512x768", "768x512", "832x1216", "1216x832", "896x1152", "1152x896", "1024x1024", "1024x1536", "1536x1024"]
+image_presets_path = SETTINGS_DIR / "image_presets.yaml"
+IMAGE_ASPECT_RATIOS = ["1:1 (Square)"]
+IMAGE_SIZES = ["512x512", "512x768", "768x512", "832x1216", "1216x832", "896x1152", "1152x896", "1024x1024", "1024x1536", "1536x1024"]
+try:
+    if image_presets_path.is_file():
+        image_presets_text = image_presets_path.read_text(encoding="utf-8")
+        image_presets_data = yaml.load(image_presets_text)
+        IMAGE_ASPECT_RATIOS = image_presets_data.get("aspect_ratios", IMAGE_ASPECT_RATIOS)
+        IMAGE_SIZES = image_presets_data.get("sizes", IMAGE_SIZES)
+    else:
+        logger.warning(f"Image presets file not found {image_presets_path}")
+except Exception as e:
+    logger.warning(f"Error loading image presets file {image_presets_path} : {e}")
+
 def load_list_image_sizes():
     global IMAGE_SIZES
     return IMAGE_SIZES
@@ -174,11 +186,6 @@ def image_rescale_keeping_aspect_ratio(image, width:int, height:int, rescaler:st
 
     return final_image
 
-image_aspect_ratios_file = SETTINGS_DIR / "image_aspect_ratios.txt"
-if image_aspect_ratios_file.is_file():
-    IMAGE_ASPECT_RATIOS = image_aspect_ratios_file.read_text(encoding="utf-8").splitlines()
-else:
-    IMAGE_ASPECT_RATIOS = ["1:1 (Square)"]
 def load_list_image_aspect_ratios():
     global IMAGE_ASPECT_RATIOS
     return IMAGE_ASPECT_RATIOS

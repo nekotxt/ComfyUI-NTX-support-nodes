@@ -1012,8 +1012,7 @@ Whatever the mode, the resulting width and height are rounded with `divisible_by
 multiple, never below the divisor). Where a mode computes a side from an aspect ratio or a
 pixel count, this rounding may make the result deviate slightly from the exact target.
 
-The preset and aspect ratio lists are read from `image_sizes.txt` and
-`image_aspect_ratios.txt` in the addon's data folder (one entry per line).
+The preset and aspect ratio lists are read from `image_presets.yaml` in the addon's data folder.
 
 ### Inputs
 

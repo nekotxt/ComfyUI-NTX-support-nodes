@@ -391,6 +391,11 @@ class ImageResolution(io.ComfyNode):
                         io.Combo.Input("aspect_ratio", options=load_list_image_aspect_ratios()),
                         io.Float.Input("megapixel", default=1.0, min=0.01, max=256.0, step=0.05),
                     ]),
+                    io.DynamicCombo.Option("resolution and custom AR", [
+                        io.Int.Input("ratio_w", default=1, min=1, max=10, step=1),
+                        io.Int.Input("ratio_h", default=1, min=1, max=10, step=1),
+                        io.Float.Input("megapixel", default=1.0, min=0.01, max=256.0, step=0.05),
+                    ]),
                     io.DynamicCombo.Option("resolution and width", [
                         io.Int.Input("width", default=1024, min=1, max=16384, step=1),
                         io.Float.Input("megapixel", default=1.0, min=0.01, max=256.0, step=0.05),
@@ -418,6 +423,13 @@ class ImageResolution(io.ComfyNode):
         elif mode["mode"] == "resolution":
             # size with the requested pixel count (1 megapixel = 1024x1024) and aspect ratio
             ratio_w, ratio_h = extract_image_aspect_ratio(mode["aspect_ratio"])
+            pixels = mode["megapixel"] * 1024 * 1024
+            width = max(1, round(math.sqrt(pixels * ratio_w / ratio_h)))
+            height = max(1, round(width * ratio_h / ratio_w))
+        elif mode["mode"] == "resolution and custom AR":
+            # size with the requested pixel count (1 megapixel = 1024x1024) and custom aspect ratio
+            ratio_w = mode["ratio_w"]
+            ratio_h = mode["ratio_h"]
             pixels = mode["megapixel"] * 1024 * 1024
             width = max(1, round(math.sqrt(pixels * ratio_w / ratio_h)))
             height = max(1, round(width * ratio_h / ratio_w))
