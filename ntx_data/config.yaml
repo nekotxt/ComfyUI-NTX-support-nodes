@@ -5,3 +5,4 @@ tokens:
 cloud_storage_id:
 models_dir_local: D:/ComfyUI/models
 download_missing_loras: false
+templates_subdir:

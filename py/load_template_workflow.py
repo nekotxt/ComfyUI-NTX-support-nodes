@@ -3,7 +3,7 @@
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
 
-from ..config_variables import API_PREFIX, SETTINGS_DIR
+from ..config_variables import API_PREFIX, SETTINGS_DIR, TEMPLATES_SUBDIR
 from .logging import logger
 
 # ===== WORKFLOW TEMPLATE PRESETS ==========================================================================================================
@@ -136,6 +136,16 @@ def save_template_preset(name, templates, overwrite=False):
 
 from aiohttp import web
 from server import PromptServer
+
+@PromptServer.instance.routes.get(f"/{API_PREFIX}/load_template_workflow_subdir")
+async def load_template_workflow_subdir_route(request):
+    """The "templates_subdir" configuration entry, i.e. the folder (relative to the
+    ComfyUI user "workflows" folder) the picker scans for template workflows.
+    Separators are normalised for the frontend, which builds userdata paths with
+    it; an empty answer means the entry is unset and the whole "workflows" folder
+    is scanned."""
+    subdir = str(TEMPLATES_SUBDIR or "").replace("\\", "/").strip("/")
+    return web.json_response({"subdir": subdir})
 
 @PromptServer.instance.routes.get(f"/{API_PREFIX}/load_template_workflow_presets")
 async def load_template_workflow_presets_route(request):

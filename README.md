@@ -36,8 +36,17 @@ The command is available from three places:
 - the **canvas right-click menu** (*Load template workflow*) — the nodes are dropped where the
   menu was opened.
 
-Templates are read from the `ntx/_templates` subfolder of the ComfyUI user **workflows** folder
-(`workflows/ntx/_templates`); every `.json` file found there, at any depth, is offered.
+Templates are read from a subfolder of the ComfyUI user **workflows** folder, named by the
+`templates_subdir` entry of `input/ntx_data/config.yaml`:
+
+```yaml
+templates_subdir: my_templates
+```
+
+Every `.json` file found in that folder, at any depth, is offered. Leaving the entry **unset**
+(or empty) scans the whole **workflows** folder instead. The setting is read when ComfyUI starts,
+so pointing the picker elsewhere takes a restart — the **Refresh** button below only re-scans the
+folder currently configured.
 
 Invoking the command opens a **tree picker** organised by subfolder:
 

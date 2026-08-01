@@ -7,9 +7,11 @@ import { ADDON_PREFIX, API_PREFIX } from "./config.js";
 import { registerCanvasMenu } from "./menu.js";
 
 // ── Configuration ─────────────────────────────────────────────────────────────
-// Subdirectory (inside the ComfyUI user "workflows" folder) that is scanned for
-// template workflows. Change this to point the picker somewhere else.
-const TEMPLATES_SUBDIR = "ntx/_templates";
+// The subdirectory (inside the ComfyUI user "workflows" folder) scanned for
+// template workflows is configured with the "templates_subdir" entry of
+// input/ntx_data/config.yaml and served by py/load_template_workflow.py — see
+// fetchTemplatesSubdir. Leaving that entry unset scans the whole "workflows"
+// folder.
 
 // Name of the throw-away workflow tab used while importing a template. The
 // frontend appends ".json" and de-conflicts the path, so collisions with real
@@ -311,12 +313,41 @@ function toast(severity, summary, detail) {
     app.extensionManager?.toast?.add?.({ severity, summary, detail, life: 4000 });
 }
 
+// The configured templates subdirectory, fetched once per session (the backend
+// reads config.yaml at import time, so it cannot change without a restart) and
+// then reused. Never rejects: an unreachable endpoint is treated like an unset
+// entry rather than leaving the picker unusable.
+let _templatesSubdir = null;
+
+async function fetchTemplatesSubdir() {
+    if (_templatesSubdir !== null) return _templatesSubdir;
+
+    let subdir = "";
+    try {
+        const resp = await api.fetchApi(`/${API_PREFIX}/load_template_workflow_subdir`);
+        if (!resp.ok) throw new Error(`subdir HTTP ${resp.status}`);
+        subdir = String((await resp.json())?.subdir ?? "");
+    } catch (err) {
+        console.error("[LoadWfTemplate] failed to read the configured templates subdir:", err);
+    }
+    _templatesSubdir = subdir;
+    return _templatesSubdir;
+}
+
+// The scanned folder as a userdata path. Synchronous, for the dialog's labels
+// and messages — all of them run after fetchTemplateList has resolved the
+// subdir.
+function templatesDir() {
+    return _templatesSubdir ? `workflows/${_templatesSubdir}` : "workflows";
+}
+
 let _templateListCache = null;
 
 async function fetchTemplateList(force = false) {
     if (CACHE_LIST && _templateListCache && !force) return _templateListCache;
 
-    const dir = `workflows/${TEMPLATES_SUBDIR}`;
+    await fetchTemplatesSubdir();
+    const dir = templatesDir();
     const resp = await api.fetchApi(
         `/userdata?dir=${encodeURIComponent(dir)}&recurse=true&split=false&full_info=false`
     );
@@ -467,7 +498,8 @@ function autoConnectTemplate(pastedNodes, previousIds) {
 // Returns the width of the inserted items (so multiple templates can be placed
 // one to the right of the other) along with the created nodes, in graph order.
 async function loadTemplate(relPath, dropPos) {
-    const fullPath = `workflows/${TEMPLATES_SUBDIR}/${relPath}`;
+    await fetchTemplatesSubdir();
+    const fullPath = `${templatesDir()}/${relPath}`;
     const resp = await api.fetchApi(`/userdata/${encodeURIComponent(fullPath)}`);
     if (!resp.ok) throw new Error(`userdata read HTTP ${resp.status}`);
     const graphData = await resp.json();
@@ -527,7 +559,7 @@ async function loadTemplate(relPath, dropPos) {
 }
 
 // ── Tree model ────────────────────────────────────────────────────────────────
-// Paths are relative to TEMPLATES_SUBDIR, e.g. "sdxl/portraits/base.json".
+// Paths are relative to the templates subdir, e.g. "sdxl/portraits/base.json".
 
 function buildTree(paths) {
     const root = { dirs: new Map(), files: [] };
@@ -591,7 +623,7 @@ function openTemplateDialog(paths, presets, dropPos, initialFilter = "", initial
     title.className = "lwt-title";
     title.innerHTML = `Load template workflow<small></small>`;
     title.querySelector("small").textContent =
-        `workflows/${TEMPLATES_SUBDIR} · Ctrl+click to select multiple`;
+        `${templatesDir()} · Ctrl+click to select multiple`;
     panel.appendChild(title);
 
     const filterInput = document.createElement("input");
@@ -985,7 +1017,7 @@ function openTemplateDialog(paths, presets, dropPos, initialFilter = "", initial
             empty.className = "lwt-empty";
             empty.textContent = paths.length
                 ? "No workflows match the filter."
-                : `No workflows found in workflows/${TEMPLATES_SUBDIR}`;
+                : `No workflows found in ${templatesDir()}`;
             treeEl.appendChild(empty);
         }
 
@@ -1019,7 +1051,7 @@ function openTemplateDialog(paths, presets, dropPos, initialFilter = "", initial
             refreshBtn.classList.remove("busy");
             console.error("[LoadWfTemplate] failed to refresh workflows:", err);
             toast("error", "Refresh failed",
-                `Could not rescan workflows/${TEMPLATES_SUBDIR}: ${err.message ?? err}`);
+                `Could not rescan ${templatesDir()}: ${err.message ?? err}`);
         }
     }
 
@@ -1054,7 +1086,7 @@ async function showTemplatePicker(dropPos) {
     } catch (err) {
         console.error("[LoadWfTemplate] failed to list workflows:", err);
         toast("error", "Scan failed",
-            `Could not list workflows/${TEMPLATES_SUBDIR}: ${err.message ?? err}`);
+            `Could not list ${templatesDir()}: ${err.message ?? err}`);
     }
 }
 
