@@ -142,16 +142,16 @@ def load_list_schedulers():
 image_presets_path = SETTINGS_DIR / "image_presets.yaml"
 IMAGE_ASPECT_RATIOS = ["1:1 (Square)"]
 IMAGE_SIZES = ["512x512", "512x768", "768x512", "832x1216", "1216x832", "896x1152", "1152x896", "1024x1024", "1024x1536", "1536x1024"]
-try:
-    if image_presets_path.is_file():
+if image_presets_path.is_file():
+    try:
         image_presets_text = image_presets_path.read_text(encoding="utf-8")
         image_presets_data = yaml.load(image_presets_text)
         IMAGE_ASPECT_RATIOS = image_presets_data.get("aspect_ratios", IMAGE_ASPECT_RATIOS)
         IMAGE_SIZES = image_presets_data.get("sizes", IMAGE_SIZES)
-    else:
-        logger.warning(f"Image presets file not found {image_presets_path}")
-except Exception as e:
-    logger.warning(f"Error loading image presets file {image_presets_path} : {e}")
+    except Exception as e:
+        logger.warning(f"Error loading image presets file {image_presets_path} : {e}")
+else:
+    logger.warning(f"Image presets file not found {image_presets_path}")
 
 def load_list_image_sizes():
     global IMAGE_SIZES

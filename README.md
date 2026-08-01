@@ -5,7 +5,7 @@ A collection of custom nodes for ComfyUI. All nodes are registered with the `NTX
 The right-click menu entries added by the addon carry the same prefix; it is omitted
 throughout this document.
 
-Configuration and data files (prompt library, custom pipe templates, `config.json`) are read
+Configuration and data files (prompt library, custom pipe templates, `config.yaml`) are read
 from `input/ntx_data/` inside the ComfyUI folder (falling back to the `ntx_data/` folder
 bundled with the addon).
 
@@ -281,11 +281,11 @@ For each `(name, strength_model, strength_clip)` entry:
 - entries with both strengths equal to 0 are skipped;
 - a LoRA already applied earlier in the stack (same name) is skipped;
 - the file is resolved in the `loras` model folder. If it is missing and cloud download is
-  enabled in `config.json` (`download_missing_loras`, `cloud_storage_id`; active on Linux
+  enabled in `config.yaml` (`download_missing_loras`, `cloud_storage_id`; active on Linux
   only), the node attempts to fetch it; otherwise a warning toast is emitted and the entry is
   skipped;
 - the LoRA weights are loaded from disk and kept in a cache shared by all ApplyLoraStack nodes
-  (size limited by `cache.max_loras` in `config.json`, default 5, oldest evicted first), then
+  (size limited by `cache.max_loras` in `config.yaml`, default 5, oldest evicted first), then
   applied with `comfy.sd.load_lora_for_models`.
 
 ### Inputs

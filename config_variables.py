@@ -3,6 +3,9 @@ import sys
 
 from pathlib import Path
 
+from ruamel.yaml import YAML
+yaml = YAML(typ='safe', pure=True)
+
 ADDON_NAME = "NTX-support-nodes"
 ADDON_PREFIX = "NTX"
 ADDON_CATEGORY = "NTX-support-nodes"
@@ -33,16 +36,20 @@ SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
 if not SETTINGS_DIR.exists():
     SETTINGS_DIR = Path(__file__).parent / "ntx_data"
     #SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
-print(f"{ADDON_NAME} Load settings from {SETTINGS_DIR}")
+print(f"[INFO] [{ADDON_NAME}] Load settings from {SETTINGS_DIR}")
 
 CONFIGURATION = {}
-configuration_file = SETTINGS_DIR / "config.json"
+configuration_file = SETTINGS_DIR / "config.yaml"
 if configuration_file.is_file():
-    with open(configuration_file,'r', encoding='utf-8') as f:
-        CONFIGURATION = json.load(f)
+    try:
+        configuration_text = configuration_file.read_text(encoding="utf-8")
+        CONFIGURATION = yaml.load(configuration_text)
+    except Exception as e:
+        print(f"[WARN] [{ADDON_NAME}] Error loading configuration file {configuration_file} : {e}")
+else:
+    logger.warning(f"[WARN] [{ADDON_NAME}] Configuration file not found {configuration_file}")
 
 INCLUDE_MODELS_FROM_CATALOGUE = CONFIGURATION.get("include_models_from_catalogue", False)
 MAX_CACHED_LORAS = CONFIGURATION.get("cache", {}).get("max_loras", 5)
 DOWNLOAD_MISSING_LORAS = CONFIGURATION.get("download_missing_loras", False) and sys.platform.lower().startswith("linux") # only download for linux (pods)
 CLOUD_STORAGE_ID = CONFIGURATION.get("cloud_storage_id", "")
-
