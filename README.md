@@ -1173,7 +1173,7 @@ the other inputs) changes.
 |---|---|---|
 | `models_list` | STRING (multiline) | The models to download, as blocks separated by empty lines (see *Example*). Lines starting with `#` are ignored. |
 | `models_dir` | STRING | Base folder the subpaths are resolved against. When left **empty** (the default), the ComfyUI `models` folder is used. |
-| `civitai_api_key` | STRING | Civitai API token, used for downloads that require an account. Optional, and never written to the log (the log only shows its length as asterisks). |
+| `civitai_api_key` | STRING | Civitai API token, used for downloads that require an account. Optional, and never written to the log (the log only shows its length as asterisks). If left empty, the node will attempt to read the value from the 'tokens' section of the config.yaml file |
 
 ### Outputs
 

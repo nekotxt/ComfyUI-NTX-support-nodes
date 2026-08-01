@@ -1,6 +1,6 @@
 from comfy_api.latest import ComfyExtension, io
 
-from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, MODELS_DIR, SETTINGS_DIR
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, MODELS_DIR, SETTINGS_DIR, API_TOKENS
 from .logging import logger
 
 from ..scripts.ms_download_models import download_models_from_text_list
@@ -30,11 +30,17 @@ class DownloadModelsList(io.ComfyNode):
             global MODELS_DIR
             models_dir = MODELS_DIR
 
+        if civitai_api_key == "":
+            global API_TOKENS
+            tokens = API_TOKENS
+        else:
+            tokens={"civitai": civitai_api_key}
+
         logger.info("Attempt to download models:")
         logger.info(f"- models dir: {models_dir}")
         logger.info(f"- civitai api key: {str(len(civitai_api_key)*'*')}")
 
-        result = download_models_from_text_list(text=models_list, models_dir=str(models_dir), tokens={"civitai": civitai_api_key})
+        result = download_models_from_text_list(text=models_list, models_dir=str(models_dir), tokens=tokens)
 
         return io.NodeOutput(result)
 
