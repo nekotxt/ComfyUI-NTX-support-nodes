@@ -33,6 +33,7 @@ class DownloadModelsList(io.ComfyNode):
         if civitai_api_key == "":
             global API_TOKENS
             tokens = API_TOKENS
+            civitai_api_key = tokens.get("civitai", "")
         else:
             tokens={"civitai": civitai_api_key}
 
