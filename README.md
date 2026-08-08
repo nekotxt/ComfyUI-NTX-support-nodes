@@ -1299,3 +1299,99 @@ Editing the name turns the button back into **Save**, so a confirmation is never
 another file. Names are compared **ignoring case**, so saving `Anima` over an existing
 `anima.dwlst` replaces that file — keeping its original spelling — instead of adding a
 near-duplicate.
+
+---
+
+## ImagesGrid
+
+![ImagesGrid node](images/ImagesGrid.png)
+
+Combines a batch of images into a single grid image. The images are placed in batch order,
+left to right and top to bottom, each in its own cell; since all the images of a batch share
+the same size, every cell is exactly the size of one input image and the grid is a plain
+tiling of them. The `mode` widget is a dynamic combo: selecting a mode shows only the widgets
+that the mode actually uses.
+
+`padding` is inserted **between** the cells only — there is no border around the grid, so a
+grid of *r* × *c* images is `c × width + (c - 1) × padding` by `r × height + (r - 1) × padding`
+pixels. The whole canvas is filled with `color` beforehand, which is therefore what shows
+through in the padding and in any cell left empty (an RGBA input keeps its alpha channel, and
+the filled area is opaque).
+
+When the grid cannot hold every input image — only possible when both dimensions are fixed,
+i.e. in `rows and columns` or with a fully numeric custom layout — the images in excess are
+**discarded**, and the number dropped is written to the log. When the input batch is empty the
+node returns a single 1×1 pixel of `color`.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `images` | IMAGE | The batch of images to combine. |
+| `mode` | dynamic COMBO | How the grid size is decided; see the mode list below. Default `fixed columns`. |
+| `padding` | INT | Gap between the cells, in pixels (0–1024, default `0` = the images touch). |
+| `color` | COLOR | Color picker (default black `#000000`) filling the padding and the empty cells. |
+
+### Modes
+
+- **`fixed columns`** — widget `columns` (1–64, default 2). The number of rows is derived
+  from the number of images, so every image always fits.
+- **`fixed rows`** — widget `rows` (1–64, default 2). The mirror of the above: the number of
+  columns is derived from the number of images.
+- **`rows and columns`** — widgets `rows` and `columns` (1–64, default 2). The grid size is
+  exact: fewer images than cells leaves the remaining cells filled with `color`, more images
+  than cells discards the excess.
+- **`custom`** — widget `options`, a multiline text listing several layouts, one per line, so
+  that the grid shape adapts to the number of images. See below.
+
+### The `custom` layout list
+
+Each line of `options` is a layout written as `<max_images> <rows> <columns>`, meaning "up to
+*max_images* images, use *rows* × *columns*". Either `rows` or `columns` — never both — can be
+`*`, meaning "as many as needed" for the number of images actually received. Values are
+separated by spaces and empty lines are ignored.
+
+At run time the node picks the **first** layout of the list whose `max_images` is greater than
+or equal to the number of input images, or the **last** layout of the list when the images
+exceed them all. The order of the lines is the order they are written in — they are not sorted
+— so list them from the smallest `max_images` to the largest.
+
+A line is **discarded**, with the reason written to the log, when it is not a triad of values,
+when a value is not a number, when both `rows` and `columns` are `*`, or when any value is
+zero or negative. The other lines still work. If *no* valid layout is left at all, the node
+falls back to a near-square grid (⌈√n⌉ columns) and logs a warning.
+
+#### Example
+
+The default value of `options` is:
+
+```
+1 1 1
+2 1 2
+3 1 3
+4 2 2
+9 * 3
+10 * 4
+```
+
+which gives:
+
+| Images received | Layout used | Resulting grid |
+|---|---|---|
+| 1 | `1 1 1` | 1 row × 1 column |
+| 2 | `2 1 2` | 1 row × 2 columns |
+| 3 | `3 1 3` | 1 row × 3 columns |
+| 4 | `4 2 2` | 2 rows × 2 columns |
+| 5 | `9 * 3` | 2 rows × 3 columns, the last cell filled with `color` |
+| 9 | `9 * 3` | 3 rows × 3 columns |
+| 10 | `10 * 4` | 3 rows × 4 columns, the last 2 cells filled with `color` |
+| 11 | `10 * 4` (last one, none fits) | 3 rows × 4 columns, the last cell filled with `color` |
+
+A line such as `20 3 *` reads "up to 20 images, 3 rows and as many columns as needed": with 7
+images it produces a 3 × 3 grid, the two spare cells filled with `color`.
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `grid` | IMAGE | The composed grid, as a single image (batch of 1); a 1×1 pixel of `color` when the input batch is empty. |

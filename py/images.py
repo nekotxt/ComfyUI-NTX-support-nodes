@@ -237,6 +237,43 @@ def create_images_grid(images: list[Image.Image], gap=2, background_color="black
     return grid_image
 
 
+# parse the custom grid layouts of ImagesGrid : one layout per line, "<max_images> <rows> <columns>",
+# where rows or columns (at most one of the two) can be "*" meaning "as many as needed".
+# Malformed lines are discarded; returns a list of (max_images, rows, columns), with None standing for "*"
+def parse_grid_layouts(options: str) -> list[tuple[int, int | None, int | None]]:
+    layouts = []
+
+    for line in (options or "").splitlines():
+        parts = line.split()
+
+        if not parts:  # empty lines are not layouts, skip them silently
+            continue
+
+        if len(parts) != 3:
+            logger.warning(f"discarding grid layout \"{line.strip()}\" : not a triad of values")
+            continue
+
+        if parts[1] == "*" and parts[2] == "*":
+            logger.warning(f"discarding grid layout \"{line.strip()}\" : only one of rows and columns can be \"*\"")
+            continue
+
+        try:
+            max_images = int(parts[0])
+            rows = None if parts[1] == "*" else int(parts[1])
+            columns = None if parts[2] == "*" else int(parts[2])
+        except ValueError:
+            logger.warning(f"discarding grid layout \"{line.strip()}\" : not a triad of numbers")
+            continue
+
+        if max_images <= 0 or (rows is not None and rows <= 0) or (columns is not None and columns <= 0):
+            logger.warning(f"discarding grid layout \"{line.strip()}\" : the values must be greater than zero")
+            continue
+
+        layouts.append((max_images, rows, columns))
+
+    return layouts
+
+
 # ===== NODES : IMAGES ==================================================================================================================
 
 class SaveMultipleImages(io.ComfyNode):
@@ -741,6 +778,105 @@ class MaskOverlay(io.ComfyNode):
 
         return io.NodeOutput(preview, mask, ui=ui.PreviewImage(preview, cls=cls))
 
+class ImagesGrid(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}ImagesGrid",
+            display_name=f"{ADDON_PREFIX} Images Grid",
+            description="Combine a batch of images into a single grid image, with an optional padding between the cells; the color fills both the padding and the empty cells",
+            category=f"{ADDON_CATEGORY}/images",
+            inputs=[
+                io.Image.Input("images"),
+                io.DynamicCombo.Input("mode", options=[
+                    io.DynamicCombo.Option("fixed columns", [
+                        io.Int.Input("columns", default=2, min=1, max=64, step=1),
+                    ]),
+                    io.DynamicCombo.Option("fixed rows", [
+                        io.Int.Input("rows", default=2, min=1, max=64, step=1),
+                    ]),
+                    io.DynamicCombo.Option("rows and columns", [
+                        io.Int.Input("rows", default=2, min=1, max=64, step=1),
+                        io.Int.Input("columns", default=2, min=1, max=64, step=1),
+                    ]),
+                    io.DynamicCombo.Option("custom", [
+                        io.String.Input("options", multiline=True, dynamic_prompts=False, default="1 1 1\n2 1 2\n3 1 3\n4 2 2\n9 * 3\n10 * 4",
+                                        tooltip="One layout per line, \"<max_images> <rows> <columns>\" : the first layout holding the input images is used (the last one if none does). "
+                                                "Either rows or columns (not both) can be \"*\" to mean \"as many as needed\""),
+                    ]),
+                ]),
+                io.Int.Input("padding", default=0, min=0, max=1024, step=1),
+                io.Color.Input("color", default="#000000"),
+            ],
+            outputs=[
+                io.Image.Output("grid"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, images, mode: io.DynamicCombo.Type, padding: int, color: str) -> io.NodeOutput:
+
+        logger.node_name("ImagesGrid")
+
+        count = 0 if images is None else images.shape[0]
+
+        # grid size : the dimension not fixed by the mode is derived from the number of images
+        if mode["mode"] == "fixed columns":
+            columns = max(1, mode["columns"])
+            rows = max(1, math.ceil(count / columns))
+        elif mode["mode"] == "fixed rows":
+            rows = max(1, mode["rows"])
+            columns = max(1, math.ceil(count / rows))
+        elif mode["mode"] == "custom":
+            # the first layout able to hold the input images wins, or the last one if the images exceed them all
+            layouts = parse_grid_layouts(mode["options"])
+            if not layouts:
+                columns = max(1, math.ceil(math.sqrt(count)))
+                rows = max(1, math.ceil(count / columns))
+                logger.warning(f"no valid grid layout, falling back to a {columns}x{rows} grid")
+            else:
+                _, rows, columns = next((layout for layout in layouts if layout[0] >= count), layouts[-1])
+                if rows is None:      # "*" rows : as many as needed for the given columns
+                    rows = max(1, math.ceil(count / columns))
+                elif columns is None:  # "*" columns : as many as needed for the given rows
+                    columns = max(1, math.ceil(count / rows))
+        else:  # "rows and columns" : the grid size is exact, the images in excess are discarded
+            rows = max(1, mode["rows"])
+            columns = max(1, mode["columns"])
+
+        # an exact grid (both dimensions fixed) can be too small to hold every input image
+        if count > rows * columns:
+            logger.info(f"grid is {columns}x{rows}, discarding {count - rows * columns} of the {count} input images")
+            count = rows * columns
+
+        # with no images the grid is a single cell of background color
+        if count == 0:
+            logger.info("no input images, returning a 1x1 image")
+            fill = list(parse_hex_color(color)) + [1.0]
+            return io.NodeOutput(torch.tensor(fill[:3]).view(1, 1, 1, 3))
+
+        # all the images of a batch share the same size, so every cell is the image size
+        cell_height, cell_width = images.shape[1], images.shape[2]
+        channels = images.shape[3]
+
+        grid_height = rows * cell_height + (rows - 1) * padding
+        grid_width = columns * cell_width + (columns - 1) * padding
+
+        # fill the whole canvas with the color : what remains visible is the padding and the empty cells
+        fill = list(parse_hex_color(color)) + [1.0]  # extra channel (alpha) filled opaque
+        fill_tensor = torch.tensor(fill[:channels], dtype=images.dtype, device=images.device).view(1, 1, channels)
+        grid = fill_tensor.expand(grid_height, grid_width, channels).clone()
+
+        for index in range(count):
+            row, column = divmod(index, columns)
+            y = row * (cell_height + padding)
+            x = column * (cell_width + padding)
+            grid[y:y + cell_height, x:x + cell_width, :] = images[index]
+
+        logger.info(f"composed {count} images into a {columns}x{rows} grid ({grid_width}x{grid_height}px)")
+
+        return io.NodeOutput(grid.unsqueeze(0))  # [H, W, C] -> [1, H, W, C]
+
 # ===== INITIALIZATION =====================================================================================================================
 
 def get_nodes_list() -> list[type[io.ComfyNode]]:
@@ -751,4 +887,5 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         ExtractImageFromBatch,
         ResizeImageMask,
         MaskOverlay,
+        ImagesGrid,
     ]
