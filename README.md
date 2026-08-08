@@ -969,6 +969,18 @@ with `divisible_by` = `16`, both sides of the result are multiples of 16). Where
 computes a side from the aspect ratio, the rounding may make the final aspect ratio deviate
 slightly from the source.
 
+`upscale_method` defaults to `auto`, which picks the interpolation per input instead of
+applying the same one to everything: a **mask** is always rescaled with `bilinear`, an
+**image** with `lanczos` when it grows and `area` when it shrinks (the sharpest filter when
+enlarging, a proper box average — no aliasing or moiré — when reducing). The image and the
+mask are resolved independently, so with both connected the same run can use `lanczos` on the
+image and `bilinear` on the mask. The direction is decided on the total pixel count, so a
+resize that grows one side and shrinks the other follows the dominant one; in the crop modes
+it is measured *after* the crop, and in the pad modes on the scaled content rather than on the
+padded canvas. Since `bilinear` produces soft edges, pick `nearest-exact` explicitly when a
+mask must stay strictly binary. Any method other than `auto` is applied as chosen to both
+inputs.
+
 ### Inputs
 
 | Input | Type | Description |
@@ -976,7 +988,7 @@ slightly from the source.
 | `image` | IMAGE (optional) | The image to resize. |
 | `mask` | MASK (optional) | The mask to resize. |
 | `mode` | dynamic COMBO | The resize strategy; see the mode list below. Default `do nothing`. |
-| `upscale_method` | COMBO | Interpolation used for every rescale: `nearest-exact`, `bilinear`, `area`, `bicubic`, `lanczos`. |
+| `upscale_method` | COMBO | Interpolation used for every rescale: `auto` (default), `nearest-exact`, `bilinear`, `area`, `bicubic`, `lanczos`. `auto` picks the filter per input, see above. |
 | `divisible_by` | INT | The final width and height are rounded to the nearest multiple of this value (1–1024, default `1` = no rounding). Ignored by `do nothing`. |
 
 ### Modes

@@ -39,6 +39,20 @@ def round_to_multiple(value: int, divisor: int) -> int:
         return value
     return max(divisor, int(round(value / divisor)) * divisor)
 
+# resolve the "auto" upscale method into a concrete one, based on what is being rescaled
+# and on the direction of the rescale (the total pixel count decides, so a resize that grows
+# one axis and shrinks the other follows the dominant direction):
+#   - masks     -> bilinear  (smooth edges, no ringing / no out-of-range values)
+#   - images up -> lanczos   (sharpest, best detail retention when enlarging)
+#   - images down -> area    (box average over the whole footprint, no aliasing / moire)
+# any explicitly picked method is returned unchanged.
+def resolve_upscale_method(upscale_method: str, is_mask: bool, old_width: int, old_height: int, new_width: int, new_height: int) -> str:
+    if upscale_method != "auto":
+        return upscale_method
+    if is_mask:
+        return "bilinear"
+    return "lanczos" if new_width * new_height >= old_width * old_height else "area"
+
 # crop a [B, C, H, W] tensor to the aspect ratio of (width, height), keeping the excess
 # according to crop_position (center, top, bottom, left, right). Returns a view (no copy).
 def crop_to_aspect(samples, width: int, height: int, crop_position: str):
@@ -74,14 +88,17 @@ def crop_to_aspect(samples, width: int, height: int, crop_position: str):
 def resize_image_cover(image, width: int, height: int, upscale_method: str, crop_position: str):
     samples = image.movedim(-1, 1)  # [B, H, W, C] -> [B, C, H, W]
     samples = crop_to_aspect(samples, width, height, crop_position)
-    samples = comfy.utils.common_upscale(samples, width, height, upscale_method, "disabled")
+    # "auto" is resolved after the crop, so the direction is measured on what is actually rescaled
+    method = resolve_upscale_method(upscale_method, False, samples.shape[-1], samples.shape[-2], width, height)
+    samples = comfy.utils.common_upscale(samples, width, height, method, "disabled")
     return samples.movedim(1, -1)  # [B, C, H, W] -> [B, H, W, C]
 
 # rescale a MASK tensor [B, H, W] to (width, height), cropping the excess by crop_position
 def resize_mask_cover(mask, width: int, height: int, upscale_method: str, crop_position: str):
     samples = mask.unsqueeze(1)  # [B, H, W] -> [B, 1, H, W]
     samples = crop_to_aspect(samples, width, height, crop_position)
-    samples = comfy.utils.common_upscale(samples, width, height, upscale_method, "disabled")
+    method = resolve_upscale_method(upscale_method, True, samples.shape[-1], samples.shape[-2], width, height)
+    samples = comfy.utils.common_upscale(samples, width, height, method, "disabled")
     # common_upscale drops the channel dim for single-channel lanczos, keeps it otherwise
     if samples.ndim == 4:
         samples = samples.squeeze(1)
@@ -100,13 +117,15 @@ def parse_hex_color(color: str) -> tuple[float, float, float]:
 # rescale an IMAGE tensor [B, H, W, C] to exactly (width, height), no cropping or padding
 def resize_image_plain(image, width: int, height: int, upscale_method: str):
     samples = image.movedim(-1, 1)  # [B, H, W, C] -> [B, C, H, W]
-    samples = comfy.utils.common_upscale(samples, width, height, upscale_method, "disabled")
+    method = resolve_upscale_method(upscale_method, False, samples.shape[-1], samples.shape[-2], width, height)
+    samples = comfy.utils.common_upscale(samples, width, height, method, "disabled")
     return samples.movedim(1, -1)  # [B, C, H, W] -> [B, H, W, C]
 
 # rescale a MASK tensor [B, H, W] to exactly (width, height), no cropping or padding
 def resize_mask_plain(mask, width: int, height: int, upscale_method: str):
     samples = mask.unsqueeze(1)  # [B, H, W] -> [B, 1, H, W]
-    samples = comfy.utils.common_upscale(samples, width, height, upscale_method, "disabled")
+    method = resolve_upscale_method(upscale_method, True, samples.shape[-1], samples.shape[-2], width, height)
+    samples = comfy.utils.common_upscale(samples, width, height, method, "disabled")
     if samples.ndim == 4:  # single-channel lanczos drops the channel dim
         samples = samples.squeeze(1)
     return samples  # [B, H, W]
@@ -145,7 +164,9 @@ def resize_image_pad(image, width: int, height: int, upscale_method: str, pad_co
     new_width = max(1, round(old_width * ratio))
     new_height = max(1, round(old_height * ratio))
 
-    samples = comfy.utils.common_upscale(samples, new_width, new_height, upscale_method, "disabled")
+    # "auto" is resolved against the fitted size, which is what is actually rescaled (the padding is not)
+    method = resolve_upscale_method(upscale_method, False, old_width, old_height, new_width, new_height)
+    samples = comfy.utils.common_upscale(samples, new_width, new_height, method, "disabled")
 
     batch, channels = samples.shape[0], samples.shape[1]
     fill = list(parse_hex_color(pad_color)) + [1.0]  # extra channel (alpha) padded opaque
@@ -168,7 +189,8 @@ def resize_mask_pad(mask, width: int, height: int, upscale_method: str, pad_valu
     new_width = max(1, round(old_width * ratio))
     new_height = max(1, round(old_height * ratio))
 
-    samples = comfy.utils.common_upscale(samples, new_width, new_height, upscale_method, "disabled")
+    method = resolve_upscale_method(upscale_method, True, old_width, old_height, new_width, new_height)
+    samples = comfy.utils.common_upscale(samples, new_width, new_height, method, "disabled")
     if samples.ndim == 3:  # single-channel lanczos drops the channel dim
         samples = samples.unsqueeze(1)
 
@@ -532,7 +554,8 @@ class ResizeImageMask(io.ComfyNode):
                         io.Color.Input("pad_color", default="#000000"),
                     ]),
                 ]),
-                io.Combo.Input("upscale_method", options=["nearest-exact", "bilinear", "area", "bicubic", "lanczos"], default="nearest-exact"),
+                io.Combo.Input("upscale_method", options=["auto", "nearest-exact", "bilinear", "area", "bicubic", "lanczos"], default="auto",
+                               tooltip="Rescaling filter; \"auto\" picks the best one for each input: lanczos for images being enlarged, area for images being shrunk, bilinear for masks"),
                 io.Int.Input("divisible_by", default=1, min=1, max=1024, step=1),
             ],
             outputs=[
