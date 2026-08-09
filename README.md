@@ -1395,3 +1395,58 @@ images it produces a 3 × 3 grid, the two spare cells filled with `color`.
 | Output | Type | Description |
 |---|---|---|
 | `grid` | IMAGE | The composed grid, as a single image (batch of 1); a 1×1 pixel of `color` when the input batch is empty. |
+
+---
+
+## Primitive
+
+![Primitive node](images/Primitive.png)
+
+A single constant value whose **type is chosen per node**: `INT`, `FLOAT`, `BOOLEAN` or
+`STRING`. Instead of picking a different node for each type, one node is dropped into the
+graph and its type — plus, for the numeric types, the minimum, maximum and step of its
+widget — is set from the **Edit primitive** right-click dialog. The node then shows exactly
+one `value` widget of the chosen type and an output labelled with that type, so it behaves
+like the matching core primitive node.
+
+Every type keeps its **own** stored value, so switching back and forth never destroys the
+others; the value shown is carried over and converted when the type changes (a number becomes
+`true` unless it is zero, `false` and an empty string become `0`, and so on), clamped to the
+current minimum/maximum. Changing the type drops the output wires the new type is not valid
+for and keeps the compatible ones.
+
+The minimum, maximum and step are a display setting only: they constrain the widget in the
+editor, they are not enforced when a value arrives through the input socket. They are shared
+between `INT` and `FLOAT` (switching between the two carries the range over, rounded to whole
+numbers for `INT`) and are ignored by `BOOLEAN` and `STRING`.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `value` | INT / FLOAT / BOOLEAN / STRING | The value returned by the node. The widget's type — and, for the numeric types, its range and step — follow the setting chosen in the **Edit primitive** dialog. Like every widget it can also be driven by a wire. Each type stores its value in its own input (`int_value`, `float_value`, `boolean_value`, `string_value`); only the selected one is shown, under the name `value`. |
+| `primitive_type` | COMBO (hidden) | The selected type, managed by the **Edit primitive** dialog. Never shown on the node. Default: `FLOAT`. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `value` | INT / FLOAT / BOOLEAN / STRING | The value, typed as the selected primitive type — the output slot is relabelled accordingly (`INT`, `FLOAT`, …). |
+
+### Frontend
+
+- The node carries one widget per supported type but shows only the one matching the selected
+  type, labelled `value`; the others — and their input sockets — are hidden and cannot be
+  connected.
+
+Right-click menu option on the node:
+
+- **Edit primitive** — opens a dialog with:
+  - **Type** — `INT`, `FLOAT`, `BOOLEAN` or `STRING`.
+  - **Minimum** / **Maximum** — the widget's bounds, shown for `INT` and `FLOAT` only. Leave
+    a field empty for no limit.
+  - **Step** — the increment applied by the widget's arrows and by dragging it. Defaults to
+    `1` for `INT` and `0.1` for `FLOAT`; for `FLOAT` it also sets how many decimals are shown.
+  - **Apply** confirms (also **Enter**), **Cancel** or **Escape** closes without changing
+    anything. A minimum greater than the maximum, or a step of zero or less, is refused with
+    a message.

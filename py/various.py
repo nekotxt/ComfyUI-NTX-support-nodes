@@ -4,6 +4,7 @@ import folder_paths
 
 import json
 import shutil
+import sys
 import torch
 from pathlib import Path
 from typing_extensions import override
@@ -324,6 +325,60 @@ class CheckNotNull(io.ComfyNode):
         else:
             return io.NodeOutput(True)
 
+PRIMITIVE_TYPES = ["INT", "FLOAT", "BOOLEAN", "STRING"]
+
+class Primitive(io.ComfyNode):
+    """A single primitive value whose type is chosen per node instance.
+
+    The node carries one widget per supported type; the frontend
+    (web/js/various.primitive.js) shows only the one matching 'primitive_type',
+    relabels it to "value" and retypes the output. 'primitive_type' itself is a
+    hidden, socketless widget, edited from the "Edit primitive" RMB dialog.
+    Keeping one natively-typed widget per type (instead of a single widget the
+    frontend rebuilds) means every value is validated and serialized by its own
+    real type, and switching type back and forth never mangles a value.
+    """
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}Primitive",
+            display_name=f"{ADDON_PREFIX} Primitive",
+            description="A primitive value of a user-selectable type. Right-click the node and pick "
+                        "'Edit primitive' to choose the type (INT, FLOAT, BOOLEAN, STRING) and, for the "
+                        "numeric types, the minimum / maximum / step of the widget.",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[
+                # Hidden and socketless: driven by the "Edit primitive" dialog, never shown on the node.
+                io.Combo.Input("primitive_type", options=PRIMITIVE_TYPES, default="FLOAT",
+                               socketless=True, extra_dict={"hidden": True},
+                               tooltip="Type of the value returned by this node"),
+                # One widget per type; the frontend hides all but the active one. The bounds are
+                # deliberately wide open here — the per-node min/max chosen in the dialog is a frontend
+                # concern, so tightening one later can never invalidate an already saved workflow.
+                io.Int.Input("int_value", default=0, min=-sys.maxsize, max=sys.maxsize),
+                io.Float.Input("float_value", default=0.0, min=-sys.maxsize, max=sys.maxsize, step=0.1),
+                io.Boolean.Input("boolean_value", default=False),
+                io.String.Input("string_value", default=""),
+            ],
+            outputs=[
+                # Wildcard: the concrete type is set on the frontend slot, which is what link
+                # validation on both sides actually goes by.
+                io.AnyType.Output("value"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, primitive_type="FLOAT", int_value=0, float_value=0.0,
+                boolean_value=False, string_value="") -> io.NodeOutput:
+        if primitive_type == "INT":
+            return io.NodeOutput(int(int_value))
+        if primitive_type == "BOOLEAN":
+            return io.NodeOutput(bool(boolean_value))
+        if primitive_type == "STRING":
+            return io.NodeOutput(string_value)
+        return io.NodeOutput(float(float_value))
+
 # ===== INITIALIZATION =====================================================================================================================
 
 def get_nodes_list() -> list[type[io.ComfyNode]]:
@@ -339,4 +394,5 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         IsNull,
         IsEmpty,
         CheckNotNull,
+        Primitive,
     ]
