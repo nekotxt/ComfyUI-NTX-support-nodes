@@ -9,7 +9,7 @@ import torch
 from pathlib import Path
 from typing_extensions import override
 
-from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, SETTINGS_DIR, MODELS_DIR
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, SETTINGS_SOLVER, MODELS_DIR
 from .logging import logger
 from .utils import LORA_STACK_TYPE, notify_user
 
@@ -203,8 +203,7 @@ class CollectModelNtxdata(io.ComfyNode):
             for (lora_name, _, _) in lora_stack:
                 models_list.append(folder_paths.get_full_path_or_raise("loras", lora_name))
 
-        global SETTINGS_DIR
-        download_dir = SETTINGS_DIR / "downloads"
+        download_dir = SETTINGS_SOLVER.solve_path("downloads", force_user=True)
         download_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Copy to {download_dir}")
 

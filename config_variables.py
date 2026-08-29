@@ -32,14 +32,41 @@ MODELS_DIR = Path.cwd() / "models"
 
 # user configuration files
 
-SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
-if not SETTINGS_DIR.exists():
-    SETTINGS_DIR = Path(__file__).parent / "ntx_data"
-    #SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
-print(f"[INFO] [{ADDON_NAME}] Load settings from {SETTINGS_DIR}")
+class SettingsSolver():
+    """Resolve the settings files and directories of the node pack.
+
+    Every setting is looked up in the user directory first (input/ntx_data of the
+    ComfyUI installation) and falls back to the ntx_data directory shipped with the
+    node pack. The choice is made per file / directory, so a user directory holding
+    a single overridden file still gets every other setting from the node pack.
+
+    When the setting exists in neither location the user path is returned, so
+    anything created later on (a saved preset, a new directory) lands in the user
+    directory rather than inside the node pack.
+    """
+
+    def __init__(self, user_dir:Path, addon_dir:Path):
+        self.user_dir = user_dir
+        self.addon_dir = addon_dir
+
+    def solve_path(self, subpath:str, force_user:bool=False) -> Path:
+        # the user copy wins as soon as it exists, whatever it is (file or directory)
+        user_path = self.user_dir / subpath
+        if force_user:
+            return user_path
+        if user_path.exists():
+            return user_path
+        addon_path = self.addon_dir / subpath
+        if addon_path.exists():
+            return addon_path
+        # nothing to read anywhere : point at the user directory, where new files go
+        return user_path
+
+SETTINGS_SOLVER = SettingsSolver(Path.cwd() / "input" / "ntx_data", Path(__file__).parent / "ntx_data")
+print(f"[INFO] [{ADDON_NAME}] Load settings from {SETTINGS_SOLVER.user_dir}, with fallback on {SETTINGS_SOLVER.addon_dir}")
 
 CONFIGURATION = {}
-configuration_file = SETTINGS_DIR / "config.yaml"
+configuration_file = SETTINGS_SOLVER.solve_path("config.yaml")
 if configuration_file.is_file():
     try:
         configuration_text = configuration_file.read_text(encoding="utf-8")

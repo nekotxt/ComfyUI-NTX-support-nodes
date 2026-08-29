@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_DIR
+from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_SOLVER
 from .logging import logger
 from .utils import load_list_models, load_list_samplers, load_list_schedulers, find_model_file
 from ..scripts.ntxdata_file import NtxDataFile
@@ -268,7 +268,7 @@ async def save_modelinfo_data(request):
 EDIT_MODEL_INFO_TYPES = ["checkpoints", "diffusion_models", "loras", "vae", "text_encoders"]
 
 # Templates offered when a model has no side-car .txt yet (flat *.txt files).
-MODELDATA_TEMPLATES_DIR = SETTINGS_DIR / "modeldata"
+MODELDATA_TEMPLATES_DIR = SETTINGS_SOLVER.solve_path("modeldata")
 
 def _open_in_default_editor(path: Path):
     # Open a file with the OS default application for its type.

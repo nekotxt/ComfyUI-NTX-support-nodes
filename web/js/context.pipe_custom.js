@@ -9,7 +9,7 @@ import { registerNodeMenu, registerCanvasMenu } from "./menu.js";
 // data types selectable for PipeCustom inputs — edit to customize
 export const PIPE_DATA_TYPES = ["IMAGE", "MASK", "LATENT", "MODEL", "CLIP", "VAE", "CONDITIONING",
                                 "INT", "FLOAT", "STRING", "BOOLEAN",
-                                "LORA_STACK", "CONTROL_NET_STACK", "DICT", "LIST", "*"]
+                                "LORA_STACK", "CONTROL_NET_STACK", "DICT", "LIST", "VIDEO", "AUDIO", "*"]
 // max custom inputs/outputs per PipeCustom node (mirrored in py/context.py — the
 // backend pre-declares this many wildcard outputs, so keep the two values in sync)
 export const PIPE_MAX_SLOTS = 30

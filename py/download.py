@@ -1,6 +1,6 @@
 from comfy_api.latest import ComfyExtension, io
 
-from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, MODELS_DIR, SETTINGS_DIR, API_TOKENS
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, MODELS_DIR, SETTINGS_SOLVER, API_TOKENS
 from .logging import logger
 
 from ..scripts.ms_download_models import download_models_from_text_list
@@ -47,13 +47,13 @@ class DownloadModelsList(io.ComfyNode):
 
 # ===== MODELS CATALOGUE =====================================================================================================================
 
+# Ready-made download lists (*.dwlst), offered as a whole by the same dialog.
+DOWNLOADS_DIR = SETTINGS_SOLVER.solve_path("downloads", force_user=True)
+DOWNLOADS_EXT = ".dwlst"
+
 # User-maintained catalogue of downloadable models, read by the frontend picker
 # (web/js/download.models_list.js) to fill the "Append models" dialog.
-MODELS_LIST_FILE = SETTINGS_DIR / "downloads" / "_full_list.txt"
-
-# Ready-made download lists (*.dwlst), offered as a whole by the same dialog.
-DOWNLOADS_DIR = SETTINGS_DIR / "downloads"
-DOWNLOADS_EXT = ".dwlst"
+MODELS_LIST_FILE = DOWNLOADS_DIR / ("_full_list.txt")
 
 def parse_models_text(text: str) -> list[dict]:
     """Split a download list text into entries.
@@ -106,7 +106,7 @@ def load_models_catalogue() -> list[dict]:
     return entries
 
 def load_downloads_lists() -> list[dict]:
-    """Read every *.dwlst file of SETTINGS_DIR/downloads.
+    """Read every *.dwlst file of the settings "downloads" directory.
 
     Each file is a plain download list (same format as the models_list widget)
     and is returned as {"name": <file stem>, "entries": [...]} : the name fills

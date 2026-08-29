@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from PIL import Image, ImageOps
 
-from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_DIR
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_SOLVER
 from .logging import logger
 from .utils import notify_user, DICT_TYPE
 
@@ -15,7 +15,7 @@ from .utils import notify_user, DICT_TYPE
 # directory holding the nested prompt library files. Every *.yaml / *.yml file in
 # here is scanned and merged: dictionary keys are treated as nested categories and
 # list items as the leaves of the tree.
-PROMPTS_DIR = SETTINGS_DIR / "prompts"
+PROMPTS_DIR = SETTINGS_SOLVER.solve_path("prompts", force_user=True)
 
 # shown in the combobox when the file is missing or empty, so the node still loads
 NO_PROMPTS_OPTION = "(no prompts found)"

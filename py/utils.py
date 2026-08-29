@@ -12,7 +12,7 @@ from pathlib import Path
 from ruamel.yaml import YAML
 yaml = YAML(typ='safe', pure=True)
 
-from ..config_variables import ADDON_NAME, ADDON_PREFIX, API_PREFIX, ADDON_CATEGORY, SETTINGS_DIR
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, API_PREFIX, ADDON_CATEGORY, SETTINGS_SOLVER
 from .logging import logger
 
 from server import PromptServer
@@ -139,7 +139,7 @@ def load_list_schedulers():
 
 # ===== UTILITY FUNCTIONS FOR IMAGES ======================================================================================================
 
-image_presets_path = SETTINGS_DIR / "image_presets.yaml"
+image_presets_path = SETTINGS_SOLVER.solve_path("image_presets.yaml")
 IMAGE_ASPECT_RATIOS = ["1:1 (Square)"]
 IMAGE_SIZES = ["512x512", "512x768", "768x512", "832x1216", "1216x832", "896x1152", "1152x896", "1024x1024", "1024x1536", "1536x1024"]
 if image_presets_path.is_file():

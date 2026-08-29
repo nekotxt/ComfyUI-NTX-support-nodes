@@ -10,12 +10,11 @@ import ruamel.yaml
 
 from pathlib import Path
 
-from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_DIR, MODEL_TYPES, INCLUDE_MODELS_FROM_CATALOGUE
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_SOLVER, MODEL_TYPES, INCLUDE_MODELS_FROM_CATALOGUE
 from .logging import logger#log_info, log_warning
 from .utils import clone_data, clean_path, load_list_vaes, load_list_samplers, load_list_schedulers, DICT_TYPE
 from ..scripts.ntxdata_file import NtxDataFile
 
-#SETTINGS_DIR = Path.cwd() / "input" / "ntx_data"
 #MODEL_TYPES = ["vae", "checkpoints", "loras"]
 
 # ===== LOAD MODELS FILE =========================================================================================================
@@ -25,8 +24,7 @@ def _get_full_model_id(model_type:str, model_id:str):
 
 class ModelsManager():
     def __init__(self):
-        global SETTINGS_DIR
-        self.models_file = SETTINGS_DIR / "catalogue_of_ntxdata.json"
+        self.models_file = SETTINGS_SOLVER.solve_path("catalogue_of_ntxdata.json", force_user=True)
         self.catalogue = {}
         self.models_by_ID = {}
         self.categories_list = []
@@ -178,10 +176,9 @@ class LoadCheckpointInfo(io.ComfyNode):
 
 class CharactersManager():
     def __init__(self):
-        global SETTINGS_DIR
-        self.models_file = SETTINGS_DIR / "catalogue_of_ntxdata.json"
-        self.extra_chars_file = SETTINGS_DIR / "extra_chars.yaml"
-        self.characters_file = SETTINGS_DIR / "characters.json"        
+        self.models_file = SETTINGS_SOLVER.solve_path("catalogue_of_ntxdata.json", force_user=True)
+        self.extra_chars_file = SETTINGS_SOLVER.solve_path("extra_chars.yaml", force_user=True)
+        self.characters_file = SETTINGS_SOLVER.solve_path("characters.json", force_user=True)
 
     def load(self):
         if self.characters_file.is_file():
@@ -367,7 +364,7 @@ async def get_prompt_for_char_option(request):
 
 # ===== DEBUG ========================================================================================================================
 
-# DEBUGFILE_MODELS = SETTINGS_DIR / "log_models.txt"
+# DEBUGFILE_MODELS = SETTINGS_SOLVER.solve_path("log_models.txt")
 # with open(DEBUGFILE_MODELS, 'w', encoding='utf-8') as f:
 #     f.write("MODELS\n")
 #     for modelid in g_models_manager.models_by_ID:
@@ -376,7 +373,7 @@ async def get_prompt_for_char_option(request):
 #     for cat in g_models_manager.get_model_categories_list():
 #         f.write(cat + "\n")
 
-# DEBUGFILE_CHARACTERS = SETTINGS_DIR / "log_characters.txt"
+# DEBUGFILE_CHARACTERS = SETTINGS_SOLVER.solve_path("log_characters.txt")
 # with open(DEBUGFILE_CHARACTERS, 'w', encoding='utf-8') as f:
 #     for char in g_characters_manager.get_char_names():
 #         f.write(char + " [ ")

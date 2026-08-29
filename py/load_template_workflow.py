@@ -3,7 +3,7 @@
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
 
-from ..config_variables import API_PREFIX, SETTINGS_DIR, TEMPLATES_SUBDIR
+from ..config_variables import API_PREFIX, SETTINGS_SOLVER, TEMPLATES_SUBDIR
 from .logging import logger
 
 # ===== WORKFLOW TEMPLATE PRESETS ==========================================================================================================
@@ -19,7 +19,7 @@ from .logging import logger
 # (web/js/load_template_workflow.js). The ".json" extension is optional — the
 # frontend matches the entries against the templates it actually found and
 # reports the ones that are missing.
-PRESETS_FILE = SETTINGS_DIR / "workflow_template_presets.yaml"
+PRESETS_FILE = SETTINGS_SOLVER.solve_path("workflow_template_presets.yaml", force_user=True)
 
 
 def _yaml():

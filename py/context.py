@@ -9,7 +9,7 @@ from io import StringIO
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
 
-from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_DIR
+from ..config_variables import ADDON_NAME, ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, SETTINGS_SOLVER
 from .logging import logger
 from .utils import clone_data, load_list_image_sizes, extract_image_size, notify_user, DICT_TYPE, LIST_TYPE, LORA_STACK_TYPE, CONTROL_NET_STACK_TYPE
 
@@ -540,7 +540,7 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
 #
 # The value is the property type; an empty one (or the '*' wildcard, which YAML
 # needs quoted) means "any type".
-CUSTOMPIPE_TEMPLATES_FILE = SETTINGS_DIR / "custom_pipe_presets.yaml"
+CUSTOMPIPE_TEMPLATES_FILE = SETTINGS_SOLVER.solve_path("custom_pipe_presets.yaml", force_user=True)
 
 # Written at the top of the file every time it is saved. Comments already in the
 # file are not kept : a save always ends up with exactly these four lines.
