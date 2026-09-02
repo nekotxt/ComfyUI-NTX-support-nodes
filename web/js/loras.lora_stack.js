@@ -1567,8 +1567,19 @@ function makeLoraWidget(node, inputName, defaultValue) {
 // instead of the LoRA list. rebuildLoraUI() replaces whatever widget currently
 // holds loras_data with a fresh custom widget, preserving the value.
 
+// True while the node is still part of its graph. `node.graph` alone is not a
+// liveness test: the frontend reuses a single LGraph instance for every
+// workflow tab and LGraph.clear() leaves `node.graph` pointing at it, so a node
+// dropped by a graph reload still looks attached. Rebuilding such a node would
+// register a new DOM widget for it (addDOMWidget registers whenever
+// `node.graph` is set), and the orphan element then renders on top of the live
+// nodes — the ghost widget seen after loading a template workflow.
+function isNodeAlive(node) {
+    return !!node?.graph && node.graph.getNodeById(node.id) === node;
+}
+
 function rebuildLoraUI(node, force = false) {
-    if (!node.widgets) return;
+    if (!node.widgets || !isNodeAlive(node)) return;
     const idx = node.widgets.findIndex(w => w.name === "loras_data");
     if (idx === -1) return;
 
@@ -1686,7 +1697,7 @@ app.registerExtension({
         // DOM widgets mount asynchronously after load; verify shortly after
         // and force a rebuild if the element never attached.
         setTimeout(() => {
-            if (node.graph !== app.graph) return;   // tab switched away again
+            if (!isNodeAlive(node)) return;   // graph reloaded / tab switched away
             const w = node.widgets?.find(x => x.name === "loras_data");
             if (!w) return;
             if (!w.__isLoraStackUI || (w.element && !w.element.isConnected)) {
