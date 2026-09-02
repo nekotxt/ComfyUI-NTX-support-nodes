@@ -1,4 +1,4 @@
-# ComfyUI-NTX-support-nodes 
+# ComfyUI-NTX-support-nodes
 
 A collection of custom nodes for ComfyUI. All nodes are registered with the `NTX` prefix
 (e.g. *NTX Pipe Custom*) and appear under the **NTX-support-nodes** category in the node menu.
