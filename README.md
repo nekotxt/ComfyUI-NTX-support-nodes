@@ -115,6 +115,38 @@ Saving rewrites the yaml file in place, keeping its comments, its entry order an
 an overwritten preset's name (names are matched case-insensitively, so saving `anima` over
 `Anima` updates that preset instead of adding a second one).
 
+### Cached / executed node tints
+
+Shows what ComfyUI's execution cache did with the last run by tinting the nodes on the canvas:
+
+- **green** — the node was skipped and its cached output reused;
+- **orange** — the node actually executed;
+- **no tint** — the node took no part in the run at all: not reached from the queued outputs,
+  muted, or bypassed.
+
+A node is skipped when neither its own inputs nor those of *any* of its ancestors changed since
+the run that filled the cache, so a single edited value upstream turns the whole chain below it
+orange. The colors answer, at a glance, why a run was quicker (or slower) than expected.
+
+The green side is reported by the server before anything executes, so it appears as soon as the
+run starts; the orange side fills in progressively, node after node, as the run proceeds. Both
+stay on screen once the run has finished — which is when they are most useful to read — and are
+cleared when the next run starts. A subgraph node is tinted green only when *everything* inside
+it was reused; a single inner node having executed turns it orange.
+
+While something is tinted, a small **legend** recalling the two colors is drawn in the bottom
+left corner of the canvas. Each run also logs to the browser console the number of skipped nodes
+and their ids.
+
+Right-click menu option on the empty canvas:
+
+- **Tint cached / executed nodes** — turns the tints (and their legend) on and off. On by
+  default, and the choice is remembered by the browser across reloads.
+
+The tints are painted over the nodes at display time only: nothing is written to the nodes
+themselves, so no color can end up in a saved workflow. They are drawn on the graph canvas and
+therefore do not appear when ComfyUI's experimental **Vue nodes** rendering mode is enabled.
+
 ---
 
 ## PipeCustom
