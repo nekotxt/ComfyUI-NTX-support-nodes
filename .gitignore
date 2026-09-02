@@ -4,3 +4,4 @@ __pycache__/*
 .vscode/launch.json
 *.pyc
 py/__pycache__/*
+.claude/
