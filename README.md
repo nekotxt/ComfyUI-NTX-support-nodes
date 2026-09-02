@@ -1482,3 +1482,64 @@ Right-click menu option on the node:
   - **Apply** confirms (also **Enter**), **Cancel** or **Escape** closes without changing
     anything. A minimum greater than the maximum, or a step of zero or less, is refused with
     a message.
+
+---
+
+## LoadImageAndCrop
+
+![LoadImageAndCrop node](images/LoadImageAndCrop.png)
+
+Loads an image from the ComfyUI **input** folder and returns it together with its mask, with an
+optional **crop rectangle** drawn directly on the node's image preview. Apart from the crop, the
+node behaves exactly like the standard *Load Image*: the same file list and **choose file to
+upload** button, and the same right-click **Open in Mask Editor** entry to paint a mask — the
+editor writes its result back into the `image` widget, so painting a mask and cropping can be
+combined freely. The image decoding is delegated to the core loader, so animated formats, EXIF
+orientation and alpha channels are handled identically.
+
+The rectangle is expressed in pixels of the loaded image and is always clamped to it, so a
+workflow reloaded against a smaller image never keeps a rectangle hanging outside — it is shrunk
+to fit, or dropped entirely when nothing is left of it. When no rectangle is set (its width or
+height is `0`), the whole image is returned untouched.
+
+The mask follows the crop when it covers the image. An image **without an alpha channel** has no
+real mask — the loader returns a placeholder instead — and in that case the node outputs an empty
+mask of the cropped size rather than cropping the placeholder.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `image` | COMBO | The image file to load, picked among the images of the input folder, or uploaded with the **choose file to upload** button. Files produced by the mask editor are accepted too. |
+| `crop_x` | INT (hidden) | Left edge of the crop rectangle, in pixels of the loaded image (0–16384, default `0`). Managed by the frontend, not edited by hand. |
+| `crop_y` | INT (hidden) | Top edge of the crop rectangle, in pixels (0–16384, default `0`). Managed by the frontend, not edited by hand. |
+| `crop_width` | INT (hidden) | Width of the crop rectangle, in pixels (0–16384, default `0` = no crop). Managed by the frontend, not edited by hand. |
+| `crop_height` | INT (hidden) | Height of the crop rectangle, in pixels (0–16384, default `0` = no crop). Managed by the frontend, not edited by hand. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `image` | IMAGE | The loaded image, cropped to the rectangle when one is set, otherwise whole. |
+| `mask` | MASK | The image's mask, cropped the same way; an empty mask of the cropped size when the image carries no alpha channel. |
+
+### Frontend
+
+- The crop rectangle is drawn and edited **on the image preview**, which dims everything the crop
+  leaves out and shows the crop size in image pixels above its top edge:
+  - **drag on the image** where there is no rectangle yet to draw a new one;
+  - **drag inside the rectangle** to move it, keeping its size;
+  - **drag one of the eight handles** to resize it — the four corners, plus the middle of each
+    side (the side handles are left out on a side too short to hold them).
+  The mouse cursor tells which of the three a drag would do. The rectangle never leaves the image,
+  and dragging on the preview edits the crop instead of moving the node.
+- **clear crop** — removes the rectangle, so the whole image is returned.
+- **crop snap** — constrains the **width and height** of the rectangle to a multiple of the
+  selected value: `1` (default, free), `2`, `4`, `5`, `8`, `10`, `16`, `32`, `50` or `100`.
+  Snapping applies while drawing and resizing; moving the rectangle keeps its size and is
+  unaffected. A side is rounded to the *nearest* multiple, never grows past the image border and
+  never shrinks below one step. The setting travels with the workflow but is deliberately kept out
+  of the prompt sent to the server, so changing it never re-runs the node.
+- The crop is only offered for a **single image**. A multi-frame file (an animated GIF or WEBP) is
+  drawn by ComfyUI as a grid of thumbnails, which a single rectangle cannot describe; the stored
+  rectangle is left alone and still applied when the workflow runs.
