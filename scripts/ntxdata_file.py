@@ -1,4 +1,4 @@
-# VER 1.2
+# VER 1.3
 
 """
 Example of ntxdata file:
@@ -76,7 +76,9 @@ def _sort_keys(data, list_of_ordered_keys):
 
 class NtxDataFile:
     
-    def __init__(self, path:Path = None, data:dict = {}):
+    def __init__(self, path:Path = None, data:dict = None):
+        if data is None:
+            data = {}
         _replace_nulls(data) # Ensure there are no nulls
         self.path = path
         self.data = data
@@ -158,8 +160,14 @@ class NtxDataFile:
                     notes_part = yaml_part
                 else:
                     raise Exception(f"Failed to parse YAML in {path}: {e}")
-        if data is None:
+        if data is None: # invalid yaml parsing
             data = {}
+        elif type(data) is str: # the yaml is just a string, then convert it to a note
+            if notes_part == "":
+                notes_part = yaml_part
+                data = {}
+            else:
+                raise Exception(f"Failed to parse YAML in {path}: {e}")
         if notes_part:
             data["notes"] = notes_part
 
