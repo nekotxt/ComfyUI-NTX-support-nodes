@@ -1543,3 +1543,73 @@ mask of the cropped size rather than cropping the placeholder.
 - The crop is only offered for a **single image**. A multi-frame file (an animated GIF or WEBP) is
   drawn by ComfyUI as a grid of thumbnails, which a single rectangle cannot describe; the stored
   rectangle is left alone and still applied when the workflow runs.
+
+---
+
+## GroupControl
+
+![GroupControl node](images/GroupControl.png)
+
+A control panel for the **groups** of the workflow (found under **utils**): pick one or more
+groups by name, then mute, bypass, reset or run them in one click. It is meant for workflows
+built as a chain of stages — switch a stage off, or run only the stage being worked on,
+without hunting for its nodes.
+
+The node is **virtual**: it exists only in the editor and is removed from the prompt when the
+workflow is queued, so it never executes, costs nothing and cannot change a result. Its
+buttons act on the canvas the moment they are pressed — a group, and the muted or bypassed
+state of a node, are editor notions the server never hears about, so they can never be
+applied *during* a run.
+
+It acts on the graph it **lives in**: dropped inside a subgraph, it lists and drives that
+subgraph's groups. A group holds the nodes whose centre lies inside its frame (the rule
+LiteGraph itself uses when a group is dragged), nested groups included; the Group Control
+node is always left out, so a panel sitting inside a group it drives never mutes itself.
+
+The selection is stored **by name**, so it survives save and reload, travels with a copy of
+the node and reads plainly in the workflow file. Two consequences: a name matching several
+groups acts on all of them, and **renaming a group breaks the link** — the stale name keeps
+its line in the picker, flagged `(missing)`, so it can be unticked (or the group renamed
+back).
+
+### Inputs
+
+The node has no inputs — the groups to act on are picked in the `groups` widget.
+
+### Outputs
+
+The node has no outputs — it acts on the canvas, not on data.
+
+### Frontend
+
+The `groups` widget shows the current selection: the group name when a single one is picked,
+the names joined when they are short enough, `N groups` otherwise, and `click to pick…` when
+nothing is selected. Clicking it opens the group checklist:
+
+- one line per group of the graph, marked **✔** when selected; clicking a line toggles it and
+  **keeps the menu open**, so several groups can be ticked in one pass;
+- **Select all** and **Select none**;
+- a selected name that no longer matches any group is listed last, flagged `(missing)`.
+
+Four buttons, side by side, act on every node held by the selected groups:
+
+- **Mute** — mutes them, exactly as **Ctrl+M** does on a selection: they are left out of the
+  prompt.
+- **Bypass** — bypasses them, as **Ctrl+B** does: they are skipped and their input is passed
+  through to their output.
+- **Reset** — sets them back to normal, undoing either of the two above.
+- **Queue** — runs **only** the output nodes those groups hold, plus everything feeding them.
+  Muted and bypassed output nodes are skipped, and output nodes nested inside a subgraph node
+  of the group are included. Only the queued outputs and their ancestors are validated, so an
+  unrelated broken or half-configured node elsewhere in the workflow cannot block the run.
+  The run is queued once, whatever the batch count set in the menu.
+
+Each action answers with a toast: how many nodes in how many groups it changed, or why there
+was nothing to do — no group picked, none of the stored names exists in this graph, the
+groups hold no node, or they hold no active output node to run.
+
+Right-click menu options on the node:
+
+- **Pick groups…** — the same checklist as the widget.
+- **Select the nodes of these groups** — selects on the canvas every node the picked groups
+  hold.
