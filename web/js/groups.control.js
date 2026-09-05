@@ -37,7 +37,9 @@ const NODE_ID = ADDON_PREFIX + "GroupControl";
 const CATEGORY = ADDON_NAME + "/utils";
 
 const PROP_GROUPS = "groups";       // node.properties.groups = ["group title", ...]
+const PROP_BUTTONS = "buttons";     // node.properties.buttons = ["mute", "queue", ...]
 const GROUPS_WIDGET = "groups";
+const ACTIONS_WIDGET = "actions";
 
 // LiteGraph node modes. BYPASS is an addition of ComfyUI and is missing from
 // some LiteGraph builds, so the three are spelled out rather than read from it.
@@ -316,6 +318,69 @@ async function queueGroups(node) {
     }
 }
 
+// ── Buttons shown on the node ─────────────────────────────────────────────────
+
+// The four actions, in the order they are laid out. Which ones a node actually
+// shows is chosen per node from its RMB menu and kept in node.properties.buttons
+// (absent = all four); the row splits its width between whichever are left, so
+// dropping one widens the others.
+const BUTTON_DEFS = [
+    { id: "mute", label: "Mute", run: (node) => applyMode(node, MODE_NEVER, "Mute") },
+    { id: "bypass", label: "Bypass", run: (node) => applyMode(node, MODE_BYPASS, "Bypass") },
+    { id: "reset", label: "Reset", run: (node) => applyMode(node, MODE_ALWAYS, "Reset") },
+    { id: "queue", label: "Queue", run: (node) => queueGroups(node) },
+];
+
+function getButtons(node) {
+    const stored = node.properties?.[PROP_BUTTONS];
+    if (!Array.isArray(stored)) return [...BUTTON_DEFS];    // never configured: all four
+    // filtered from BUTTON_DEFS, so the layout order never depends on the order
+    // the buttons were ticked in
+    return BUTTON_DEFS.filter((def) => stored.includes(def.id));
+}
+
+function setButtons(node, ids) {
+    node.properties = node.properties || {};
+    node.properties[PROP_BUTTONS] = BUTTON_DEFS.filter((def) => ids.includes(def.id)).map((def) => def.id);
+    refreshButtons(node);
+}
+
+// Push the choice onto the row widget and take the height back when no button is
+// left — a hidden widget is skipped by the layout, the hit test and the drawing.
+function refreshButtons(node) {
+    const widget = node.widgets?.find((w) => w.name === ACTIONS_WIDGET);
+    if (!widget) return;
+    widget.buttons = getButtons(node);
+    widget.hidden = widget.buttons.length === 0;
+    node.setSize([node.size[0], node.computeSize()[1]]);
+    node.setDirtyCanvas(true, true);
+}
+
+// Checklist of the four buttons, ticking what the node shows. Same mechanics as
+// the group picker: the menu stays open and each line relabels itself.
+function openButtonPicker(node, event) {
+    const selected = new Set(getButtons(node).map((def) => def.id));
+
+    const items = BUTTON_DEFS.map((def) => ({
+        content: pickerLabel(def.label, selected.has(def.id), false),
+        callback: function () {
+            const shown = !selected.has(def.id);
+            if (shown) selected.add(def.id);
+            else selected.delete(def.id);
+            setButtons(node, [...selected]);
+            this.textContent = pickerLabel(def.label, shown, false);
+            return true;    // keep the menu open
+        },
+    }));
+
+    new LiteGraph.ContextMenu(items, {
+        event,
+        title: "Buttons",
+        className: "dark",
+        scale: Math.max(1, app.canvas?.ds?.scale ?? 1),
+    });
+}
+
 // ── Action row widget ─────────────────────────────────────────────────────────
 
 // A widget type LiteGraph does not know stays the plain object it was given:
@@ -325,6 +390,7 @@ async function queueGroups(node) {
 
 function buttonRects(widget, width) {
     const count = widget.buttons.length;
+    if (!count) return [];
     const inner = width - 2 * ROW_MARGIN;
     const buttonWidth = (inner - ROW_GAP * (count - 1)) / count;
     return widget.buttons.map((button, i) => ({
@@ -344,13 +410,13 @@ function fitFont(ctx, text, maxWidth) {
     ctx.font = `${ROW_FONT_MIN_SIZE}px Arial`;
 }
 
-function addButtonRow(node, buttons) {
+function addButtonRow(node) {
     const widget = {
         type: "ntx_button_row",
-        name: "actions",
+        name: ACTIONS_WIDGET,
         value: null,
         serialize: false,
-        buttons,
+        buttons: getButtons(node),
 
         // called both with and without a width, hence the fallback
         computeSize(width) {
@@ -381,8 +447,8 @@ function addButtonRow(node, buttons) {
             const hit = buttonRects(this, clickedNode.size[0]).find(
                 (rect) => x >= rect.x && x <= rect.x + rect.width,
             );
-            if (!hit) return false;                     // in a gap: nothing to do
-            pointer.onClick = () => hit.button.run();   // fires on release, like a stock button
+            if (!hit) return false;                                 // in a gap: nothing to do
+            pointer.onClick = () => hit.button.run(clickedNode);    // fires on release, like a stock button
             return true;
         },
     };
@@ -421,12 +487,7 @@ function registerGroupControlNode() {
                 return true;                            // click handled
             };
 
-            addButtonRow(this, [
-                { label: "Mute", run: () => applyMode(this, MODE_NEVER, "Mute") },
-                { label: "Bypass", run: () => applyMode(this, MODE_BYPASS, "Bypass") },
-                { label: "Reset", run: () => applyMode(this, MODE_ALWAYS, "Reset") },
-                { label: "Queue", run: () => queueGroups(this) },
-            ]);
+            addButtonRow(this);
 
             const [width, height] = this.computeSize();
             this.setSize([Math.max(width, MIN_WIDTH), height]);
@@ -440,6 +501,7 @@ function registerGroupControlNode() {
             const size = super.computeSize(out);
             let height = WIDGETS_START_Y;
             for (const widget of this.widgets ?? []) {
+                if (widget.hidden) continue;    // skipped by the layout too
                 const widgetHeight = widget.computeSize
                     ? widget.computeSize(size[0])[1]
                     : LiteGraph.NODE_WIDGET_HEIGHT;
@@ -458,7 +520,8 @@ function registerGroupControlNode() {
             refreshWidget(this);
             // the content sets the height, whatever a workflow saved before it
             // was measured this way; the width stays as the user left it
-            this.setSize([Math.max(this.size[0], MIN_WIDTH), this.computeSize()[1]]);
+            this.size[0] = Math.max(this.size[0], MIN_WIDTH);
+            refreshButtons(this);   // restores the chosen buttons, and the height with them
         }
     }
 
@@ -473,6 +536,10 @@ registerNodeMenu((node) => {
         {
             content: "Pick groups…",
             callback: (value, options, event) => openGroupPicker(node, event),
+        },
+        {
+            content: "Buttons shown…",
+            callback: (value, options, event) => openButtonPicker(node, event),
         },
         {
             content: "Select the nodes of these groups",

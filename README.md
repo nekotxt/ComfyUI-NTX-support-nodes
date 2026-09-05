@@ -1591,7 +1591,9 @@ nothing is selected. Clicking it opens the group checklist:
 - **Select all** and **Select none**;
 - a selected name that no longer matches any group is listed last, flagged `(missing)`.
 
-Four buttons, side by side, act on every node held by the selected groups:
+Four buttons, side by side, act on every node held by the selected groups — which of them a
+node actually shows is chosen per node (see the right-click menu below), and the row splits
+its width between whichever are left, so a node kept to a single button gets it full width:
 
 - **Mute** — mutes them, exactly as **Ctrl+M** does on a selection: they are left out of the
   prompt.
@@ -1611,5 +1613,8 @@ groups hold no node, or they hold no active output node to run.
 Right-click menu options on the node:
 
 - **Pick groups…** — the same checklist as the widget.
+- **Buttons shown…** — checklist of the four buttons, ticking the ones this node displays
+  (all four until it is changed). Unticking them all leaves the node with its `groups` widget
+  alone, the row taking no space at all.
 - **Select the nodes of these groups** — selects on the canvas every node the picked groups
   hold.
