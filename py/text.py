@@ -1,6 +1,7 @@
 from comfy_api.latest import ComfyExtension, io, ui
 
 import datetime
+import os
 import re
 from pathlib import Path
 from typing_extensions import override
@@ -40,6 +41,22 @@ def _format_js_datetime(datetime_format:str):
         datetime_format = datetime_format.replace(k,v)
     return datetime.datetime.now().strftime(datetime_format)
 
+# Documents, for the description of every node formatting its text through
+# _replace_parameters(), the 'date:<format>' parameter handled below.
+DATE_PARAMETER_DOC = """
+    The parameter name 'date:<format>' is reserved: it is not looked up in the
+    dictionary, but replaced with the current date/time rendered with <format>.
+    For instance '%%date:YYYY-MM-DD%%' gives a text such as '2026-09-09'.
+    The placeholders recognised in <format> are:
+        YYYY, yyyy  4-digit year        MMMM  month name (January)
+        YY, yy      2-digit year        MMM   short month name (Jan)
+        DD, dd      day of the month    MM    month number
+        DDDD, dddd  day of the year     HH    hour (24-hour clock)
+        mm          minutes             ss    seconds
+    'hh' is accepted as well, but it is a 24-hour clock too, not a 12-hour one.
+    Any other character of <format> is kept as it is, so it can be used as a
+    separator ('%%date:YYYY_MM_DD-HH.mm%%')."""
+
 def _replace_parameters(text:str, parameters:dict):
     # replace double % first
     pattern = r'%%([^%]+)%%'
@@ -67,17 +84,20 @@ class ReplaceTextParameters(io.ComfyNode):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}ReplaceTextParameters",
             display_name=f"{ADDON_PREFIX} Replace Text Parameters",
-            description="""
+            description=f"""
     Replace text parameters.
     The parameters must be in the form '%%name%%' or '%name%'
     For instance, if text='in the style of %%artist%%'
     and parameters contains an entry 'artist': 'anime'
     then the returned text will be 'in the style of anime'
-    If the parameter name is not found in the dictionary, it will be replaced with an empty string.
+    If the parameter name is not found in the dictionary, it will be replaced with an empty string.{DATE_PARAMETER_DOC}
+    A multiline text is treated as a list of path segments: each line is formatted
+    and stripped on its own, blank results are dropped, and the remaining pieces
+    are joined with the path separator of the operating system.
     """,
             category=f"{ADDON_CATEGORY}/utils",
             inputs=[
-                io.String.Input("text", default=""),
+                io.String.Input("text", multiline=True, default=""),
                 DICT_TYPE.Input("parameters", optional=True),
             ],
             outputs=[
@@ -91,7 +111,11 @@ class ReplaceTextParameters(io.ComfyNode):
         if parameters is None:
             parameters = {}
 
-        result = _replace_parameters(text, parameters)
+        # Each line is formatted and stripped on its own; the pieces that are
+        # left after dropping the blank ones are joined as path segments.
+        pieces = [_replace_parameters(line, parameters).strip() for line in text.splitlines()]
+        result = os.sep.join(piece for piece in pieces if piece != "")
+
         return io.NodeOutput(result, ui=ui.PreviewText(result))
 
 class FileNameTemplate(io.ComfyNode):
@@ -106,6 +130,15 @@ class FileNameTemplate(io.ComfyNode):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}FileNameTemplate",
             display_name=f"{ADDON_PREFIX} File Name From Template",
+            description=f"""
+    Build a file name by replacing the parameters of a template.
+    The parameters must be in the form '%%name%%' or '%name%', and are taken from
+    opt_textparams, from the connected inputs p0, p1, ... (as '%%p0%%', '%%p1%%', ...)
+    and, when model_name is given, from its file name stem, truncated to
+    model_name_max_length and with the spaces replaced by '_' (as '%%model_name%%').
+    A parameter which is not found is replaced with an empty string, and the
+    doubled path separators of the result are collapsed into a single one.{DATE_PARAMETER_DOC}
+    """,
             category=f"{ADDON_CATEGORY}/utils",
             inputs=[
                 io.String.Input("template", default=""),
@@ -194,12 +227,14 @@ class ComplexPrompt(io.ComfyNode):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}ComplexPrompt",
             display_name=f"{ADDON_PREFIX} Complex Prompt",
-            description="""
+            description=f"""
     Performs a series of actions:
     - concatenate the prompts
     - replace text parameters
     - extract loras from positive prompt and add them to the lora stack
     - return final clean prompts and lora stack
+    The text parameters must be in the form '%%name%%' or '%name%', and a parameter
+    which is not found in text_params is replaced with an empty string.{DATE_PARAMETER_DOC}
     """,
             category=f"{ADDON_CATEGORY}/utils",
             inputs=[
