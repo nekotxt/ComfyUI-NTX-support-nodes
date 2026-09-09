@@ -103,31 +103,37 @@ function setNames(node, names) {
     node.setDirtyCanvas(true, true);
 }
 
-// Every group of the graph THIS node lives in — inside a subgraph, that is the
-// groups of the subgraph, which is the scope the buttons act on.
-function graphGroups(node) {
-    return node.graph?.groups ?? [];
+function selectedGroups(node) {
+    return groupsNamed(node.graph, getNames(node));
 }
 
+// ── Group primitives (shared with groups.action_center.js) ────────────────────
+
+// The scope is always the graph the node LIVES IN — inside a subgraph, that is
+// the groups of the subgraph.
+
 // Unique group titles, in canvas order.
-function groupTitles(node) {
+export function graphGroupTitles(graph) {
     const titles = [];
-    for (const group of graphGroups(node)) {
+    for (const group of graph?.groups ?? []) {
         const title = group.title ?? "";
         if (title !== "" && !titles.includes(title)) titles.push(title);
     }
     return titles;
 }
 
-function selectedGroups(node) {
-    const names = new Set(getNames(node));
-    return graphGroups(node).filter((group) => names.has(group.title));
+// Every group carrying one of these titles — a title borne by several groups
+// matches them all.
+export function groupsNamed(graph, names) {
+    const wanted = new Set(names);
+    return (graph?.groups ?? []).filter((group) => wanted.has(group.title));
 }
 
-// Every node held by the given groups, deduplicated, minus the control node
-// itself. Group membership is positional and only refreshed when the group is
-// touched, so it is recomputed here before the children are read.
-function nodesOfGroups(groups, exclude) {
+// Every node held by the given groups, deduplicated, minus `exclude` (the node
+// driving them, which must never mute itself). Group membership is positional
+// and only refreshed when the group is touched, so it is recomputed here before
+// the children are read.
+export function nodesOfGroups(groups, exclude) {
     const nodes = new Set();
     for (const group of groups) {
         try {
@@ -167,7 +173,7 @@ function pickerLabel(name, ticked, missing) {
 // tells LiteGraph to keep the menu open, so several groups can be ticked in one
 // go; the entry relabels itself in place to show its new state.
 function openGroupPicker(node, event) {
-    const titles = groupTitles(node);
+    const titles = graphGroupTitles(node.graph);
     const selected = new Set(getNames(node));
     const missing = [...selected].filter((name) => !titles.includes(name));
 
@@ -248,14 +254,25 @@ function applyMode(node, mode, action) {
     const found = targets(node, action);
     if (!found) return;
 
-    const graph = node.graph;
-    graph.beforeChange?.();
-    for (const target of found.nodes) target.mode = mode;
-    graph.afterChange?.();
-    app.canvas?.setDirty(true, true);
-
+    setNodesMode(node.graph, found.nodes, mode);
     toast("info", action, `${found.nodes.length} node(s) in ${found.groups.length} group(s).`);
 }
+
+// Set the mode of every given node in one undoable step.
+export function setNodesMode(graph, nodes, mode) {
+    graph?.beforeChange?.();
+    for (const target of nodes) target.mode = mode;
+    graph?.afterChange?.();
+    app.canvas?.setDirty(true, true);
+}
+
+// The mode each mode-setting action applies. `queue` is not in here: it runs
+// nodes instead of changing them.
+export const MODE_BY_ACTION = {
+    mute: MODE_NEVER,
+    bypass: MODE_BYPASS,
+    reset: MODE_ALWAYS,
+};
 
 // Where the graph of the node sits in the execution id namespace: "" at the
 // root, "<subgraph node id>[:<...>]" inside a subgraph — the same path the core
@@ -292,26 +309,31 @@ function outputExecutionIds(nodes, prefix) {
     return ids;
 }
 
+// Queue the active output nodes among `nodes`, and nothing else. Returns how
+// many were queued — 0 when there is no active output node to run — and throws
+// when the run could not be submitted.
+export async function queueOutputNodes(graph, nodes) {
+    const prefix = executionPrefix(graph);
+    if (prefix === undefined) throw new Error("Could not locate this subgraph in the workflow.");
+
+    const ids = outputExecutionIds(nodes, prefix);
+    if (!ids.length) return 0;
+
+    // Third argument = partial execution targets: the backend runs these
+    // outputs and everything they depend on, and nothing else.
+    await app.queuePrompt(0, 1, ids);
+    return ids.length;
+}
+
 async function queueGroups(node) {
     const found = targets(node, "Queue");
     if (!found) return;
 
-    const prefix = executionPrefix(node.graph);
-    if (prefix === undefined) {
-        toast("error", "Queue failed", "Could not locate this subgraph in the workflow.");
-        return;
-    }
-
-    const ids = outputExecutionIds(found.nodes, prefix);
-    if (!ids.length) {
-        toast("warn", "Queue: nothing to run", "The selected groups hold no active output node.");
-        return;
-    }
-
     try {
-        // Third argument = partial execution targets: the backend runs these
-        // outputs and everything they depend on, and nothing else.
-        await app.queuePrompt(0, 1, ids);
+        const queued = await queueOutputNodes(node.graph, found.nodes);
+        if (!queued) {
+            toast("warn", "Queue: nothing to run", "The selected groups hold no active output node.");
+        }
     } catch (err) {
         console.error(`[${ADDON_NAME}] queueing groups failed`, err);
         toast("error", "Queue failed", String(err?.message ?? err));

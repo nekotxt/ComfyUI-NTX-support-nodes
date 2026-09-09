@@ -1618,3 +1618,86 @@ Right-click menu options on the node:
   alone, the row taking no space at all.
 - **Select the nodes of these groups** — selects on the canvas every node the picked groups
   hold.
+
+---
+
+## GroupActionCenter
+
+![GroupActionCenter node](images/GroupActionCenter.png)
+
+A panel of **custom buttons**, each playing an ordered list of group actions (found under
+**utils**, next to **GroupControl**). Where GroupControl applies one action to the groups
+ticked in its widget, a button here carries its own list of steps — a step being *mute*,
+*bypass*, *reset to normal* or *queue*, applied to one named group — and pressing it plays
+them from top to bottom. One button can therefore mute a stage, reset another and queue the
+result, in one click.
+
+Like GroupControl the node is **virtual**: it exists only in the editor, is removed from the
+prompt when the workflow is queued, never executes and cannot change a result. It acts on the
+graph it **lives in** (dropped inside a subgraph, on that subgraph's groups); a group holds
+the nodes whose centre lies inside its frame, nested groups included, and the node itself is
+always left out. Groups are named, not referenced: renaming one breaks the steps pointing at
+it, and a step naming a group that no longer exists is skipped and reported instead of
+stopping the button.
+
+The buttons travel with the workflow and with a copy of the node. Every press answers with a
+single toast summing up what happened — nodes changed, runs queued, steps that had nothing to
+do — and listing the group names it could not find. A step that genuinely fails stops the
+list there, since the steps written after it were meant to run on it.
+
+### Inputs
+
+The node has no inputs — everything is defined in its buttons.
+
+### Outputs
+
+The node has no outputs — it acts on the canvas, not on data.
+
+### Frontend
+
+The node body is the buttons themselves, one full-width row each, drawn in the color given to
+them (the label text turns dark or light to stay readable, and shrinks when the node is
+narrowed). A node with no button yet shows a *right-click → Add button…* hint instead.
+
+**Clicking a button** plays its steps in order. `Queue` steps are waited for, so a button
+muting a group then queueing another really submits the run with the mute applied, and two
+queue steps reach the queue in the written order; the button ignores further clicks until the
+run has been submitted.
+
+The available step actions are:
+
+- **Mute** — mutes the nodes of the group, as **Ctrl+M** does on a selection.
+- **Bypass** — bypasses them, as **Ctrl+B** does.
+- **Reset to normal** — sets them back, undoing either of the two above.
+- **Queue** — runs only the output nodes the group holds, plus everything feeding them (muted
+  and bypassed ones are skipped). Only those outputs and their ancestors are validated, so a
+  broken node elsewhere in the workflow cannot block the run, and the run is queued once
+  whatever the batch count set in the menu.
+
+Right-click menu options on the node:
+
+- **Add button…** — opens the button form on a new button, appended to the node on **OK**.
+- **Edit buttons…** — opens the list of the buttons of the node.
+
+The **button form** holds everything about one button:
+
+- **Title** — what the button shows.
+- **Color** — a checkbox arming a color picker; left unticked the button keeps the default
+  widget grey.
+- the **action list**, played in the order shown: each row picks a group and an action. The
+  group comes from a **dropdown of the groups of the current graph**, so a step can only
+  target a group that exists; a step whose group has since been renamed or deleted opens with
+  an empty field, waiting for a new pick. Rows are added with **+ Add action**, removed with
+  **✕** and **drag-reordered** with the handle.
+- **OK** refuses a button without a title, without any action, or with an action missing its
+  group name. **Enter** confirms, **Escape** cancels.
+
+The **button list** (**Edit buttons…**) shows one row per button — color swatch, title and
+the number of actions it holds (hover it to read them) — in the order they appear on the
+node:
+
+- **drag-reorder** the rows with the handle to change that order;
+- **✕** removes a button, **Edit…** opens the button form on it;
+- **+ Add button** appends a new one.
+- Nothing is written to the node until **OK**: **Cancel** discards the whole session,
+  including the changes made in the button form.
