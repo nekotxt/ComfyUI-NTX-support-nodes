@@ -15,6 +15,11 @@
 //   - canvas contributors take no argument and return the empty-canvas items.
 // A contributor may return a single item or an array of items; falsy results
 // are ignored.
+//
+// The canvas section additionally starts with a built-in "Add node" entry that
+// opens the addon's own node tree (the same one found under the native
+// "Add Node" > ADDON_NAME submenu), so the addon's nodes can be added from the
+// top-level canvas menu without digging through every installed pack.
 
 import { app } from "../../../scripts/app.js";
 import { ADDON_NAME, API_PREFIX } from "./config.js";
@@ -61,6 +66,80 @@ function appendGroup(options, items) {
     options.push(null);                                     // separator below the section
 }
 
+// Root category the python side registers every node under (ADDON_CATEGORY in
+// config_variables.py, which equals ADDON_NAME) — with the trailing slash the
+// litegraph category helpers expect for a path prefix.
+const ROOT_CATEGORY = ADDON_NAME + "/";
+
+const compareByContent = (a, b) =>
+    (a.content ?? "").localeCompare(b.content ?? "", undefined, { numeric: true, sensitivity: "base" });
+
+// Open a submenu listing the sub-categories and nodes found directly under
+// `baseCategory` (a "path/" prefix). Mirrors the closure litegraph uses for its
+// own "Add Node" menu (LGraphCanvas.onMenuAdd), which cannot be started from a
+// category other than the root, so it is re-implemented here scoped to the
+// addon's tree. Nodes are created at the position of the initial right-click.
+function openAddNodeSubmenu(baseCategory, e, prevMenu) {
+    const canvas = app.canvas;
+    const graph = canvas?.graph;
+    if (!graph) return;
+    const filter = canvas.filter || graph.filter;
+
+    const categoryEntries = [];
+    for (const category of LiteGraph.getNodeTypesCategories(filter)) {
+        if (!category.startsWith(baseCategory)) continue;
+        const name = category.slice(baseCategory.length).split("/", 1)[0];
+        if (!name) continue;
+        const path = baseCategory + name + "/";
+        if (categoryEntries.some((entry) => entry.value === path)) continue;
+        categoryEntries.push({
+            value: path,
+            content: name,
+            has_submenu: true,
+            callback: (value, _event, _mouseEvent, contextMenu) =>
+                openAddNodeSubmenu(value.value, e, contextMenu),
+        });
+    }
+    categoryEntries.sort(compareByContent);
+
+    const nodeEntries = [];
+    for (const type of LiteGraph.getNodeTypesInCategory(baseCategory.slice(0, -1), filter)) {
+        if (type.skip_list) continue;
+        nodeEntries.push({
+            value: type.type,
+            content: type.title,
+            has_submenu: false,
+            callback: (value, _event, _mouseEvent, contextMenu) => {
+                const firstEvent = contextMenu.getFirstEvent();
+                graph.beforeChange();
+                const node = LiteGraph.createNode(value.value);
+                if (node) {
+                    node.pos = canvas.convertEventToCanvasOffset(firstEvent);
+                    graph.add(node);
+                } else {
+                    console.warn(`[${ADDON_NAME}] failed to create node of type:`, value.value);
+                }
+                graph.afterChange();
+            },
+        });
+    }
+    nodeEntries.sort(compareByContent);
+
+    new LiteGraph.ContextMenu([...categoryEntries, ...nodeEntries], { event: e, parentMenu: prevMenu });
+}
+
+// The "Add node" entry that heads the addon's canvas section.
+function addNodeEntry() {
+    return {
+        content: "Add node",
+        has_submenu: true,
+        callback: (_value, _options, e, prevMenu) => {
+            openAddNodeSubmenu(ROOT_CATEGORY, e, prevMenu);
+            return false;
+        },
+    };
+}
+
 let installed = false;
 function installGroupedMenu() {
     const LGraphCanvas = window.LGraphCanvas || app.canvas?.constructor;
@@ -79,7 +158,7 @@ function installGroupedMenu() {
     const origCanvasMenu = LGraphCanvas.prototype.getCanvasMenuOptions;
     LGraphCanvas.prototype.getCanvasMenuOptions = function () {
         const options = origCanvasMenu.apply(this, arguments);
-        appendGroup(options, collect(canvasContributors, null));
+        appendGroup(options, [addNodeEntry(), ...collect(canvasContributors, null)]);
         return options;
     };
 }

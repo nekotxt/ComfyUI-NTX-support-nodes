@@ -147,6 +147,24 @@ The tints are painted over the nodes at display time only: nothing is written to
 themselves, so no color can end up in a saved workflow. They are drawn on the graph canvas and
 therefore do not appear when ComfyUI's experimental **Vue nodes** rendering mode is enabled.
 
+### Add node
+
+A shortcut to the addon's nodes from the top level of the canvas right-click menu, so they can
+be added without opening ComfyUI's own **Add Node** submenu and scrolling through every
+installed node pack to reach **NTX-support-nodes**.
+
+Right-click menu option on the empty canvas:
+
+- **Add node** — opens a submenu with the addon's subcategories (**context**, **images**,
+  **info**, **loras**, **pipe**, **prompts**, **reroute**, **text**, **utils**, plus
+  **deprecated** for the nodes kept only for older workflows); each one lists its nodes, and
+  picking a node places it on the canvas at the position that was right-clicked. The tree is
+  the same one shown under **Add Node › NTX-support-nodes**, read from the registered nodes
+  at the moment the menu opens, so it always reflects the current node set.
+
+The entry heads the **NTX-support-nodes** section of the canvas menu, right below the section
+title. Adding a node this way is undoable like any other edit (**Ctrl+Z**).
+
 ---
 
 ## PipeCustom

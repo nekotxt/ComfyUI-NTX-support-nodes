@@ -42,7 +42,19 @@ def _format_js_datetime(datetime_format:str):
     return datetime.datetime.now().strftime(datetime_format)
 
 # Documents, for the description of every node formatting its text through
-# _replace_parameters(), the 'date:<format>' parameter handled below.
+# _replace_parameters(), the two syntaxes handled below.
+PREFIX_SUFFIX_PARAMETER_DOC = """
+    A parameter can carry a prefix and/or a suffix: '*' separates the prefix from
+    the parameter name, '#' separates the parameter name from the suffix. Both
+    characters are reserved and cannot be used in a parameter name. With
+    char='Mario':
+        'filename%_*char%'    prefix '_'              gives 'filename_Mario'
+        'filename%char#-%'    suffix '-'              gives 'filenameMario-'
+        'filename%_*char#-%'  prefix '_', suffix '-'  gives 'filename_Mario-'
+    A prefix and a suffix are written out only along with a non-empty value, so
+    all three give plain 'filename' when char is undefined or empty: an unused
+    parameter takes its own separators away with it."""
+
 DATE_PARAMETER_DOC = """
     The parameter name 'date:<format>' is reserved: it is not looked up in the
     dictionary, but replaced with the current date/time rendered with <format>.
@@ -57,25 +69,47 @@ DATE_PARAMETER_DOC = """
     Any other character of <format> is kept as it is, so it can be used as a
     separator ('%%date:YYYY_MM_DD-HH.mm%%')."""
 
+def _split_marker(match:str):
+    """Split the content of a marker, i.e. what sits between the '%' (or '%%')
+    delimiters, into its (prefix, name, suffix): 'prefix*name#suffix', both
+    separators being optional. '*' and '#' are reserved and cannot be used in a
+    parameter name, which makes the three parts unambiguous."""
+
+    (prefix, star, rest) = match.partition("*")
+    if star == "":
+        (prefix, rest) = ("", match)
+
+    (name, _, suffix) = rest.partition("#")
+
+    return (prefix, name, suffix)
+
+def _resolve_parameter(match:str, parameters:dict):
+    """Render the content of a marker. The prefix and the suffix are written out
+    only along with a non-empty value, so a marker whose parameter is missing
+    leaves nothing behind, separators included."""
+
+    (prefix, name, suffix) = _split_marker(match)
+
+    if name.startswith("date:"):
+        value = _format_js_datetime(name[5:])
+    else:
+        value = parameters.get(name, "")
+
+    return "" if value == "" else prefix + value + suffix
+
 def _replace_parameters(text:str, parameters:dict):
     # replace double % first
     pattern = r'%%([^%]+)%%'
     matches = re.findall(pattern, text)
     for match in matches:
-        if match.startswith("date:"):
-            text = text.replace(f"%%{match}%%", _format_js_datetime(match[5:]))
-        else:
-            text = text.replace(f"%%{match}%%", parameters.get(match, ""))
+        text = text.replace(f"%%{match}%%", _resolve_parameter(match, parameters))
 
     # replace single % next
     pattern = r'%([^%]+)%'
     matches = re.findall(pattern, text)
     for match in matches:
-        if match.startswith("date:"):
-            text = text.replace(f"%{match}%", _format_js_datetime(match[5:]))
-        else:
-            text = text.replace(f"%{match}%", parameters.get(match, ""))
-    
+        text = text.replace(f"%{match}%", _resolve_parameter(match, parameters))
+
     return text
 
 class ReplaceTextParameters(io.ComfyNode):
@@ -90,12 +124,12 @@ class ReplaceTextParameters(io.ComfyNode):
     For instance, if text='in the style of %%artist%%'
     and parameters contains an entry 'artist': 'anime'
     then the returned text will be 'in the style of anime'
-    If the parameter name is not found in the dictionary, it will be replaced with an empty string.{DATE_PARAMETER_DOC}
+    If the parameter name is not found in the dictionary, it will be replaced with an empty string.{PREFIX_SUFFIX_PARAMETER_DOC}{DATE_PARAMETER_DOC}
     A multiline text is treated as a list of path segments: each line is formatted
     and stripped on its own, blank results are dropped, and the remaining pieces
     are joined with the path separator of the operating system.
     """,
-            category=f"{ADDON_CATEGORY}/utils",
+            category=f"{ADDON_CATEGORY}/text",
             inputs=[
                 io.String.Input("text", multiline=True, default=""),
                 DICT_TYPE.Input("parameters", optional=True),
@@ -137,9 +171,9 @@ class FileNameTemplate(io.ComfyNode):
     and, when model_name is given, from its file name stem, truncated to
     model_name_max_length and with the spaces replaced by '_' (as '%%model_name%%').
     A parameter which is not found is replaced with an empty string, and the
-    doubled path separators of the result are collapsed into a single one.{DATE_PARAMETER_DOC}
+    doubled path separators of the result are collapsed into a single one.{PREFIX_SUFFIX_PARAMETER_DOC}{DATE_PARAMETER_DOC}
     """,
-            category=f"{ADDON_CATEGORY}/utils",
+            category=f"{ADDON_CATEGORY}/text",
             inputs=[
                 io.String.Input("template", default=""),
                 io.Autogrow.Input("params", template=autogrow_template),
@@ -177,7 +211,7 @@ class PromptChainer(io.ComfyNode):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}PromptChainer",
             display_name=f"{ADDON_PREFIX} Prompt Chainer",
-            category=f"{ADDON_CATEGORY}/utils",
+            category=f"{ADDON_CATEGORY}/text",
             inputs=[
                 io.String.Input("prompt", multiline=True, dynamic_prompts=True, default=""),
                 io.String.Input("prev_prompt", multiline=True, dynamic_prompts=True, default="",
@@ -206,7 +240,7 @@ class DoublePrompt(io.ComfyNode):
     Drag the divider between the two fields to change how the node height is
     shared between them (double-click the divider to restore the even split).
     """,
-            category=f"{ADDON_CATEGORY}/prompts",
+            category=f"{ADDON_CATEGORY}/text",
             inputs=[
                 io.String.Input("prompt_positive", multiline=True, dynamic_prompts=True, default=""),
                 io.String.Input("prompt_negative", multiline=True, dynamic_prompts=True, default=""),
@@ -234,9 +268,9 @@ class ComplexPrompt(io.ComfyNode):
     - extract loras from positive prompt and add them to the lora stack
     - return final clean prompts and lora stack
     The text parameters must be in the form '%%name%%' or '%name%', and a parameter
-    which is not found in text_params is replaced with an empty string.{DATE_PARAMETER_DOC}
+    which is not found in text_params is replaced with an empty string.{PREFIX_SUFFIX_PARAMETER_DOC}{DATE_PARAMETER_DOC}
     """,
-            category=f"{ADDON_CATEGORY}/utils",
+            category=f"{ADDON_CATEGORY}/text",
             inputs=[
                 io.Autogrow.Input("prompt_positives", optional=True, template=io.Autogrow.TemplatePrefix(
                     input=io.String.Input("prompt"),
@@ -301,7 +335,7 @@ class TextConcat(io.ComfyNode):
     comma_separator / newline_separator insert a ',' and/or a newline between the
     prompts, unless the text already ends with that separator.
     """,
-            category=f"{ADDON_CATEGORY}/utils",
+            category=f"{ADDON_CATEGORY}/text",
             inputs=[
                 io.Autogrow.Input("prompts", optional=True, template=io.Autogrow.TemplatePrefix(
                     input=io.String.Input("prompt", optional=True),   # optional: unconnected slots are allowed

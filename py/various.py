@@ -124,7 +124,7 @@ class PreviewAsText(io.ComfyNode):
             display_name=f"{ADDON_PREFIX} Preview as Text",
             description="Preview any value as text, like the core 'Preview as Text' node, "
                         "but not an output node: it only runs when a downstream node needs its output.",
-            category=f"{ADDON_CATEGORY}/utils",
+            category=f"{ADDON_CATEGORY}/text",
             inputs=[
                 io.AnyType.Input("source"),
             ],
@@ -161,7 +161,7 @@ class PreviewImage(io.ComfyNode):
             display_name=f"{ADDON_PREFIX} Preview Image",
             description="Preview images, like the core 'Preview Image' node, "
                         "but not an output node: it only runs when a downstream node needs its output.",
-            category=f"{ADDON_CATEGORY}/utils",
+            category=f"{ADDON_CATEGORY}/images",
             inputs=[
                 io.Image.Input("images"),
             ],
