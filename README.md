@@ -1764,9 +1764,9 @@ node:
 
 ---
 
-## SaveImageInPlace
+## SaveImageToPath
 
-![SaveImageInPlace node](images/SaveImageInPlace.png)
+![SaveImageToPath node](images/SaveImageToPath.png)
 
 Saves an image **exactly where the path says**, with no progressive counter and no
 date/prefix decoration: the file is always named after `path` and always written as a
@@ -1801,14 +1801,14 @@ image, like *Save Image*.
 
 ---
 
-## LoadImageFromPlace
+## LoadImageFromPath
 
-![LoadImageFromPlace node](images/LoadImageFromPlace.png)
+![LoadImageFromPath node](images/LoadImageFromPath.png)
 
 Loads an image from an **arbitrary path** — typed, not picked from the input folder list —
 and returns it as an IMAGE. A relative path is resolved against the ComfyUI folder chosen in
 `folder`; an absolute path is used as is, and `folder` is ignored. A path **without
-extension is assumed to be a `.png`**, so the node pairs naturally with **SaveImageInPlace**
+extension is assumed to be a `.png`**, so the node pairs naturally with **SaveImageToPath**
 (same `folder` and `path` on both sides); any explicit extension is kept and every format
 PIL can open is accepted. EXIF orientation is applied and the image is converted to RGB;
 only the first frame of an animated file is returned.
@@ -1842,11 +1842,11 @@ toast `File not found: <resolved path>` is raised as well.
 
 ---
 
-## SaveVideoInPlace
+## SaveVideoToPath
 
-![SaveVideoInPlace node](images/SaveVideoInPlace.png)
+![SaveVideoToPath node](images/SaveVideoToPath.png)
 
-The video counterpart of **SaveImageInPlace**: encodes a batch of frames (plus an optional
+The video counterpart of **SaveImageToPath**: encodes a batch of frames (plus an optional
 audio track) into a video file written **exactly where the path says**, with no progressive
 counter. A relative path is resolved against the ComfyUI folder chosen in `folder`; an
 absolute path is used as is, and `folder` is ignored. Missing intermediate directories are
@@ -1883,18 +1883,18 @@ not (the frontend can only play files under those folders).
 
 ---
 
-## LoadVideoFromPlace
+## LoadVideoFromPath
 
-![LoadVideoFromPlace node](images/LoadVideoFromPlace.png)
+![LoadVideoFromPath node](images/LoadVideoFromPath.png)
 
-The video counterpart of **LoadImageFromPlace**: loads a video from an **arbitrary path** and
+The video counterpart of **LoadImageFromPath**: loads a video from an **arbitrary path** and
 returns its frames, audio track and frame rate — the same three values *Get Video
 Components* extracts. A relative path is resolved against the ComfyUI folder chosen in
 `folder`; an absolute path is used as is, and `folder` is ignored.
 
 A path **without extension** is completed by trying `.mp4`, `.mkv` and `.webm` **in this
 order**, and the first existing file wins — so the node pairs naturally with
-**SaveVideoInPlace** (same `folder` and `path` on both sides, whatever container was
+**SaveVideoToPath** (same `folder` and `path` on both sides, whatever container was
 picked). An explicit extension is kept as typed, and any container PyAV can open is
 accepted.
 

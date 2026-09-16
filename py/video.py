@@ -32,12 +32,12 @@ def saved_result_for(file_path: Path) -> ui.SavedResult | None:
 
 # ===== NODES : VIDEO ==========================================================================================================================
 
-class SaveVideoInPlace(io.ComfyNode):
+class SaveVideoToPath(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id=f"{ADDON_PREFIX}SaveVideoInPlace",
-            display_name=f"{ADDON_PREFIX} Save Video In Place",
+            node_id=f"{ADDON_PREFIX}SaveVideoToPath",
+            display_name=f"{ADDON_PREFIX} Save Video To Path",
             description="Save the frames (and audio) as a video exactly at the given path, no progressive counter. The extension follows the selected format. A relative path is resolved against the selected ComfyUI folder.",
             category=f"{ADDON_CATEGORY}/video",
             is_output_node=True,
@@ -69,7 +69,7 @@ class SaveVideoInPlace(io.ComfyNode):
     @classmethod
     def execute(cls, images, fps: float, folder: str, path: str, format, overwrite: bool, audio=None):
 
-        logger.node_name("SaveVideoInPlace")
+        logger.node_name("SaveVideoToPath")
 
         # unpack the container / codec selection as the native Save Video node does
         if isinstance(format, dict):
@@ -91,7 +91,7 @@ class SaveVideoInPlace(io.ComfyNode):
         if file_path.exists() and not overwrite:
             msg = f"file already exists, save skipped : {file_path}"
             logger.warning(msg)
-            notify_user("warn", "Save Video In Place", msg)
+            notify_user("warn", "Save Video To Path", msg)
             return io.NodeOutput(saved_path)
 
         # embed prompt and workflow as the native Save Video node does
@@ -121,12 +121,12 @@ class SaveVideoInPlace(io.ComfyNode):
             return io.NodeOutput(saved_path, ui=ui.PreviewVideo([result]))
         return io.NodeOutput(saved_path)
 
-class LoadVideoFromPlace(io.ComfyNode):
+class LoadVideoFromPath(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id=f"{ADDON_PREFIX}LoadVideoFromPlace",
-            display_name=f"{ADDON_PREFIX} Load Video From Place",
+            node_id=f"{ADDON_PREFIX}LoadVideoFromPath",
+            display_name=f"{ADDON_PREFIX} Load Video From Path",
             description="Load a video from the given path and return its frames, audio and frame rate (.mp4, .mkv and .webm are tried in this order when no extension is given). A relative path is resolved against the selected ComfyUI folder. The node runs again only when the path or the file on disk (size / modification time) changes.",
             category=f"{ADDON_CATEGORY}/video",
             inputs=[
@@ -175,7 +175,7 @@ class LoadVideoFromPlace(io.ComfyNode):
     @classmethod
     def execute(cls, folder: str, path: str, suppress_errors: bool):
 
-        logger.node_name("LoadVideoFromPlace")
+        logger.node_name("LoadVideoFromPath")
 
         file_path = cls.resolve_file(folder, path)
 
@@ -183,7 +183,7 @@ class LoadVideoFromPlace(io.ComfyNode):
             msg = f"File not found: {file_path if file_path is not None else path}"
             logger.warning(msg)
             if not suppress_errors:
-                notify_user("warn", "Load Video From Place", msg)
+                notify_user("warn", "Load Video From Path", msg)
             return io.NodeOutput(None, None, None, False)
 
         components = InputImpl.VideoFromFile(str(file_path)).get_components()
@@ -197,6 +197,6 @@ class LoadVideoFromPlace(io.ComfyNode):
 
 def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
-        SaveVideoInPlace,
-        LoadVideoFromPlace,
+        SaveVideoToPath,
+        LoadVideoFromPath,
     ]

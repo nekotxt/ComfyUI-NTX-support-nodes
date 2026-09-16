@@ -411,12 +411,12 @@ class SaveMultipleImages(io.ComfyNode):
         else:
             return io.NodeOutput(output_image_grid, list_saved_images)
 
-class SaveImageInPlace(io.ComfyNode):
+class SaveImageToPath(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id=f"{ADDON_PREFIX}SaveImageInPlace",
-            display_name=f"{ADDON_PREFIX} Save Image In Place",
+            node_id=f"{ADDON_PREFIX}SaveImageToPath",
+            display_name=f"{ADDON_PREFIX} Save Image To Path",
             description="Save the image exactly at the given path (always as PNG, no progressive counter). A relative path is resolved against the selected ComfyUI folder.",
             category=f"{ADDON_CATEGORY}/images",
             is_output_node=True,
@@ -435,7 +435,7 @@ class SaveImageInPlace(io.ComfyNode):
     @classmethod
     def execute(cls, image, folder: str, path: str, overwrite: bool):
 
-        logger.node_name("SaveImageInPlace")
+        logger.node_name("SaveImageToPath")
 
         # resolve the target file: the extension is always .png
         file_path = resolve_path(path, get_comfy_folder(folder)).with_suffix(".png").resolve()
@@ -444,7 +444,7 @@ class SaveImageInPlace(io.ComfyNode):
         if file_path.exists() and not overwrite:
             msg = f"file already exists, save skipped : {file_path}"
             logger.warning(msg)
-            notify_user("warn", "Save Image In Place", msg)
+            notify_user("warn", "Save Image To Path", msg)
             return io.NodeOutput(saved_path)
 
         if image.shape[0] > 1:
@@ -468,12 +468,12 @@ class SaveImageInPlace(io.ComfyNode):
 
         return io.NodeOutput(saved_path, ui=ui.PreviewImage(image[0:1], cls=cls))
 
-class LoadImageFromPlace(io.ComfyNode):
+class LoadImageFromPath(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
-            node_id=f"{ADDON_PREFIX}LoadImageFromPlace",
-            display_name=f"{ADDON_PREFIX} Load Image From Place",
+            node_id=f"{ADDON_PREFIX}LoadImageFromPath",
+            display_name=f"{ADDON_PREFIX} Load Image From Path",
             description="Load an image from the given path (.png is assumed when no extension is given). A relative path is resolved against the selected ComfyUI folder. The node runs again only when the path or the file on disk (size / modification time) changes.",
             category=f"{ADDON_CATEGORY}/images",
             inputs=[
@@ -515,7 +515,7 @@ class LoadImageFromPlace(io.ComfyNode):
     @classmethod
     def execute(cls, folder: str, path: str, suppress_errors: bool):
 
-        logger.node_name("LoadImageFromPlace")
+        logger.node_name("LoadImageFromPath")
 
         file_path = cls.resolve_file(folder, path)
 
@@ -523,7 +523,7 @@ class LoadImageFromPlace(io.ComfyNode):
             msg = f"File not found: {file_path if file_path is not None else path}"
             logger.warning(msg)
             if not suppress_errors:
-                notify_user("warn", "Load Image From Place", msg)
+                notify_user("warn", "Load Image From Path", msg)
             return io.NodeOutput(None, False)
 
         img = node_helpers.pillow(Image.open, file_path)
@@ -1028,8 +1028,8 @@ class ImagesGrid(io.ComfyNode):
 def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         SaveMultipleImages,
-        SaveImageInPlace,
-        LoadImageFromPlace,
+        SaveImageToPath,
+        LoadImageFromPath,
         ImageSize,
         ImageResolution,
         ExtractImageFromBatch,
