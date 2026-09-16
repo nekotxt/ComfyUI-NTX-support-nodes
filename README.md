@@ -1927,3 +1927,104 @@ path without extension, the reported name is the `.mp4` candidate).
 | `audio` | AUDIO | The audio track; `None` when the video has none or the file was not found. |
 | `fps` | FLOAT | The frame rate of the video; `None` when the file was not found. |
 | `loaded` | BOOLEAN | `True` when the file was loaded, `False` when it was not found. |
+
+---
+
+## SaveLosslessVideoToPath
+
+![SaveLosslessVideoToPath node](images/SaveLosslessVideoToPath.png)
+
+Saves a video **without any compression loss**, for intermediate results that will be loaded
+back into a workflow: instead of an encoded video file, `path` names a **directory** that
+receives one **PNG per frame**, the audio track as **FLAC** and a small `info.json` holding
+the frame rate. This sidesteps the losses of **SaveVideoToPath** (chroma subsampling of the
+video codec, AAC/Opus audio): the frames come back within the 8‑bit rounding of the PNG
+conversion and the audio within 16‑bit PCM precision. The counterpart loader is
+**LoadLosslessVideoFromPath**.
+
+Because the node empties a directory when overwriting, the destination is tightly confined:
+
+- `path` **must be relative** and is always placed under `<folder>/lossless_video_save/` —
+  with `folder` = `output` and `path` = `video1/clip1` the files go to
+  `output/lossless_video_save/video1/clip1/`. An absolute path is refused.
+- a `path` **containing any dot** is refused, which rules out `./`, `../` and every other way
+  of climbing out of that root (a resolved path that still ends outside it, or on the root
+  itself, is refused too).
+- an existing directory is only emptied when it is empty or when it was **written by this
+  node** (its `info.json` carries a marker); a directory holding anything else raises an error
+  and is left untouched.
+
+A refused save shows a warning toast, writes nothing and returns an empty `saved_path`.
+
+When the directory does not exist it is created (parents included). When it exists and
+`overwrite` is on, its content is deleted and rewritten; with `overwrite` off the save is
+**skipped** and a warning toast reports it. The node shows a preview of the first frame.
+
+The directory holds:
+
+| File | Content |
+|---|---|
+| `frame_00001.png`, `frame_00002.png`, … | One PNG per frame, in order, without embedded metadata. |
+| `audio.flac` | The first waveform of the `audio` batch, only when `audio` is connected (mono, stereo or 5.1 layout). |
+| `info.json` | `fps`, `frame_count`, `width`, `height`, the frame file pattern, the audio description (`file`, `sample_rate`, `channels`, `samples`, or `null`), the save `timestamp` (ISO) and `timestamp_ns` (epoch nanoseconds, used by the loader to detect a new save), plus the `ntx_lossless_video` marker. |
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `images` | IMAGE | The frames of the video, in order. |
+| `audio` | AUDIO (optional) | Audio track saved as FLAC next to the frames. |
+| `fps` | FLOAT | Frame rate stored in `info.json` (1–120, default `30`). |
+| `folder` | COMBO | ComfyUI folder the directory is placed in: `input`, `output` (default) or `temp`. |
+| `path` | STRING | Directory, relative to `<folder>/lossless_video_save`. Absolute paths and paths containing dots are refused. An empty path is refused as well. |
+| `overwrite` | BOOLEAN | `yes` (default): an existing directory is emptied and rewritten. `no`: the save is skipped and a toast warns about it. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `saved_path` | STRING | Full absolute path of the directory; returned also when the save was skipped. Empty when the save was refused. |
+
+---
+
+## LoadLosslessVideoFromPath
+
+![LoadLosslessVideoFromPath node](images/LoadLosslessVideoFromPath.png)
+
+Loads back what **SaveLosslessVideoToPath** wrote: the frames, the audio track and the frame
+rate of the directory given by `path`, which follows the same rules as the save node —
+relative to `<folder>/lossless_video_save`, no absolute paths, no dots — so the same
+`folder` and `path` values work on both sides. The frames are read as RGB in their stored
+order, the FLAC comes back as a single-item AUDIO batch, and `fps` is the value stored at
+save time.
+
+The node **re-runs only when the directory content changes**: its cache fingerprint is made
+of the resolved directory plus the save timestamp and frame count read from `info.json`, so
+it executes when first queued, whenever `folder` or `path` change, after every new save into
+that directory, and after a server restart — and is served from cache otherwise. While the
+directory is missing, the fingerprint is a stable marker: the node is not re-run at every
+queue, but runs again as soon as the directory appears.
+
+Only a directory carrying the loader's `info.json` marker is recognised. When it is **not
+found** (or `path` is invalid) the node does not fail the prompt: it outputs `None` on
+`images`, `audio` and `fps`, and `False` on `loaded`. With `suppress_errors` on (the default)
+nothing is shown; turned off, a warning toast is raised as well (`Directory not found: <dir>`,
+or `Invalid path (<reason>)` for a refused path). A directory that exists but has lost some of
+its frames or its audio file is a real error and stops the prompt.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `folder` | COMBO | ComfyUI folder the directory is looked up in: `input`, `output` (default) or `temp`. |
+| `path` | STRING | Directory written by the save node, relative to `<folder>/lossless_video_save`. Absolute paths and paths containing dots are refused. |
+| `suppress_errors` | BOOLEAN | `yes` (default): a missing directory silently yields `None`. `no`: a missing or refused directory also raises a warning toast. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `images` | IMAGE | The frames as a batch; `None` when the directory was not found. |
+| `audio` | AUDIO | The audio track; `None` when none was saved or the directory was not found. |
+| `fps` | FLOAT | The frame rate stored at save time; `None` when the directory was not found. |
+| `loaded` | BOOLEAN | `True` when the directory was loaded, `False` when it was not found. |
