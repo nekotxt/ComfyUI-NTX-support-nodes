@@ -1761,3 +1761,79 @@ node:
 - **+ Add button** appends a new one.
 - Nothing is written to the node until **OK**: **Cancel** discards the whole session,
   including the changes made in the button form.
+
+---
+
+## SaveImageInPlace
+
+![SaveImageInPlace node](images/SaveImageInPlace.png)
+
+Saves an image **exactly where the path says**, with no progressive counter and no
+date/prefix decoration: the file is always named after `path` and always written as a
+**PNG**, whatever extension was typed (`shot.jpg` and `shot` both become `shot.png`). A
+relative path is resolved against the ComfyUI folder chosen in `folder`; an absolute path is
+used as is, and `folder` is ignored. Missing intermediate directories are created.
+
+The saved PNG embeds the **prompt and the workflow** in its metadata, exactly as the standard
+*Save Image* node does (and, like it, honours the `--disable-metadata` server option), so
+dropping the file back on the canvas restores the workflow that produced it.
+
+When the target file already exists it is overwritten if `overwrite` is on; otherwise the
+save is **skipped** and a warning toast reports the path that was left untouched. Only the
+**first image** of a batch is saved — a counter would have to be appended to write the
+others — and a warning is logged when more arrive. The node shows a preview of the saved
+image, like *Save Image*.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `image` | IMAGE | The image to save; only the first image of a batch is written. |
+| `folder` | COMBO | ComfyUI folder a relative `path` is anchored to: `input`, `output` (default) or `temp`. Ignored when `path` is absolute. |
+| `path` | STRING | Destination file, relative to `folder` or absolute. The extension is replaced by `.png` (added when missing). An empty path is an error. |
+| `overwrite` | BOOLEAN | `yes` (default): an existing file is replaced. `no`: the save is skipped and a toast warns about it. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `saved_path` | STRING | Full absolute path of the file (normalised, `..` segments resolved). Returned also when the save was skipped, since it names the file actually on disk. |
+
+---
+
+## LoadImageFromPlace
+
+![LoadImageFromPlace node](images/LoadImageFromPlace.png)
+
+Loads an image from an **arbitrary path** — typed, not picked from the input folder list —
+and returns it as an IMAGE. A relative path is resolved against the ComfyUI folder chosen in
+`folder`; an absolute path is used as is, and `folder` is ignored. A path **without
+extension is assumed to be a `.png`**, so the node pairs naturally with **SaveImageInPlace**
+(same `folder` and `path` on both sides); any explicit extension is kept and every format
+PIL can open is accepted. EXIF orientation is applied and the image is converted to RGB;
+only the first frame of an animated file is returned.
+
+The node **re-runs only when the image changes**. Its cache fingerprint is made of the
+resolved path plus the file's size and modification time, so it executes when first queued,
+whenever `folder` or `path` change, whenever the file on disk is rewritten, and after a server
+restart — and is served from cache otherwise. While the file is missing, the fingerprint is a
+stable marker: the node is not re-run at every queue, but runs again as soon as the file
+appears.
+
+When the file is **not found** (or `path` is empty) the node does not fail the prompt: it
+outputs `None` as `image`. With `suppress_errors` on (the default) nothing is shown; turned
+off, a warning toast `File not found: <resolved path>` is raised as well.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `folder` | COMBO | ComfyUI folder a relative `path` is anchored to: `input` (default), `output` or `temp`. Ignored when `path` is absolute. |
+| `path` | STRING | Source file, relative to `folder` or absolute. `.png` is assumed when no extension is given. |
+| `suppress_errors` | BOOLEAN | `yes` (default): a missing file silently yields `None`. `no`: a missing file also raises a warning toast. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `image` | IMAGE | The loaded image as a single-image batch; `None` when the file was not found. |
