@@ -165,6 +165,41 @@ Right-click menu option on the empty canvas:
 The entry heads the **NTX-support-nodes** section of the canvas menu, right below the section
 title. Adding a node this way is undoable like any other edit (**Ctrl+Z**).
 
+### Change output to UE broadcast
+
+Turns the outputs of a node into **Anything Everywhere** broadcasts (from the
+[cg-use-everywhere](https://github.com/chrisgoringe/cg-use-everywhere) node pack, which must be
+installed): instead of a wire to every consumer, the output feeds one *Anything Everywhere*
+node restricted to a global name, and the consumer inputs are renamed to that name so UE
+connects them virtually. Typical use: the model / clip / VAE loaders of a workflow, named
+`g_h3_model`, `g_h3_clip`, `g_h3_vae`…
+
+Right-click menu option on the node:
+
+- **Change output to UE broadcast** — runs the routine on the right-clicked node, or on every
+  selected node one after the other when the right-clicked node is part of a multi-selection.
+  For each output of each node a dialog asks *What global name to use for `#<id> (<node title>)
+  <output>`?* — e.g. *#1 (KSamplerFirst) LATENT*:
+  - leaving the name **empty** (or closing the dialog) skips that output and moves on to the
+    next one;
+  - otherwise the name is prefixed with `g_` (unless it already starts with it — `h3_model`
+    and `g_h3_model` both give `g_h3_model`). If the canvas already holds a UE node carrying
+    that name (as its title, or as an exact-match `^name$` input regex), a warning is shown
+    and the dialog asks again, with the rejected name pre-filled for editing — until a free
+    name is entered, or the field is left empty to skip the output. Then:
+    1. an *Anything Everywhere* node is added to the right of the source node (stacked, one
+       per output) and the output is wired into it;
+    2. the node is titled with the name and gets an **input regex** restriction of
+       `^<name>$`, so it only feeds inputs called exactly `<name>` of the output's data type;
+    3. every link leaving the output is followed: the input at the far end is **renamed**
+       (its label set) to `<name>` and the link is removed — UE then feeds it from the
+       broadcast node.
+
+Links whose far end is another *Anything Everywhere* (or other UE) node are left in place,
+since renaming and disconnecting that input would only orphan the node; so are links ending on
+a subgraph output slot. A toast sums up how many outputs were broadcast and how many inputs
+were renamed. The entry is not shown on nodes without outputs, nor on UE nodes themselves.
+
 ---
 
 ## PipeCustom

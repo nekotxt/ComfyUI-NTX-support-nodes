@@ -19,6 +19,7 @@ from .utils import clone_data, download_file_from_cloud, load_list_loras, find_m
 # used by ApplyLoraStack
 CACHED_LORAS = []
 logger.info(f"MAX_CACHED_LORAS = {MAX_CACHED_LORAS}")
+USE_LORA_CACHE = (MAX_CACHED_LORAS > 0)
 
 def normalize_lora_name(lora_name:str):
     if Path(lora_name).suffix == "":
@@ -191,6 +192,7 @@ class ApplyLoraStack(io.ComfyNode):
 
         global CACHED_LORAS
         global MAX_CACHED_LORAS
+        global USE_LORA_CACHE
         global DOWNLOAD_MISSING_LORAS
         global CLOUD_STORAGE_ID
         global MODELS_DIR
@@ -248,15 +250,20 @@ class ApplyLoraStack(io.ComfyNode):
 
             try:
                 lora = None
-                for(cached_lora_path, cached_lora) in CACHED_LORAS:
-                    if cached_lora_path == lora_path:
-                        lora = cached_lora
-                        break
+
+                if USE_LORA_CACHE:
+                    for(cached_lora_path, cached_lora) in CACHED_LORAS:
+                        if cached_lora_path == lora_path:
+                            lora = cached_lora
+                            break
 
                 if lora is None:
                     lora = comfy.utils.load_torch_file(lora_path, safe_load=True)
-                    CACHED_LORAS.append([lora_path, lora])
-                    msg = "loaded from disk (added to cache)"
+                    if USE_LORA_CACHE:
+                        CACHED_LORAS.append([lora_path, lora])
+                        msg = "loaded from disk (added to cache)"
+                    else:
+                        msg = "loaded from disk"
                 else:
                     msg = "retrieved from cache"
 
@@ -272,18 +279,20 @@ class ApplyLoraStack(io.ComfyNode):
         for (lora_name, strength_model, strength_clip) in applied_lora_stack:
             logger.info(f"- {lora_name} {strength_model} {strength_clip}")
 
-        logger.info("Current cache :")
-        for (cached_lora_path, _) in CACHED_LORAS:
-            logger.info(f"- {cached_lora_path}")
+        if USE_LORA_CACHE:
 
-        if len(CACHED_LORAS) > MAX_CACHED_LORAS:
-            logger.info(f"Pruning cache (max={MAX_CACHED_LORAS}):")
-            while len(CACHED_LORAS) > MAX_CACHED_LORAS:
-                (cached_lora_path, cached_lora) = CACHED_LORAS.pop(0)
-                logger.info(f"- remove {cached_lora_path}")
-            logger.info("Final cache :")
+            logger.info("Current cache :")
             for (cached_lora_path, _) in CACHED_LORAS:
                 logger.info(f"- {cached_lora_path}")
+
+            if len(CACHED_LORAS) > MAX_CACHED_LORAS:
+                logger.info(f"Pruning cache (max={MAX_CACHED_LORAS}):")
+                while len(CACHED_LORAS) > MAX_CACHED_LORAS:
+                    (cached_lora_path, cached_lora) = CACHED_LORAS.pop(0)
+                    logger.info(f"- remove {cached_lora_path}")
+                logger.info("Final cache :")
+                for (cached_lora_path, _) in CACHED_LORAS:
+                    logger.info(f"- {cached_lora_path}")
 
         return io.NodeOutput(applied_lora_stack, model, clip)
 

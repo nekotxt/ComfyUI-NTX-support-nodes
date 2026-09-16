@@ -99,10 +99,10 @@ def _resolve_parameter(match:str, parameters:dict):
 
 def _replace_parameters(text:str, parameters:dict):
     # replace double % first
-    pattern = r'%%([^%]+)%%'
-    matches = re.findall(pattern, text)
-    for match in matches:
-        text = text.replace(f"%%{match}%%", _resolve_parameter(match, parameters))
+    # pattern = r'%%([^%]+)%%'
+    # matches = re.findall(pattern, text)
+    # for match in matches:
+    #     text = text.replace(f"%%{match}%%", _resolve_parameter(match, parameters))
 
     # replace single % next
     pattern = r'%([^%]+)%'

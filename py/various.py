@@ -299,6 +299,25 @@ class IsEmpty(io.ComfyNode):
             return io.NodeOutput(len(value) == 0)
         return io.NodeOutput(False)
 
+class IsPod(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}IsPod",
+            display_name=f"{ADDON_PREFIX} Is Pod",
+            description="True when ComfyUI runs in a pod (Linux), False on a local Windows/Mac install.",
+            category=f"{ADDON_CATEGORY}/utils",
+            inputs=[],
+            outputs=[
+                io.Boolean.Output("is_pod")
+            ]
+        )
+
+    @classmethod
+    def execute(cls) -> io.NodeOutput:
+        # Same convention as DOWNLOAD_MISSING_LORAS in config_variables: linux == pod
+        return io.NodeOutput(sys.platform.lower().startswith("linux"))
+
 class CheckNotNull(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -393,5 +412,6 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         IsNull,
         IsEmpty,
         CheckNotNull,
+        IsPod,
         Primitive,
     ]
