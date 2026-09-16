@@ -77,7 +77,7 @@ else:
     logger.warning(f"[WARN] [{ADDON_NAME}] Configuration file not found {configuration_file}")
 
 INCLUDE_MODELS_FROM_CATALOGUE = CONFIGURATION.get("include_models_from_catalogue", False)
-MAX_CACHED_LORAS = CONFIGURATION.get("cache", {}).get("max_loras", 5)
+MAX_CACHED_LORAS = CONFIGURATION.get("cache", {}).get("max_loras", 0)
 DOWNLOAD_MISSING_LORAS = CONFIGURATION.get("download_missing_loras", False) and sys.platform.lower().startswith("linux") # only download for linux (pods)
 CLOUD_STORAGE_ID = CONFIGURATION.get("cloud_storage_id", "")
 API_TOKENS = CONFIGURATION.get("tokens", {})

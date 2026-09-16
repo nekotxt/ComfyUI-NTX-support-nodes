@@ -193,12 +193,19 @@ Right-click menu option on the node:
        `^<name>$`, so it only feeds inputs called exactly `<name>` of the output's data type;
     3. every link leaving the output is followed: the input at the far end is **renamed**
        (its label set) to `<name>` and the link is removed — UE then feeds it from the
-       broadcast node.
+       broadcast node. A widget-backed input (`cfg`, `steps`, a converted primitive…) is
+       also marked as **UE connectable** on its node, the opt-in UE requires before it
+       broadcasts to widgets.
 
-Links whose far end is another *Anything Everywhere* (or other UE) node are left in place,
-since renaming and disconnecting that input would only orphan the node; so are links ending on
-a subgraph output slot. A toast sums up how many outputs were broadcast and how many inputs
-were renamed. The entry is not shown on nodes without outputs, nor on UE nodes themselves.
+A link is **left in place** — with a warning toast, kept on screen until closed, saying
+which one and why — when the
+input at its far end is not *exactly* of the output's type (e.g. a multi-type slot such as
+`FLOAT,INT,BOOLEAN` fed by a `FLOAT`: UE only feeds exact type matches, so renaming it would
+leave it unfed), when the far end is another *Anything Everywhere* (or other UE) node, since
+renaming and disconnecting that input would only orphan the node, or when it is a subgraph
+output slot. The broadcast node is still created in those cases. A final toast sums up how
+many outputs were broadcast, how many inputs were renamed and how many links were kept. The
+entry is not shown on nodes without outputs, nor on UE nodes themselves.
 
 ---
 

@@ -17,11 +17,15 @@
 //      titled `name`;
 //   3. every link that left the output is followed: the input at its far end
 //      is relabelled `name` and the link is removed. UE matches inputs by
-//      `label || localized_name || name`, so the AE node now feeds it.
+//      `label || localized_name || name`, so the AE node now feeds it. A
+//      widget-backed input is additionally flagged as UE-connectable on its
+//      node, since UE skips widgets without that opt-in.
 //
-// Links whose far end is itself a UE node are left alone (relabelling and
-// disconnecting an AE input would just orphan that node), as are links to a
-// subgraph output slot, which has no node to relabel.
+// A link is left in place — and reported in a warning toast — when the input
+// at its far end is not exactly of the output's type (UE would not feed it),
+// when the far end is itself a UE node (relabelling and disconnecting an AE
+// input would just orphan that node), or when it is a subgraph output slot,
+// which has no node to relabel.
 
 import { app } from "../../../scripts/app.js";
 import { ADDON_NAME, API_PREFIX } from "./config.js";
@@ -34,8 +38,12 @@ const AE_MIN_SIZE = [200, 70];               // fits the title and the two slots
 const AE_GAP_X = 60;                         // horizontal gap between the source node and its AE nodes
 const AE_GAP_Y = 20;                         // vertical gap between stacked AE nodes
 
-function toast(severity, summary, detail) {
-    app.extensionManager?.toast?.add?.({ severity, summary, detail, life: 5000 });
+// `life` is the auto-dismiss delay in ms; null makes the toast sticky (it
+// stays until closed with its X).
+function toast(severity, summary, detail, life = 5000) {
+    const message = { severity, summary, detail };
+    if (life != null) message.life = life;
+    app.extensionManager?.toast?.add?.(message);
 }
 
 // Compat: graph.links/_links may be a Map or a plain object depending on the
@@ -150,34 +158,71 @@ function createBroadcastNode(node, slotIndex, name, stackIndex) {
     return ae;
 }
 
-// Relabel the far end of every link in `linkIds` and remove the link. Returns
-// the number of inputs relabelled.
-function redirectConsumers(graph, linkIds, name) {
-    let count = 0;
+// The widget backing a widget-converted input: by widgetId on recent
+// frontends, by the widget name the input records otherwise.
+function findWidget(node, input) {
+    const widgets = node.widgets ?? [];
+    return (input.widgetId && widgets.find((w) => w.widgetId === input.widgetId))
+        || widgets.find((w) => w.name === input.widget?.name)
+        || null;
+}
+
+// Relabel the far end of every link in `linkIds` and remove the link. Links
+// that cannot be replaced by a broadcast are left in place and described in
+// the returned `kept` list:
+//   - the input's type is not exactly the output's type (a multi-type slot
+//     such as "FLOAT,INT,BOOLEAN", or "*") — UE only feeds exact type matches,
+//     so relabelling it would just leave it unfed;
+//   - the far end is a UE node (relabelling and disconnecting its input would
+//     only orphan it);
+//   - the far end is a subgraph output slot, which has no node to relabel.
+function redirectConsumers(graph, linkIds, name, outputType) {
+    const result = { relabelled: 0, kept: [] };
     for (const linkId of linkIds) {
         const link = getLink(graph, linkId);
         if (!link) continue;
         const target = graph.getNodeById?.(link.target_id);
         if (!target) {
-            console.warn(`[${ADDON_NAME}] ${MENU_LABEL}: link ${linkId} has no target node (subgraph output?) — left in place`);
-            continue;
-        }
-        if (isUENode(target)) {
-            console.warn(`[${ADDON_NAME}] ${MENU_LABEL}: link ${linkId} feeds UE node "${target.title}" — left in place`);
+            result.kept.push(`link ${linkId}: no target node (subgraph output?)`);
             continue;
         }
         const input = target.inputs?.[link.target_slot];
         if (!input) continue;
+        const where = `#${target.id} (${target.title}) ${input.label || input.name}`;
+        if (isUENode(target)) {
+            result.kept.push(`${where}: feeds a UE node`);
+            continue;
+        }
+        if (input.type !== outputType) {
+            result.kept.push(`${where}: input type "${input.type}" is not exactly ${outputType}`);
+            continue;
+        }
+
         input.label = name;
+        if (input.widget) {
+            // The widget row is drawn from widget.label, not input.label, so
+            // rename both — as the frontend's own "Rename widget" does —
+            // otherwise the new name only shows up after a reload.
+            const widget = findWidget(target, input);
+            if (widget) widget.label = name;
+            // UE ignores widget-backed inputs (cfg, steps, seed...) unless the
+            // target node explicitly marks them as UE-connectable — the same
+            // flag its own "UE connectable widgets" submenu toggles.
+            target.properties ??= {};
+            target.properties.ue_properties ??= {};
+            target.properties.ue_properties.widget_ue_connectable ??= {};
+            target.properties.ue_properties.widget_ue_connectable[input.name] = true;
+        }
         target.disconnectInput(link.target_slot);
-        count++;
+        graph.trigger?.("node:slot-label:changed", { nodeId: target.id, slotType: LiteGraph.INPUT });
+        result.relabelled++;
     }
-    return count;
+    return result;
 }
 
 // Run the routine on one node. Returns a tally for the final report.
 async function broadcastOutputs(node) {
-    const tally = { outputs: 0, inputs: 0 };
+    const tally = { outputs: 0, inputs: 0, kept: 0 };
     const graph = node.graph;
     if (!graph) return tally;
 
@@ -185,6 +230,7 @@ async function broadcastOutputs(node) {
     const outputs = (node.outputs ?? []).map((out, index) => ({
         index,
         name: out.label || out.localized_name || out.name || `output ${index}`,
+        type: out.type,
         links: [...(out.links ?? [])],
     }));
 
@@ -199,7 +245,15 @@ async function broadcastOutputs(node) {
             const ae = createBroadcastNode(node, out.index, name, tally.outputs);
             if (!ae) continue;
             tally.outputs++;
-            tally.inputs += redirectConsumers(graph, out.links, name);
+            const { relabelled, kept } = redirectConsumers(graph, out.links, name, out.type);
+            tally.inputs += relabelled;
+            tally.kept += kept.length;
+            if (kept.length) {
+                const detail = kept.join("\n");
+                console.warn(`[${ADDON_NAME}] ${MENU_LABEL}: links of #${node.id} (${node.title}) ${out.name} left in place:\n${detail}`);
+                // sticky: the list is worth keeping around until the user has acted on it
+                toast("warn", `${MENU_LABEL}: ${kept.length} link${kept.length === 1 ? "" : "s"} of ${out.name} not replaced`, detail, null);
+            }
         } finally {
             graph.afterChange?.();
         }
@@ -219,19 +273,21 @@ async function run(clicked) {
     const selected = Object.values(app.canvas?.selected_nodes ?? {}).filter((n) => n?.graph);
     const nodes = selected.includes(clicked) ? selected : [clicked];
 
-    const total = { outputs: 0, inputs: 0 };
+    const total = { outputs: 0, inputs: 0, kept: 0 };
     for (const node of nodes) {
         const tally = await broadcastOutputs(node);
         total.outputs += tally.outputs;
         total.inputs += tally.inputs;
+        total.kept += tally.kept;
     }
 
     const n = nodes.length;
+    const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
     toast(
-        total.outputs ? "success" : "info",
+        total.outputs ? (total.kept ? "warn" : "success") : "info",
         MENU_LABEL,
-        `${n} node${n === 1 ? "" : "s"}: ${total.outputs} output${total.outputs === 1 ? "" : "s"} broadcast, ` +
-        `${total.inputs} input${total.inputs === 1 ? "" : "s"} relabelled.`,
+        `${plural(n, "node")}: ${plural(total.outputs, "output")} broadcast, ${plural(total.inputs, "input")} relabelled` +
+        (total.kept ? `, ${plural(total.kept, "link")} left in place.` : "."),
     );
 }
 

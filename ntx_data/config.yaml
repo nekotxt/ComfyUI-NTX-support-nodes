@@ -1,5 +1,5 @@
 cache:
-    max_loras: 8
+    max_loras: 0
 tokens:
     civitai: 
 cloud_storage_id:
