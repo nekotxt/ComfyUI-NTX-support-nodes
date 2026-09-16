@@ -483,6 +483,7 @@ class LoadImageFromPlace(io.ComfyNode):
             ],
             outputs=[
                 io.Image.Output("image"),
+                io.Boolean.Output("loaded", tooltip="True when the file was loaded, False when it was not found"),
             ],
         )
 
@@ -523,7 +524,7 @@ class LoadImageFromPlace(io.ComfyNode):
             logger.warning(msg)
             if not suppress_errors:
                 notify_user("warn", "Load Image From Place", msg)
-            return io.NodeOutput(None)
+            return io.NodeOutput(None, False)
 
         img = node_helpers.pillow(Image.open, file_path)
         img = node_helpers.pillow(ImageOps.exif_transpose, img)
@@ -531,7 +532,7 @@ class LoadImageFromPlace(io.ComfyNode):
 
         logger.info(f"Loaded file : {file_path} ({img.width}x{img.height})")
 
-        return io.NodeOutput(pillow_to_tensor(img))
+        return io.NodeOutput(pillow_to_tensor(img), True)
 
 class ImageSize(io.ComfyNode):
     @classmethod

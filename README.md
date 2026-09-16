@@ -1821,8 +1821,9 @@ stable marker: the node is not re-run at every queue, but runs again as soon as 
 appears.
 
 When the file is **not found** (or `path` is empty) the node does not fail the prompt: it
-outputs `None` as `image`. With `suppress_errors` on (the default) nothing is shown; turned
-off, a warning toast `File not found: <resolved path>` is raised as well.
+outputs `None` as `image` and `False` as `loaded`, so a downstream switch can react to the
+missing file. With `suppress_errors` on (the default) nothing is shown; turned off, a warning
+toast `File not found: <resolved path>` is raised as well.
 
 ### Inputs
 
@@ -1837,3 +1838,92 @@ off, a warning toast `File not found: <resolved path>` is raised as well.
 | Output | Type | Description |
 |---|---|---|
 | `image` | IMAGE | The loaded image as a single-image batch; `None` when the file was not found. |
+| `loaded` | BOOLEAN | `True` when the file was loaded, `False` when it was not found. |
+
+---
+
+## SaveVideoInPlace
+
+![SaveVideoInPlace node](images/SaveVideoInPlace.png)
+
+The video counterpart of **SaveImageInPlace**: encodes a batch of frames (plus an optional
+audio track) into a video file written **exactly where the path says**, with no progressive
+counter. A relative path is resolved against the ComfyUI folder chosen in `folder`; an
+absolute path is used as is, and `folder` is ignored. Missing intermediate directories are
+created.
+
+The container and codec are chosen with the same `format` / `codec` selectors as the native
+*Save Video* node, and the **file extension follows the container**: whatever extension was
+typed in `path` is replaced by `.mp4`, `.mkv` or `.webm`. With `format` = `auto` the container
+is `webm` for the `av1` codec and `mp4` otherwise. The saved file embeds the **prompt and the
+workflow** in its metadata, as *Save Video* does (honouring `--disable-metadata`).
+
+When the target file already exists it is overwritten if `overwrite` is on; otherwise the
+save is **skipped** and a warning toast reports the path that was left untouched. A file
+saved inside one of the ComfyUI folders is previewed on the node; a file saved elsewhere is
+not (the frontend can only play files under those folders).
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `images` | IMAGE | The frames of the video, in order. |
+| `audio` | AUDIO (optional) | Audio track muxed into the file. |
+| `fps` | FLOAT | Frame rate (1–120, default `30`). |
+| `folder` | COMBO | ComfyUI folder a relative `path` is anchored to: `input`, `output` (default) or `temp`. Ignored when `path` is absolute. |
+| `path` | STRING | Destination file, relative to `folder` or absolute. Its extension is replaced by the one of the selected container. An empty path is an error. |
+| `format` | COMBO | Container: `auto`, `mp4`, `mkv` or `webm`. Each choice unfolds the native `codec` selector (`auto`, `h264`, `av1` — `webm` only offers `auto` / `av1`), whose **re-encode** mode exposes the `crf` quality value. |
+| `overwrite` | BOOLEAN | `yes` (default): an existing file is replaced. `no`: the save is skipped and a toast warns about it. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `saved_path` | STRING | Full absolute path of the file, extension included. Returned also when the save was skipped, since it names the file actually on disk. |
+
+---
+
+## LoadVideoFromPlace
+
+![LoadVideoFromPlace node](images/LoadVideoFromPlace.png)
+
+The video counterpart of **LoadImageFromPlace**: loads a video from an **arbitrary path** and
+returns its frames, audio track and frame rate — the same three values *Get Video
+Components* extracts. A relative path is resolved against the ComfyUI folder chosen in
+`folder`; an absolute path is used as is, and `folder` is ignored.
+
+A path **without extension** is completed by trying `.mp4`, `.mkv` and `.webm` **in this
+order**, and the first existing file wins — so the node pairs naturally with
+**SaveVideoInPlace** (same `folder` and `path` on both sides, whatever container was
+picked). An explicit extension is kept as typed, and any container PyAV can open is
+accepted.
+
+The node **re-runs only when the video changes**. Its cache fingerprint is made of the
+resolved path plus the file's size and modification time, so it executes when first queued,
+whenever `folder` or `path` change, whenever the file on disk is rewritten, and after a server
+restart — and is served from cache otherwise. While the file is missing, the fingerprint is a
+stable marker: the node is not re-run at every queue, but runs again as soon as the file
+appears.
+
+When the file is **not found** (or `path` is empty) the node does not fail the prompt: it
+outputs `None` on `images`, `audio` and `fps`, and `False` on `loaded`, so a downstream
+switch can react to the missing file. With `suppress_errors` on (the default) nothing is
+shown; turned off, a warning toast `File not found: <resolved path>` is raised as well (for a
+path without extension, the reported name is the `.mp4` candidate).
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `folder` | COMBO | ComfyUI folder a relative `path` is anchored to: `input` (default), `output` or `temp`. Ignored when `path` is absolute. |
+| `path` | STRING | Source file, relative to `folder` or absolute. Without extension, `.mp4` / `.mkv` / `.webm` are tried in this order. |
+| `suppress_errors` | BOOLEAN | `yes` (default): a missing file silently yields `None`. `no`: a missing file also raises a warning toast. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `images` | IMAGE | The decoded frames as a batch; `None` when the file was not found. |
+| `audio` | AUDIO | The audio track; `None` when the video has none or the file was not found. |
+| `fps` | FLOAT | The frame rate of the video; `None` when the file was not found. |
+| `loaded` | BOOLEAN | `True` when the file was loaded, `False` when it was not found. |
