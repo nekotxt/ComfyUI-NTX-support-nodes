@@ -19,10 +19,11 @@
 // moved to another slot of its kind by holding the grip at the right of its
 // slot and dragging (swapping with the file already there, if any). A picture
 // opens at full size in a lightbox from its magnifier, and in the editor of
-// media_loader.editor.js from its pencil ; a video opens in the editor of
-// media_loader.video_editor.js from its pencil. The editors record rotate /
-// mirror / crop / max size / time range settings on the item (`edit`, see those
-// modules), the file itself is never touched. Files are uploaded through the core /upload/image
+// media_loader.editor.js from its pencil ; a video and an audio open in the
+// editors of media_loader.video_editor.js and media_loader.audio_editor.js from
+// theirs. The editors record rotate / mirror / crop / max size / time range
+// settings on the item (`edit`, see those modules), the file itself is never
+// touched. Files are uploaded through the core /upload/image
 // route, in the input/ntx_media subfolder, and previewed straight from /view.
 
 import { app } from "../../../scripts/app.js";
@@ -30,6 +31,7 @@ import { api } from "../../../scripts/api.js";
 import { ADDON_PREFIX, API_PREFIX } from "./config.js";
 import { openEditor, isEdited, describeEdit, paintEdited } from "./media_loader.editor.js";
 import { openVideoEditor, isVideoEdited, describeVideoEdit, normalizeVideoEdit } from "./media_loader.video_editor.js";
+import { openAudioEditor, isAudioEdited, describeAudioEdit, normalizeAudioEdit } from "./media_loader.audio_editor.js";
 
 const NODE_ID = ADDON_PREFIX + "MediaLoader";
 const WIDGET_NAME = "media_state";
@@ -285,7 +287,7 @@ const CSS = `
     text-overflow: ellipsis;
 }
 /* in the audio row the grip sits inline, after the player */
-.nml-arow .nml-grip { position: static; opacity: 1; flex-shrink: 0; }
+.nml-arow .nml-grip, .nml-arow .nml-edit { position: static; opacity: 1; flex-shrink: 0; }
 
 .nml-arow {
     display: flex;
@@ -305,7 +307,7 @@ const CSS = `
     text-overflow: ellipsis;
     font-size: 10px;
 }
-.nml-arow audio { height: 24px; width: 46%; min-width: 120px; flex-shrink: 0; }
+.nml-arow audio { height: 24px; width: 40%; min-width: 110px; flex-shrink: 0; }
 `;
 
 let cssInjected = false;
@@ -747,10 +749,25 @@ function makeMediaWidget(node, inputName, initialValue) {
         } else {
             const audio = el("audio", { src: url, controls: true, preload: "none" });
             audio.addEventListener("click", (ev) => ev.stopPropagation());
+            // the player starts at the kept span
+            const aedit = normalizeAudioEdit(item.edit);
+            audio.addEventListener("loadedmetadata", () => { if (aedit.start > 0) audio.currentTime = aedit.start; });
+            const edited = isAudioEdited(item.edit);
+            const pencil = el("div", { class: "nml-edit" + (edited ? " on" : ""),
+                title: edited ? `Edit (${describeAudioEdit(item.edit)})` : "Edit : trim",
+                onclick: (ev) => {
+                    ev.stopPropagation();
+                    openAudioEditor(item, viewURL(item), (edit) => {
+                        const live = state[kind][index];
+                        if (!live || live.file !== item.file) return;   // the slot changed meanwhile
+                        if (edit) live.edit = edit; else delete live.edit;
+                        commit();
+                    });
+                } }, "✎");
             slot.append(el("div", { class: "nml-arow" },
                 el("span", { class: "nml-glyph" }, "♪"),
                 el("span", { class: "nml-aname", title: item.name }, item.name),
-                audio, gripFor(kind, index, item)));
+                audio, pencil, gripFor(kind, index, item)));
         }
         slot.append(el("div", {
             class: "nml-remove",
