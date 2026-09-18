@@ -23,6 +23,7 @@ DICT_TYPE = io.Custom("DICT")
 LIST_TYPE = io.Custom("LIST")
 LORA_STACK_TYPE = io.Custom("LORA_STACK")
 CONTROL_NET_STACK_TYPE = io.Custom("CONTROL_NET_STACK")
+MEDIA_REFS_TYPE = io.Custom("NTX_MEDIA_REFS")     # bundle of reference media files (see media_loader.py)
 
 # ===== General use functions ==================================================================================================================
 
