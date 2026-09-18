@@ -17,14 +17,17 @@
 // on it or by picking them in the file dialog it opens when clicked; extra
 // files spill over into the next free slots of the same kind. A loaded file is
 // moved to another slot of its kind by holding the grip at the right of its
-// slot and dragging (swapping with the file already there, if any), and a
-// picture opens at full size in a lightbox from the magnifier next to the
-// grip. Files are uploaded through the core /upload/image route, in the
-// input/ntx_media subfolder, and previewed straight from /view.
+// slot and dragging (swapping with the file already there, if any). A picture
+// opens at full size in a lightbox from its magnifier, and in the editor of
+// media_loader.editor.js from its pencil ; the editor records rotate / mirror /
+// crop / max size settings on the item (`edit`, see that module), the file
+// itself is never touched. Files are uploaded through the core /upload/image
+// route, in the input/ntx_media subfolder, and previewed straight from /view.
 
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 import { ADDON_PREFIX, API_PREFIX } from "./config.js";
+import { openEditor, isEdited, describeEdit, paintEdited } from "./media_loader.editor.js";
 
 const NODE_ID = ADDON_PREFIX + "MediaLoader";
 const WIDGET_NAME = "media_state";
@@ -139,7 +142,7 @@ const CSS = `
 .nml-slot.filled.aud { border-color: #4c3d6e; }
 .nml-slot.busy { border-style: dotted; color: #8a93a3; cursor: progress; }
 
-.nml-slot img, .nml-slot video {
+.nml-slot img, .nml-slot video, .nml-slot canvas {
     position: absolute;
     inset: 0;
     width: 100%;
@@ -160,7 +163,7 @@ const CSS = `
     text-overflow: ellipsis;
     pointer-events: none;
 }
-.nml-slot.pic .nml-name { padding-right: 38px; }   /* two icons at the right of a picture caption */
+.nml-slot.pic .nml-name { padding-right: 56px; }   /* three icons at the right of a picture caption */
 .nml-slot .nml-remove {
     position: absolute;
     top: 2px; right: 2px;
@@ -195,9 +198,9 @@ const CSS = `
 .nml-slot:hover .nml-grip { opacity: 1; }
 .nml-slot .nml-grip:hover { background: #2a303b; color: #fff; }
 .nml-slot .nml-grip:active { cursor: grabbing; }
-.nml-slot .nml-zoom {
+.nml-slot .nml-zoom, .nml-slot .nml-edit {
     position: absolute;
-    bottom: 2px; right: 20px;
+    bottom: 2px; right: 38px;
     width: 16px; height: 16px;
     line-height: 16px;
     text-align: center;
@@ -209,8 +212,10 @@ const CSS = `
     opacity: 0;
     transition: opacity .12s;
 }
-.nml-slot:hover .nml-zoom { opacity: 1; }
-.nml-slot .nml-zoom:hover { background: #2a303b; color: #fff; }
+.nml-slot .nml-edit { right: 20px; }
+.nml-slot:hover .nml-zoom, .nml-slot:hover .nml-edit { opacity: 1; }
+.nml-slot .nml-zoom:hover, .nml-slot .nml-edit:hover { background: #2a303b; color: #fff; }
+.nml-slot .nml-edit.on { opacity: 1; color: #e0a94c; }
 
 .nml-light {
     position: fixed;
@@ -685,10 +690,33 @@ function makeMediaWidget(node, inputName, initialValue) {
             onclick: () => openPicker(kind, index),
         });
         if (kind === "pictures") {
-            slot.append(el("img", { src: url, alt: item.name, draggable: false }));
+            const img = el("img", { src: url, alt: item.name, draggable: false });
+            slot.append(img);
+            // an edited picture is previewed through a canvas drawn once the picture is loaded ;
+            // the img stays (hidden) as the source of the move ghost
+            if (isEdited(item.edit)) {
+                img.addEventListener("load", () => {
+                    if (!img.isConnected) return;
+                    const canvas = paintEdited(img, item.edit, 256);
+                    img.style.display = "none";
+                    slot.insertBefore(canvas, img);
+                });
+            }
             slot.append(el("div", { class: "nml-name" }, item.name));
             slot.append(el("div", { class: "nml-zoom", title: "View at full size",
                 onclick: (ev) => { ev.stopPropagation(); lightbox(item); } }, "\ud83d\udd0d"));
+            const edited = isEdited(item.edit);
+            slot.append(el("div", { class: "nml-edit" + (edited ? " on" : ""),
+                title: edited ? `Edit (${describeEdit(item.edit)})` : "Edit : rotate, mirror, crop, max size",
+                onclick: (ev) => {
+                    ev.stopPropagation();
+                    openEditor(item, viewURL(item), (edit) => {
+                        const live = state[kind][index];
+                        if (!live || live.file !== item.file) return;   // the slot changed meanwhile
+                        if (edit) live.edit = edit; else delete live.edit;
+                        commit();
+                    });
+                } }, "\u270e"));
             slot.append(gripFor(kind, index, item));
         } else if (kind === "videos") {
             const video = el("video", { src: url, muted: true, loop: true, playsInline: true, preload: "metadata" });

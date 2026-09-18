@@ -27,7 +27,8 @@ MIN_ROWS = 1
 # a filled one a dict :
 #   {"name": "clip.mp4", "file": "ntx_media/clip.mp4", "type": "input"}
 # where "file" is the path relative to the ComfyUI folder named by "type", and "name" the original
-# file name shown in the slot
+# file name shown in the slot. A picture may carry the edits recorded by the frontend editor
+# (web/js/media_loader.editor.js), as an "edit" dict, see normalize_edit
 def parse_media_state(media_state: str) -> dict[str, list]:
     try:
         state = json.loads(media_state or "{}")
@@ -55,6 +56,48 @@ def parse_media_state(media_state: str) -> dict[str, list]:
 def annotated_name(slot: dict) -> str:
     return f"{slot['file']} [{slot.get('type', 'input')}]"
 
+# the edits a picture may carry, and the order they are meant to be applied in :
+#   1. rotate the original picture clockwise by "rotate" degrees (0, 90, 180, 270)
+#   2. mirror it horizontally ("mirror_h") and / or vertically ("mirror_v")
+#   3. crop it to "crop" = {x, y, width, height}, in pixels of the rotated and mirrored picture
+#      (None : no crop)
+#   4. scale it down so that its longer side is at most "max_size" pixels (0 : no limit)
+# The loader only records these settings, it never touches the file : applying them is up to the
+# node consuming the bundle
+EDIT_ROTATIONS = (0, 90, 180, 270)
+EDIT_MAX_SIZES = (0, 512, 832, 1024, 1280, 1600, 1920, 2048)
+
+def normalize_edit(edit) -> dict:
+    result = {"rotate": 0, "mirror_h": False, "mirror_v": False, "crop": None, "max_size": 0}
+    if not isinstance(edit, dict):
+        return result
+    try:
+        rotate = int(edit.get("rotate", 0))
+    except (TypeError, ValueError):
+        rotate = 0
+    if rotate in EDIT_ROTATIONS:
+        result["rotate"] = rotate
+    result["mirror_h"] = bool(edit.get("mirror_h"))
+    result["mirror_v"] = bool(edit.get("mirror_v"))
+    crop = edit.get("crop")
+    if isinstance(crop, dict):
+        try:
+            rect = {key: int(round(float(crop.get(key, 0)))) for key in ("x", "y", "width", "height")}
+            if rect["width"] > 0 and rect["height"] > 0 and rect["x"] >= 0 and rect["y"] >= 0:
+                result["crop"] = rect
+        except (TypeError, ValueError):
+            pass
+    try:
+        max_size = int(edit.get("max_size", 0))
+    except (TypeError, ValueError):
+        max_size = 0
+    if max_size in EDIT_MAX_SIZES:
+        result["max_size"] = max_size
+    return result
+
+def is_edited(edit: dict) -> bool:
+    return edit["rotate"] != 0 or edit["mirror_h"] or edit["mirror_v"] or edit["crop"] is not None or edit["max_size"] != 0
+
 # ===== NODES ==================================================================================================================================
 
 class MediaLoader(io.ComfyNode):
@@ -66,9 +109,13 @@ class MediaLoader(io.ComfyNode):
     slot opens when clicked ; the file is uploaded in the input/ntx_media directory and a preview is
     displayed in the slot.
 
+    A picture can also be edited on the node (rotate, mirror, crop, max size) : the editor records
+    the settings on the slot, the file is never touched, and the settings travel with the picture in
+    the bundle (see normalize_edit) for the consuming node to apply.
+
     The slots live in the media_state widget, a JSON object the frontend replaces on the node by
-    the slot panel that edits it (see parse_media_state for its layout). The node resolves each file and hands
-    the whole set out as one media bundle.
+    the slot panel that edits it (see parse_media_state for its layout). The node resolves each file
+    and hands the whole set out as one media bundle.
     """
 
     @classmethod
@@ -101,14 +148,19 @@ class MediaLoader(io.ComfyNode):
                 if slot is None:
                     continue
                 path = folder_paths.get_annotated_filepath(annotated_name(slot))
-                media[kind].append({
+                entry = {
                     "slot": index,
                     "name": slot.get("name") or os.path.basename(slot["file"]),
                     "file": slot["file"],
                     "type": slot.get("type", "input"),
                     "path": path,
-                })
-            logger.info(f"{kind} : {len(media[kind])} / {len(slots)} slots loaded")
+                }
+                if kind == "pictures":
+                    entry["edit"] = normalize_edit(slot.get("edit"))
+                media[kind].append(entry)
+            edited = sum(1 for entry in media[kind] if "edit" in entry and is_edited(entry["edit"]))
+            logger.info(f"{kind} : {len(media[kind])} / {len(slots)} slots loaded"
+                        + (f", {edited} edited" if edited else ""))
 
         return io.NodeOutput(media)
 
