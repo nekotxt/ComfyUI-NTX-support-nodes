@@ -1,8 +1,11 @@
 from comfy_api.latest import io
 
 import av
+import comfy.utils
 import folder_paths
 import numpy as np
+import torch
+from PIL import Image, ImageOps
 
 import asyncio
 import hashlib
@@ -256,11 +259,163 @@ class MediaLoader(io.ComfyNode):
                     return f"Missing {kind[:-1]} file in slot {index + 1} : {slot['file']}"
         return True
 
+# ===== MEDIA SPLITTER =========================================================================================================================
+
+# the slots the splitter exposes : the first ones of each kind of the bundle
+SPLIT_PICTURES = 9
+SPLIT_VIDEOS = 3
+SPLIT_AUDIOS = 3
+
+# apply the frame edits of a picture or video record to a batch of frames [B, H, W, C] :
+# rotate (pictures only), mirror, crop, then scale down to the maximum size
+def apply_frame_edits(frames: torch.Tensor, edit: dict) -> torch.Tensor:
+    rotate = int(edit.get("rotate", 0) or 0)
+    if rotate:
+        # k=-1 on (H, W) turns clockwise
+        frames = torch.rot90(frames, k=-(rotate // 90), dims=(1, 2))
+    if edit.get("mirror_h"):
+        frames = torch.flip(frames, dims=[2])
+    if edit.get("mirror_v"):
+        frames = torch.flip(frames, dims=[1])
+    crop = edit.get("crop")
+    if crop:
+        height, width = frames.shape[1], frames.shape[2]
+        x = max(0, min(int(crop["x"]), width))
+        y = max(0, min(int(crop["y"]), height))
+        w = max(0, min(int(crop["width"]), width - x))
+        h = max(0, min(int(crop["height"]), height - y))
+        if w > 0 and h > 0:
+            frames = frames[:, y:y + h, x:x + w, :]
+    max_size = int(edit.get("max_size", 0) or 0)
+    height, width = frames.shape[1], frames.shape[2]
+    if max_size and max(width, height) > max_size:
+        scale = max_size / max(width, height)
+        new_width = max(1, int(round(width * scale)))
+        new_height = max(1, int(round(height * scale)))
+        frames = comfy.utils.common_upscale(frames.movedim(-1, 1), new_width, new_height, "lanczos", "disabled").movedim(1, -1)
+    return frames.contiguous()
+
+# load a picture as an IMAGE batch [1, H, W, 3] with its edits applied (the first frame of an
+# animated file)
+def load_picture(path: str, edit: dict) -> torch.Tensor:
+    with Image.open(path) as image:
+        image = ImageOps.exif_transpose(image)
+        image = image.convert("RGB")
+        frames = torch.from_numpy(np.asarray(image).astype(np.float32) / 255.0)[None, ...]
+    return apply_frame_edits(frames, edit)
+
+# decode the frames of a video between start and end seconds as an IMAGE batch [T, H, W, 3],
+# with its edits applied
+def load_video_frames(path: str, edit: dict) -> torch.Tensor | None:
+    start = float(edit.get("start", 0) or 0)
+    end = edit.get("end")
+    end = None if end is None else float(end)
+    frames = []
+    with av.open(path) as container:
+        stream = next((s for s in container.streams if s.type == "video"), None)
+        if stream is None:
+            return None
+        stream.thread_type = "AUTO"
+        if start > 0:
+            try:
+                container.seek(int(max(0.0, start - 1.0) * av.time_base), backward=True)
+            except Exception:
+                pass
+        index = 0
+        for frame in container.decode(stream):
+            # frames without a timestamp are counted at the stream's rate
+            time = frame.time if frame.time is not None else index / float(stream.average_rate or 25)
+            index += 1
+            if end is not None and time >= end:
+                break
+            if time < start:
+                continue
+            frames.append(torch.from_numpy(frame.to_ndarray(format="rgb24")))
+    if not frames:
+        return None
+    batch = torch.stack(frames).float() / 255.0
+    return apply_frame_edits(batch, edit)
+
+# the audio of a file (a video or an audio file) between start and end seconds, as an AUDIO
+# dict ; None when the file has no audio track or the span is empty
+def load_audio_span(path: str, edit: dict) -> dict | None:
+    start = float(edit.get("start", 0) or 0)
+    end = edit.get("end")
+    end = None if end is None else float(end)
+    samples, rate = decode_audio_span(path, start, end)
+    if samples is None or samples.shape[1] == 0:
+        return None
+    return {"waveform": torch.from_numpy(samples)[None, ...], "sample_rate": rate}
+
+class MediaSplitter(io.ComfyNode):
+    """Split a media bundle into one output per slot.
+
+    Every picture, video and audio of the bundle is decoded, its recorded edits are applied
+    (rotation, mirrors, crop, maximum size for the frames ; the kept span for videos and
+    audios) and the result is delivered on the output of its slot. The outputs of the empty
+    slots are None.
+    """
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}MediaSplitter",
+            display_name=f"{ADDON_PREFIX} Media Splitter",
+            description=f"Split a media bundle of the Media Loader into its slots : the first {SPLIT_PICTURES} pictures, "
+                        f"{SPLIT_VIDEOS} videos (frames and audio) and {SPLIT_AUDIOS} audios, decoded with their edits applied. "
+                        "The outputs of the empty slots are None.",
+            category=f"{ADDON_CATEGORY}/images",
+            inputs=[
+                MEDIA_REFS_TYPE.Input("media", tooltip="The media bundle of a Media Loader node."),
+            ],
+            outputs=[
+                *[io.Image.Output(f"picture_{i + 1}") for i in range(SPLIT_PICTURES)],
+                *[io.Image.Output(f"video_{i + 1}") for i in range(SPLIT_VIDEOS)],
+                *[io.Audio.Output(f"video_audio_{i + 1}") for i in range(SPLIT_VIDEOS)],
+                *[io.Audio.Output(f"audio_{i + 1}") for i in range(SPLIT_AUDIOS)],
+            ],
+        )
+
+    @classmethod
+    def execute(cls, media) -> io.NodeOutput:
+        logger.node_name("MediaSplitter")
+        media = media if isinstance(media, dict) else {}
+        by_slot = lambda kind: {int(entry["slot"]): entry for entry in media.get(kind, []) if isinstance(entry, dict)}
+        pictures, videos, audios = by_slot("pictures"), by_slot("videos"), by_slot("audios")
+
+        picture_out = [None] * SPLIT_PICTURES
+        for slot, entry in pictures.items():
+            if slot < SPLIT_PICTURES:
+                picture_out[slot] = load_picture(entry["path"], normalize_edit(entry.get("edit")))
+                logger.info(f"picture {slot + 1} : [{entry['name']}] -> {picture_out[slot].shape[2]}x{picture_out[slot].shape[1]}")
+
+        video_out, video_audio_out = [None] * SPLIT_VIDEOS, [None] * SPLIT_VIDEOS
+        for slot, entry in videos.items():
+            if slot < SPLIT_VIDEOS:
+                edit = normalize_video_edit(entry.get("edit"))
+                video_out[slot] = load_video_frames(entry["path"], edit)
+                video_audio_out[slot] = load_audio_span(entry["path"], edit)
+                frames = video_out[slot]
+                logger.info(f"video {slot + 1} : [{entry['name']}] -> "
+                            + (f"{frames.shape[0]} frames {frames.shape[2]}x{frames.shape[1]}" if frames is not None else "no frames")
+                            + (", with audio" if video_audio_out[slot] is not None else ", no audio"))
+
+        audio_out = [None] * SPLIT_AUDIOS
+        for slot, entry in audios.items():
+            if slot < SPLIT_AUDIOS:
+                audio_out[slot] = load_audio_span(entry["path"], normalize_audio_edit(entry.get("edit")))
+                audio = audio_out[slot]
+                logger.info(f"audio {slot + 1} : [{entry['name']}] -> "
+                            + (f"{audio['waveform'].shape[2] / audio['sample_rate']:.2f}s at {audio['sample_rate']}Hz" if audio is not None else "no audio"))
+
+        return io.NodeOutput(*picture_out, *video_out, *video_audio_out, *audio_out)
+
 # ===== INITIALIZATION =========================================================================================================================
 
 def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         MediaLoader,
+        MediaSplitter,
     ]
 
 # ===== AUDIO EXTRACTION =======================================================================================================================
