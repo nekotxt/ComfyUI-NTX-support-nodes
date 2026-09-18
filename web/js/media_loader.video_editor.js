@@ -30,6 +30,8 @@ import { MAX_SIZES, ASPECTS, MULTIPLES, HANDLES, HANDLE_CURSORS, dragRect, resiz
 const MIN_SPAN = 0.1;
 // one step of the frame buttons, in seconds
 const FRAME_STEP = 1 / 25;
+// the spans the quick range buttons select, in seconds, from the start and from the end
+const QUICK_SPANS = [1, 2, 3];
 
 // ── Edit records ──────────────────────────────────────────────────────────────
 
@@ -181,6 +183,9 @@ const CSS = `
     font-family: ui-monospace, monospace; font-size: 11px; padding: 2px 4px; text-align: right;
 }
 .nmv-transport .nmv-kept { color: #8a93a3; font-family: ui-monospace, monospace; }
+.nmv-quick { display: flex; align-items: center; gap: 6px; }
+.nmv-quick label { color: #8a93a3; margin-right: 2px; }
+.nmv-quick .nmv-sep { width: 1px; height: 18px; background: #303642; margin: 0 4px; }
 .nmv-info { display: flex; gap: 16px; color: #8a93a3; min-height: 16px; white-space: nowrap; overflow: hidden; }
 .nmv-info b { color: #c8cfda; font-weight: normal; }
 .nmv-foot { display: flex; align-items: center; gap: 6px; }
@@ -256,9 +261,10 @@ export function openVideoEditor(item, url, onApply) {
     const tctx = timeline.getContext("2d");
     const playheadLabel = el("div", { class: "nmv-tlrow" });
     const transport = el("div", { class: "nmv-transport" });
+    const quick = el("div", { class: "nmv-quick" });
     const info = el("div", { class: "nmv-info" });
     const bar = el("div", { class: "nmv-bar" });
-    const modal = el("div", { class: "nmv-modal" }, bar, stage, timeline, playheadLabel, transport, info);
+    const modal = el("div", { class: "nmv-modal" }, bar, stage, timeline, playheadLabel, transport, quick, info);
     const overlay = el("div", { class: "nmv-overlay" }, modal);
 
     const close = () => {
@@ -367,6 +373,7 @@ export function openVideoEditor(item, url, onApply) {
         draw();
         drawTimeline();
         drawTransport();
+        drawQuick();
         drawInfo();
     }
 
@@ -515,6 +522,36 @@ export function openVideoEditor(item, url, onApply) {
                 el("button", { class: "nmv-btn", title: "Go to the start of the kept span", onclick: () => { video.pause(); seek(edit.start); } }, "⏮ First"),
                 el("button", { class: "nmv-btn", title: "Go to the end of the kept span", onclick: () => { video.pause(); seek(rangeEnd()); } }, "Last ⏭"),
             ),
+        );
+    }
+
+    // ── quick ranges ──
+    // the first or last N seconds of the video, in one click (the whole video when shorter)
+    function selectSpan(seconds, fromEnd) {
+        video.pause();
+        const span = Math.min(seconds, duration());
+        edit.start = fromEnd ? round3(Math.max(0, duration() - span)) : 0;
+        edit.end = fromEnd ? null : (span >= duration() - 0.0005 ? null : round3(span));
+        seek(edit.start);
+        refresh();
+    }
+    function drawQuick() {
+        const d = duration();
+        const lit = (seconds, fromEnd) => {
+            const start = fromEnd ? Math.max(0, d - seconds) : 0;
+            const end = fromEnd ? d : Math.min(seconds, d);
+            return Math.abs(edit.start - start) < 0.0015 && Math.abs(rangeEnd() - end) < 0.0015;
+        };
+        fill(quick,
+            el("label", {}, "keep"),
+            QUICK_SPANS.map(n => el("button", { class: "nmv-btn" + (lit(n, false) ? " on" : ""),
+                title: `Keep the first ${n} second${n > 1 ? "s" : ""}`, onclick: () => selectSpan(n, false) }, `first ${n}s`)),
+            el("span", { class: "nmv-sep" }),
+            QUICK_SPANS.map(n => el("button", { class: "nmv-btn" + (lit(n, true) ? " on" : ""),
+                title: `Keep the last ${n} second${n > 1 ? "s" : ""}`, onclick: () => selectSpan(n, true) }, `last ${n}s`)),
+            el("span", { class: "nmv-sep" }),
+            el("button", { class: "nmv-btn" + (edit.start === 0 && edit.end == null ? " on" : ""),
+                title: "Keep the whole video", onclick: () => { edit.start = 0; edit.end = null; seek(0); refresh(); } }, "all"),
         );
     }
 
