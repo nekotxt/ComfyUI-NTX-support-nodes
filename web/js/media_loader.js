@@ -97,6 +97,42 @@ const CSS = `
 .nml-btn:disabled { opacity: .4; cursor: default; }
 .nml-btn.danger:hover { background: #7a2e2e; border-color: #a04040; color: #fff; }
 
+.nml-report-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10040;
+    background: rgba(8, 10, 14, .78);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: sans-serif;
+    font-size: 11px;
+    color: #c8cfda;
+}
+.nml-report {
+    width: min(640px, 94vw);
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    box-sizing: border-box;
+    background: #191c22;
+    border: 1px solid #303642;
+    border-radius: 8px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, .55);
+}
+.nml-report h3 { margin: 0; font-size: 12px; font-weight: bold; }
+.nml-report .nml-report-body { overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.nml-report h4 { margin: 0; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #6b7484; }
+.nml-report h4.ok { color: #7ec87e; }
+.nml-report h4.up { color: #7fb8d8; }
+.nml-report h4.miss { color: #e08a8a; }
+.nml-report ul { margin: 0; padding-left: 16px; }
+.nml-report li { line-height: 1.5; }
+.nml-report li span { color: #6b7484; }
+.nml-report .nml-report-foot { display: flex; justify-content: flex-end; }
+
 .nml-cols {
     flex: 1;
     min-height: 0;
@@ -360,6 +396,37 @@ function toast(severity, summary, detail) {
     } catch {
         console.log(`[MediaLoader] ${summary}: ${detail}`);
     }
+}
+
+// whether the file of a slot item is still on the server (a HEAD on the view route)
+async function fileExists(item) {
+    try {
+        const resp = await api.fetchApi(viewURL(item), { method: "HEAD" });
+        return resp.ok;
+    } catch {
+        return false;
+    }
+}
+
+// the report of a "Load missing" pass : three lists and a Close button
+function showReport(title, sections) {
+    const close = () => { overlay.remove(); window.removeEventListener("keydown", onKey); };
+    const onKey = (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); close(); } };
+    const body = el("div", { class: "nml-report-body" });
+    for (const { heading, css, items, empty } of sections) {
+        body.append(el("h4", { class: css }, `${heading} (${items.length})`));
+        body.append(items.length
+            ? el("ul", {}, items.map(({ text, note }) => el("li", {}, text, note ? el("span", {}, ` \u2014 ${note}`) : null)))
+            : el("div", { style: { color: "#6b7484", paddingLeft: "16px" } }, empty));
+    }
+    const overlay = el("div", { class: "nml-report-overlay", onclick: (ev) => { if (ev.target === overlay) close(); } },
+        el("div", { class: "nml-report" },
+            el("h3", {}, title),
+            body,
+            el("div", { class: "nml-report-foot" }, el("button", { class: "nml-btn", onclick: close }, "Close"))));
+    window.addEventListener("keydown", onKey);
+    document.body.append(overlay);
+    return overlay;
 }
 
 // ask the user to confirm an action, through the frontend's dialog when it is there
@@ -674,6 +741,112 @@ function makeMediaWidget(node, inputName, initialValue) {
     }
 
     // empty every slot, after confirmation (the files stay in the input folder)
+    // ── load missing ──
+    // Every filled slot is checked on the server ; the files gone missing (a workflow opened on
+    // another machine, a cleaned input folder) are looked for, by name, in a folder the user
+    // picks on this machine, and uploaded from there. The pass ends with a report.
+    let loadingMissing = false;
+    const folderPicker = el("input", { type: "file", multiple: true, style: { display: "none" } });
+    folderPicker.webkitdirectory = true;
+
+    function filledSlots() {
+        const list = [];
+        for (const kind of Object.keys(KINDS)) {
+            state[kind].forEach((item, index) => { if (item) list.push({ kind, index, item }); });
+        }
+        return list;
+    }
+
+    // the file of the picked folder matching a slot item : by its original name first, then by
+    // the name it is stored under, case-insensitively ; the shallowest match wins
+    function matchFile(item, files) {
+        const wanted = [item.name, item.file.slice(item.file.lastIndexOf("/") + 1)].map(n => n.toLowerCase());
+        for (const name of wanted) {
+            const found = files.filter(f => f.name.toLowerCase() === name)
+                .sort((a, b) => (a.webkitRelativePath || "").split("/").length - (b.webkitRelativePath || "").split("/").length);
+            if (found.length) return found[0];
+        }
+        return null;
+    }
+
+    // upload a file for a slot whose file is missing : the slot keeps its name and edits, and
+    // points at the name the server stored the file under
+    async function reupload(kind, index, file) {
+        const key = `${kind}:${index}`;
+        busy.add(key); render();
+        try {
+            const uploaded = await uploadFile(file);
+            const live = state[kind][index];
+            if (live) { live.file = uploaded.file; live.type = uploaded.type; }
+        } finally {
+            busy.delete(key); commit();
+        }
+    }
+
+    async function loadMissing() {
+        if (loadingMissing) return;
+        loadingMissing = true;
+        render();
+        try {
+            const slots = filledSlots();
+            const label = ({ kind, index, item }) => `${item.name} (${KINDS[kind].label} ${index + 1})`;
+            const present = [], missing = [];
+            for (const slot of slots) (await fileExists(slot.item) ? present : missing).push(slot);
+            const found = present.map(s => ({ text: label(s) }));
+            if (!missing.length) {
+                showReport("Load missing media", [
+                    { heading: "Found on the server, unchanged", css: "ok", items: found, empty: "no media loaded" },
+                    { heading: "Missing, uploaded", css: "up", items: [], empty: "nothing was missing" },
+                    { heading: "Still missing", css: "miss", items: [], empty: "none" },
+                ]);
+                return;
+            }
+            // pick the folder
+            const files = await new Promise((resolve) => {
+                let timer = 0;
+                const done = (list) => {
+                    clearTimeout(timer);
+                    folderPicker.removeEventListener("change", onChange);
+                    folderPicker.removeEventListener("cancel", onCancel);
+                    window.removeEventListener("focus", onFocus);
+                    resolve(list);
+                };
+                const onChange = () => { const list = [...folderPicker.files]; folderPicker.value = ""; done(list); };
+                const onCancel = () => done(null);
+                // browsers without the cancel event : the window gets its focus back once the
+                // dialog closes, and a selection follows within a moment when there is one
+                const onFocus = () => { clearTimeout(timer); timer = setTimeout(() => done(null), 1000); };
+                folderPicker.addEventListener("change", onChange);
+                folderPicker.addEventListener("cancel", onCancel);
+                setTimeout(() => window.addEventListener("focus", onFocus), 100);
+                folderPicker.click();
+            });
+            if (!files) return;                     // the picker was cancelled
+            const uploaded = [], still = [];
+            for (const slot of missing) {
+                const file = matchFile(slot.item, files);
+                if (!file) { still.push({ text: label(slot), note: "not in the folder" }); continue; }
+                if (!file.size) { still.push({ text: label(slot), note: "the file in the folder is empty" }); continue; }
+                try {
+                    await reupload(slot.kind, slot.index, file);
+                    const stored = state[slot.kind][slot.index]?.file ?? "";
+                    uploaded.push({ text: label(slot), note: `from ${file.webkitRelativePath || file.name}`
+                        + (stored.slice(stored.lastIndexOf("/") + 1) !== slot.item.name ? `, stored as ${stored.slice(stored.lastIndexOf("/") + 1)}` : "") });
+                } catch (err) {
+                    still.push({ text: label(slot), note: `upload failed : ${err.message}` });
+                }
+            }
+            showReport("Load missing media", [
+                { heading: "Found on the server, unchanged", css: "ok", items: found, empty: "none" },
+                { heading: "Missing, uploaded from the folder", css: "up", items: uploaded, empty: "none" },
+                { heading: "Still missing", css: "miss", items: still, empty: "none" },
+            ]);
+        } finally {
+            loadingMissing = false;
+            render();
+        }
+    }
+
     async function clearAll() {
         const count = loadedCount();
         if (!count) return;
@@ -843,6 +1016,9 @@ function makeMediaWidget(node, inputName, initialValue) {
             el("button", { class: "nml-btn", disabled: state.rows <= MIN_ROWS,
                 title: "Remove the last row of slots : 3 pictures, 1 video, 1 audio",
                 onclick: (ev) => { ev.stopPropagation(); removeRow(); } }, "Remove slots"),
+            el("button", { class: "nml-btn", disabled: !count || loadingMissing,
+                title: "Check that every loaded file is still on the server, and upload the missing ones from a folder of this machine",
+                onclick: (ev) => { ev.stopPropagation(); loadMissing(); } }, loadingMissing ? "checking\u2026" : "Load missing"),
             el("button", { class: "nml-btn danger", disabled: !count, title: "Empty every slot",
                 onclick: (ev) => { ev.stopPropagation(); clearAll(); } }, "Clear"));
     }
