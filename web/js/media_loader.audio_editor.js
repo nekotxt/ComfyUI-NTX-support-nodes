@@ -19,6 +19,8 @@
 const MIN_SPAN = 0.1;
 // one step of the step buttons, in seconds
 const STEP = 0.1;
+// the spans the quick range buttons select, in seconds, from the start and from the end
+const QUICK_SPANS = [1, 2, 3];
 
 // ── Edit records ──────────────────────────────────────────────────────────────
 
@@ -75,7 +77,7 @@ const CSS = `
 }
 .nma-modal {
     width: min(1000px, 94vw);
-    height: min(440px, 92vh);
+    height: min(470px, 92vh);
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -131,6 +133,9 @@ const CSS = `
     font-family: ui-monospace, monospace; font-size: 11px; padding: 2px 4px; text-align: right;
 }
 .nma-transport .nma-kept { color: #8a93a3; font-family: ui-monospace, monospace; }
+.nma-quick { display: flex; align-items: center; gap: 6px; }
+.nma-quick label { color: #8a93a3; margin-right: 2px; }
+.nma-quick .nma-sep { width: 1px; height: 18px; background: #303642; margin: 0 4px; }
 .nma-foot { display: flex; align-items: center; gap: 6px; }
 .nma-foot .nma-spacer { flex: 1; }
 `;
@@ -215,8 +220,9 @@ export function openAudioEditor(item, url, onApply) {
     const tctx = timeline.getContext("2d");
     const playheadLabel = el("div", { class: "nma-tlrow" });
     const transport = el("div", { class: "nma-transport" });
+    const quick = el("div", { class: "nma-quick" });
     const bar = el("div", { class: "nma-bar" });
-    const modal = el("div", { class: "nma-modal" }, bar, stage, timeline, playheadLabel, transport);
+    const modal = el("div", { class: "nma-modal" }, bar, stage, timeline, playheadLabel, transport, quick);
     const overlay = el("div", { class: "nma-overlay" }, modal);
 
     const close = () => {
@@ -295,6 +301,7 @@ export function openAudioEditor(item, url, onApply) {
         drawWave();
         drawTimeline();
         drawTransport();
+        drawQuick();
     }
 
     // ── waveform ──
@@ -447,6 +454,36 @@ export function openAudioEditor(item, url, onApply) {
                 el("button", { class: "nma-btn", title: "Go to the start of the kept span", onclick: () => { audio.pause(); seek(edit.start); } }, "⏮ First"),
                 el("button", { class: "nma-btn", title: "Go to the end of the kept span", onclick: () => { audio.pause(); seek(rangeEnd()); } }, "Last ⏭"),
             ),
+        );
+    }
+
+    // ── quick ranges ──
+    // the first or last N seconds of the audio, in one click (the whole audio when shorter)
+    function selectSpan(seconds, fromEnd) {
+        audio.pause();
+        const span = Math.min(seconds, duration());
+        edit.start = fromEnd ? round3(Math.max(0, duration() - span)) : 0;
+        edit.end = fromEnd ? null : (span >= duration() - 0.0005 ? null : round3(span));
+        seek(edit.start);
+        refresh();
+    }
+    function drawQuick() {
+        const d = duration();
+        const lit = (seconds, fromEnd) => {
+            const start = fromEnd ? Math.max(0, d - seconds) : 0;
+            const end = fromEnd ? d : Math.min(seconds, d);
+            return Math.abs(edit.start - start) < 0.0015 && Math.abs(rangeEnd() - end) < 0.0015;
+        };
+        fill(quick,
+            el("label", {}, "keep"),
+            QUICK_SPANS.map(n => el("button", { class: "nma-btn" + (lit(n, false) ? " on" : ""),
+                title: `Keep the first ${n} second${n > 1 ? "s" : ""}`, onclick: () => selectSpan(n, false) }, `first ${n}s`)),
+            el("span", { class: "nma-sep" }),
+            QUICK_SPANS.map(n => el("button", { class: "nma-btn" + (lit(n, true) ? " on" : ""),
+                title: `Keep the last ${n} second${n > 1 ? "s" : ""}`, onclick: () => selectSpan(n, true) }, `last ${n}s`)),
+            el("span", { class: "nma-sep" }),
+            el("button", { class: "nma-btn" + (edit.start === 0 && edit.end == null ? " on" : ""),
+                title: "Keep the whole audio", onclick: () => { edit.start = 0; edit.end = null; seek(0); refresh(); } }, "all"),
         );
     }
 
