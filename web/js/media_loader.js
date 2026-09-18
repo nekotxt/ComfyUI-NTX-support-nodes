@@ -15,9 +15,12 @@
 // stacked on the right (1 of each per row). The number of rows is edited with
 // the "Add slots" / "Remove slots" buttons. A slot is filled by dropping files
 // on it or by picking them in the file dialog it opens when clicked; extra
-// files spill over into the next free slots of the same kind. Files are
-// uploaded through the core /upload/image route, in the input/ntx_media
-// subfolder, and previewed straight from /view.
+// files spill over into the next free slots of the same kind. A loaded file is
+// moved to another slot of its kind by holding the grip at the right of its
+// slot and dragging (swapping with the file already there, if any), and a
+// picture opens at full size in a lightbox from the magnifier next to the
+// grip. Files are uploaded through the core /upload/image route, in the
+// input/ntx_media subfolder, and previewed straight from /view.
 
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
@@ -157,6 +160,7 @@ const CSS = `
     text-overflow: ellipsis;
     pointer-events: none;
 }
+.nml-slot.pic .nml-name { padding-right: 38px; }   /* two icons at the right of a picture caption */
 .nml-slot .nml-remove {
     position: absolute;
     top: 2px; right: 2px;
@@ -173,13 +177,113 @@ const CSS = `
 }
 .nml-slot:hover .nml-remove { opacity: 1; }
 .nml-slot .nml-remove:hover { background: #7a2e2e; color: #fff; }
+.nml-slot .nml-grip {
+    position: absolute;
+    bottom: 2px; right: 2px;
+    width: 16px; height: 16px;
+    line-height: 16px;
+    text-align: center;
+    border-radius: 3px;
+    background: rgba(8, 10, 14, .72);
+    color: #c8cfda;
+    font-size: 11px;
+    cursor: grab;
+    opacity: 0;
+    transition: opacity .12s;
+    touch-action: none;
+}
+.nml-slot:hover .nml-grip { opacity: 1; }
+.nml-slot .nml-grip:hover { background: #2a303b; color: #fff; }
+.nml-slot .nml-grip:active { cursor: grabbing; }
+.nml-slot .nml-zoom {
+    position: absolute;
+    bottom: 2px; right: 20px;
+    width: 16px; height: 16px;
+    line-height: 16px;
+    text-align: center;
+    border-radius: 3px;
+    background: rgba(8, 10, 14, .72);
+    color: #c8cfda;
+    font-size: 11px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .12s;
+}
+.nml-slot:hover .nml-zoom { opacity: 1; }
+.nml-slot .nml-zoom:hover { background: #2a303b; color: #fff; }
+
+.nml-light {
+    position: fixed;
+    inset: 0;
+    z-index: 10040;
+    background: rgba(8, 10, 14, .78);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: zoom-out;
+}
+.nml-lightbox {
+    max-width: 92vw;
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    background: #191c22;
+    border: 1px solid #303642;
+    border-radius: 8px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, .55);
+    cursor: default;
+}
+.nml-lightbox img {
+    display: block;
+    max-width: 90vw;
+    max-height: 84vh;
+    object-fit: contain;
+    background: #0a0c10;
+}
+.nml-lightcap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: sans-serif;
+    font-size: 11px;
+    color: #c8cfda;
+}
+.nml-lightcap .nml-lightdims { color: #6b7484; }
+.nml-lightcap .nml-btn { margin-left: auto; }
+.nml-slot.moving { opacity: .45; }
+.nml-ghost {
+    position: fixed;
+    z-index: 10050;
+    width: 72px; height: 72px;
+    border: 1px solid #6f86b8;
+    border-radius: 4px;
+    background: #0a0c10;
+    overflow: hidden;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .5);
+    pointer-events: none;
+}
+.nml-ghost img { width: 100%; height: 100%; object-fit: contain; }
+.nml-ghost.label {
+    width: auto; height: auto;
+    max-width: 200px;
+    padding: 4px 8px;
+    font-size: 10px;
+    color: #c8cfda;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* in the audio row the grip sits inline, after the player */
+.nml-arow .nml-grip { position: static; opacity: 1; flex-shrink: 0; }
 
 .nml-arow {
     display: flex;
     align-items: center;
     gap: 6px;
     width: 100%;
-    padding: 0 6px;
+    padding: 0 22px 0 6px;     /* room on the right for the remove button above the grip */
     box-sizing: border-box;
     min-width: 0;
 }
@@ -220,6 +324,23 @@ function el(tag, props = {}, ...children) {
         e.append(c.nodeType ? c : document.createTextNode(c));
     }
     return e;
+}
+
+// full size view of a picture, closed by a click outside, the Close button or Escape
+function lightbox(item) {
+    const img = el("img", { src: viewURL(item), alt: item.name });
+    const dims = el("span", { class: "nml-lightdims" });
+    img.addEventListener("load", () => { dims.textContent = `${img.naturalWidth} x ${img.naturalHeight}`; });
+    const close = () => { overlay.remove(); window.removeEventListener("keydown", onKey); };
+    const onKey = (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); close(); } };
+    const overlay = el("div", { class: "nml-light", onclick: (ev) => { if (ev.target === overlay) close(); } },
+        el("div", { class: "nml-lightbox" }, img,
+            el("div", { class: "nml-lightcap" },
+                el("span", {}, item.name), dims,
+                el("button", { class: "nml-btn", onclick: close }, "Close"))));
+    window.addEventListener("keydown", onKey);
+    document.body.append(overlay);
+    return overlay;
 }
 
 function toast(severity, summary, detail) {
@@ -393,6 +514,67 @@ function makeMediaWidget(node, inputName, initialValue) {
         commit();
     }
 
+    // move an item to another slot of the same kind, swapping with whatever is there
+    function move(kind, from, to) {
+        if (from === to || !state[kind][from]) return;
+        [state[kind][from], state[kind][to]] = [state[kind][to], state[kind][from]];
+        commit();
+    }
+
+    // ── slot to slot moves ──
+    // Holding the grip of a filled slot starts a move : the pointer is captured
+    // by the grip, a ghost thumbnail follows it, the slot under it (same kind
+    // only) lights up, and releasing there moves the item. Pointer capture
+    // keeps the events flowing even when the pointer leaves the node.
+    function startMove(ev, grip, kind, index, item) {
+        if (ev.button !== 0) return;
+        ev.preventDefault(); ev.stopPropagation();
+        const source = grip.closest(".nml-slot");
+        const thumb = source.querySelector("img");
+        const ghost = thumb
+            ? el("div", { class: "nml-ghost" }, el("img", { src: thumb.src }))
+            : el("div", { class: "nml-ghost label" }, `${kind === "videos" ? "\u25b6" : "\u266a"} ${item.name}`);
+        document.body.append(ghost);
+        source.classList.add("moving");
+        let target = null;
+
+        const place = (e) => { ghost.style.left = `${e.clientX + 14}px`; ghost.style.top = `${e.clientY + 14}px`; };
+        const slotAt = (e) => {
+            const slot = document.elementFromPoint(e.clientX, e.clientY)?.closest?.(".nml-slot");
+            return slot && slot !== source && slot.dataset.kind === kind && panel.contains(slot) ? slot : null;
+        };
+        const onMove = (e) => {
+            place(e);
+            const slot = slotAt(e);
+            if (slot === target) return;
+            target?.classList.remove("hot");
+            target = slot;
+            target?.classList.add("hot");
+        };
+        const onUp = (e) => {
+            grip.removeEventListener("pointermove", onMove);
+            grip.removeEventListener("pointerup", onUp);
+            grip.removeEventListener("pointercancel", onUp);
+            try { grip.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+            ghost.remove();
+            source.classList.remove("moving");
+            target?.classList.remove("hot");
+            if (e.type === "pointerup" && target) move(kind, index, parseInt(target.dataset.index, 10));
+        };
+        grip.addEventListener("pointermove", onMove);
+        grip.addEventListener("pointerup", onUp);
+        grip.addEventListener("pointercancel", onUp);
+        try { grip.setPointerCapture(ev.pointerId); } catch { /* not a live pointer : events still reach the grip */ }
+        place(ev);
+    }
+
+    function gripFor(kind, index, item) {
+        const grip = el("div", { class: "nml-grip", title: "Hold and drag to move to another slot" }, "\u2630");
+        grip.addEventListener("pointerdown", (ev) => startMove(ev, grip, kind, index, item));
+        grip.addEventListener("click", (ev) => ev.stopPropagation());
+        return grip;
+    }
+
     function loadedCount() {
         return Object.keys(KINDS).reduce((n, kind) => n + state[kind].filter(Boolean).length, 0);
     }
@@ -464,6 +646,8 @@ function makeMediaWidget(node, inputName, initialValue) {
     });
 
     function dropTarget(slot, kind, index) {
+        slot.dataset.kind = kind;
+        slot.dataset.index = String(index);
         slot.addEventListener("dragover", (ev) => {
             if (!hasFiles(ev)) return;
             ev.preventDefault(); ev.stopPropagation();
@@ -503,18 +687,21 @@ function makeMediaWidget(node, inputName, initialValue) {
         if (kind === "pictures") {
             slot.append(el("img", { src: url, alt: item.name, draggable: false }));
             slot.append(el("div", { class: "nml-name" }, item.name));
+            slot.append(el("div", { class: "nml-zoom", title: "View at full size",
+                onclick: (ev) => { ev.stopPropagation(); lightbox(item); } }, "\ud83d\udd0d"));
+            slot.append(gripFor(kind, index, item));
         } else if (kind === "videos") {
             const video = el("video", { src: url, muted: true, loop: true, playsInline: true, preload: "metadata" });
             slot.addEventListener("mouseenter", () => { video.play().catch(() => {}); });
             slot.addEventListener("mouseleave", () => { video.pause(); });
-            slot.append(video, el("div", { class: "nml-name" }, item.name));
+            slot.append(video, el("div", { class: "nml-name" }, item.name), gripFor(kind, index, item));
         } else {
             const audio = el("audio", { src: url, controls: true, preload: "none" });
             audio.addEventListener("click", (ev) => ev.stopPropagation());
             slot.append(el("div", { class: "nml-arow" },
                 el("span", { class: "nml-glyph" }, "♪"),
                 el("span", { class: "nml-aname", title: item.name }, item.name),
-                audio));
+                audio, gripFor(kind, index, item)));
         }
         slot.append(el("div", {
             class: "nml-remove",
