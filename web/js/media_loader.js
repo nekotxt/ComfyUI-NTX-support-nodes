@@ -19,15 +19,17 @@
 // moved to another slot of its kind by holding the grip at the right of its
 // slot and dragging (swapping with the file already there, if any). A picture
 // opens at full size in a lightbox from its magnifier, and in the editor of
-// media_loader.editor.js from its pencil ; the editor records rotate / mirror /
-// crop / max size settings on the item (`edit`, see that module), the file
-// itself is never touched. Files are uploaded through the core /upload/image
+// media_loader.editor.js from its pencil ; a video opens in the editor of
+// media_loader.video_editor.js from its pencil. The editors record rotate /
+// mirror / crop / max size / time range settings on the item (`edit`, see those
+// modules), the file itself is never touched. Files are uploaded through the core /upload/image
 // route, in the input/ntx_media subfolder, and previewed straight from /view.
 
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 import { ADDON_PREFIX, API_PREFIX } from "./config.js";
 import { openEditor, isEdited, describeEdit, paintEdited } from "./media_loader.editor.js";
+import { openVideoEditor, isVideoEdited, describeVideoEdit, normalizeVideoEdit } from "./media_loader.video_editor.js";
 
 const NODE_ID = ADDON_PREFIX + "MediaLoader";
 const WIDGET_NAME = "media_state";
@@ -164,6 +166,7 @@ const CSS = `
     pointer-events: none;
 }
 .nml-slot.pic .nml-name { padding-right: 56px; }   /* three icons at the right of a picture caption */
+.nml-slot.vid .nml-name { padding-right: 38px; }   /* two icons at the right of a video caption */
 .nml-slot .nml-remove {
     position: absolute;
     top: 2px; right: 2px;
@@ -213,6 +216,7 @@ const CSS = `
     transition: opacity .12s;
 }
 .nml-slot .nml-edit { right: 20px; }
+.nml-slot.vid .nml-edit { right: 20px; }
 .nml-slot:hover .nml-zoom, .nml-slot:hover .nml-edit { opacity: 1; }
 .nml-slot .nml-zoom:hover, .nml-slot .nml-edit:hover { background: #2a303b; color: #fff; }
 .nml-slot .nml-edit.on { opacity: 1; color: #e0a94c; }
@@ -720,9 +724,26 @@ function makeMediaWidget(node, inputName, initialValue) {
             slot.append(gripFor(kind, index, item));
         } else if (kind === "videos") {
             const video = el("video", { src: url, muted: true, loop: true, playsInline: true, preload: "metadata" });
+            // the preview shows the mirrors and starts at the kept span (the crop is not shown)
+            const vedit = normalizeVideoEdit(item.edit);
+            if (vedit.mirror_h || vedit.mirror_v) video.style.transform = `scale(${vedit.mirror_h ? -1 : 1}, ${vedit.mirror_v ? -1 : 1})`;
+            video.addEventListener("loadedmetadata", () => { if (vedit.start > 0) video.currentTime = vedit.start; });
             slot.addEventListener("mouseenter", () => { video.play().catch(() => {}); });
             slot.addEventListener("mouseleave", () => { video.pause(); });
-            slot.append(video, el("div", { class: "nml-name" }, item.name), gripFor(kind, index, item));
+            slot.append(video, el("div", { class: "nml-name" }, item.name));
+            const edited = isVideoEdited(item.edit);
+            slot.append(el("div", { class: "nml-edit" + (edited ? " on" : ""),
+                title: edited ? `Edit (${describeVideoEdit(item.edit)})` : "Edit : trim, mirror, crop, max size",
+                onclick: (ev) => {
+                    ev.stopPropagation();
+                    openVideoEditor(item, viewURL(item), (edit) => {
+                        const live = state[kind][index];
+                        if (!live || live.file !== item.file) return;   // the slot changed meanwhile
+                        if (edit) live.edit = edit; else delete live.edit;
+                        commit();
+                    });
+                } }, "✎"));
+            slot.append(gripFor(kind, index, item));
         } else {
             const audio = el("audio", { src: url, controls: true, preload: "none" });
             audio.addEventListener("click", (ev) => ev.stopPropagation());

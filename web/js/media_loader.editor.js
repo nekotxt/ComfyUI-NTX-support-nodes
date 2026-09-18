@@ -22,7 +22,9 @@
 // openEditor(item, url, onApply) shows the modal editor for a slot item ; the
 // edits are worked on a copy and only reach the item through Apply.
 // paintEdited(img, edit, maxSide) draws the edited picture on a canvas, for the
-// slot thumbnails.
+// slot thumbnails. The crop geometry (dragRect, resizeRect, HANDLES, ...) is
+// exported for the video editor of media_loader.video_editor.js, which has its
+// own interface but crops the same way.
 
 // ── Edit records ──────────────────────────────────────────────────────────────
 
@@ -151,7 +153,7 @@ function gcd(a, b) { while (b) [a, b] = [b, a % b]; return a; }
 function lcm(a, b) { return a / gcd(a, b) * b; }
 
 // the smallest width / height step honouring both the aspect ratio and the multiple
-function cropStep(aspect, mult) {
+export function cropStep(aspect, mult) {
     if (aspect === "free") return null;
     let [rw, rh] = aspect.split(":").map(Number);
     const g = gcd(rw, rh); rw /= g; rh /= g;
@@ -161,7 +163,7 @@ function cropStep(aspect, mult) {
 
 // the crop rectangle for a drag from `anchor` to `cur`, within tw x th, honouring
 // the aspect ratio and the size multiple (null when nothing usable was dragged)
-function dragRect(anchor, cur, tw, th, aspect, mult) {
+export function dragRect(anchor, cur, tw, th, aspect, mult) {
     const dx = cur.x - anchor.x, dy = cur.y - anchor.y;
     const sx = dx < 0 ? -1 : 1, sy = dy < 0 ? -1 : 1;
     const availW = sx > 0 ? tw - anchor.x : anchor.x;
@@ -183,15 +185,15 @@ function dragRect(anchor, cur, tw, th, aspect, mult) {
 }
 
 // the resize handles of the crop rectangle, as fractions of its width and height
-const HANDLES = { nw: [0, 0], n: [.5, 0], ne: [1, 0], e: [1, .5], se: [1, 1], s: [.5, 1], sw: [0, 1], w: [0, .5] };
-const HANDLE_CURSORS = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize",
+export const HANDLES = { nw: [0, 0], n: [.5, 0], ne: [1, 0], e: [1, .5], se: [1, 1], s: [.5, 1], sw: [0, 1], w: [0, .5] };
+export const HANDLE_CURSORS = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize",
                          n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize" };
 
 // the crop rectangle once its `handle` is dragged to `p`, within tw x th, honouring
 // the aspect ratio and the size multiple. A corner drags against the opposite
 // corner ; a side keeps the opposite side in place and, when the aspect ratio
 // forces the other dimension to follow, keeps the rectangle centred on that axis.
-function resizeRect(handle, crop, p, tw, th, aspect, mult) {
+export function resizeRect(handle, crop, p, tw, th, aspect, mult) {
     const { x, y, width: cw, height: ch } = crop;
     const right = x + cw, bottom = y + ch;
     if (handle.length === 2) {

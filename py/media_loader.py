@@ -27,8 +27,9 @@ MIN_ROWS = 1
 # a filled one a dict :
 #   {"name": "clip.mp4", "file": "ntx_media/clip.mp4", "type": "input"}
 # where "file" is the path relative to the ComfyUI folder named by "type", and "name" the original
-# file name shown in the slot. A picture may carry the edits recorded by the frontend editor
-# (web/js/media_loader.editor.js), as an "edit" dict, see normalize_edit
+# file name shown in the slot. A picture or a video may carry the edits recorded by the frontend
+# editors (web/js/media_loader.editor.js, web/js/media_loader.video_editor.js), as an "edit" dict,
+# see normalize_edit and normalize_video_edit
 def parse_media_state(media_state: str) -> dict[str, list]:
     try:
         state = json.loads(media_state or "{}")
@@ -98,6 +99,39 @@ def normalize_edit(edit) -> dict:
 def is_edited(edit: dict) -> bool:
     return edit["rotate"] != 0 or edit["mirror_h"] or edit["mirror_v"] or edit["crop"] is not None or edit["max_size"] != 0
 
+# the edits a video may carry, and the order they are meant to be applied in :
+#   1. keep only the span from "start" to "end" seconds (None : up to the end of the video)
+#   2. mirror the frames horizontally ("mirror_h") and / or vertically ("mirror_v")
+#   3. crop them to "crop" = {x, y, width, height}, in pixels of the mirrored frame (None : no crop)
+#   4. scale them down so that the longer side is at most "max_size" pixels (0 : no limit)
+def normalize_video_edit(edit) -> dict:
+    result = {"mirror_h": False, "mirror_v": False, "crop": None, "max_size": 0, "start": 0.0, "end": None}
+    if not isinstance(edit, dict):
+        return result
+    # the frame edits are the picture ones without the rotation
+    frame = normalize_edit({key: edit.get(key) for key in ("mirror_h", "mirror_v", "crop", "max_size")})
+    for key in ("mirror_h", "mirror_v", "crop", "max_size"):
+        result[key] = frame[key]
+    try:
+        start = float(edit.get("start", 0) or 0)
+    except (TypeError, ValueError):
+        start = 0.0
+    if start > 0:
+        result["start"] = round(start, 3)
+    end = edit.get("end")
+    if end is not None:
+        try:
+            end = float(end)
+        except (TypeError, ValueError):
+            end = None
+    if end is not None and end > result["start"]:
+        result["end"] = round(end, 3)
+    return result
+
+def is_video_edited(edit: dict) -> bool:
+    return (edit["mirror_h"] or edit["mirror_v"] or edit["crop"] is not None or edit["max_size"] != 0
+            or edit["start"] > 0 or edit["end"] is not None)
+
 # ===== NODES ==================================================================================================================================
 
 class MediaLoader(io.ComfyNode):
@@ -109,9 +143,10 @@ class MediaLoader(io.ComfyNode):
     slot opens when clicked ; the file is uploaded in the input/ntx_media directory and a preview is
     displayed in the slot.
 
-    A picture can also be edited on the node (rotate, mirror, crop, max size) : the editor records
-    the settings on the slot, the file is never touched, and the settings travel with the picture in
-    the bundle (see normalize_edit) for the consuming node to apply.
+    A picture can also be edited on the node (rotate, mirror, crop, max size), and so can a video
+    (time range, mirror, crop, max size) : the editors record the settings on the slot, the file is
+    never touched, and the settings travel with the picture or video in the bundle (see
+    normalize_edit and normalize_video_edit) for the consuming node to apply.
 
     The slots live in the media_state widget, a JSON object the frontend replaces on the node by
     the slot panel that edits it (see parse_media_state for its layout). The node resolves each file
@@ -157,8 +192,11 @@ class MediaLoader(io.ComfyNode):
                 }
                 if kind == "pictures":
                     entry["edit"] = normalize_edit(slot.get("edit"))
+                elif kind == "videos":
+                    entry["edit"] = normalize_video_edit(slot.get("edit"))
                 media[kind].append(entry)
-            edited = sum(1 for entry in media[kind] if "edit" in entry and is_edited(entry["edit"]))
+            check = is_edited if kind == "pictures" else is_video_edited
+            edited = sum(1 for entry in media[kind] if "edit" in entry and check(entry["edit"]))
             logger.info(f"{kind} : {len(media[kind])} / {len(slots)} slots loaded"
                         + (f", {edited} edited" if edited else ""))
 
