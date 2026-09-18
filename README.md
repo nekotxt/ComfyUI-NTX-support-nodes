@@ -2028,3 +2028,174 @@ its frames or its audio file is a real error and stops the prompt.
 | `audio` | AUDIO | The audio track; `None` when none was saved or the directory was not found. |
 | `fps` | FLOAT | The frame rate stored at save time; `None` when the directory was not found. |
 | `loaded` | BOOLEAN | `True` when the directory was loaded, `False` when it was not found. |
+
+---
+
+## MediaLoader
+
+![MediaLoader node](images/MediaLoader.png)
+
+Collects a set of reference media — pictures, videos and audios — in one node, and hands them
+out as a single **NTX_MEDIA_REFS** bundle for a downstream node to consume (typically a
+reference-to-video node that takes several images, clips and sounds at once).
+
+The node is a panel of **slots**, arranged in rows: each row holds **3 picture slots** (on the
+left), **1 video slot** and **1 audio slot** (on the right). A new node starts with **3 rows**
+(9 pictures, 3 videos, 3 audios); rows are added and removed on the node, down to a minimum of
+one. A slot is filled by **dropping** a file on it or by **clicking** it, which opens a file
+dialog filtered to the slot's kind; the file is **uploaded into `input/ntx_media/`** in the
+ComfyUI folder (through the standard upload route, so a file with the same name and content is
+reused, and a different file with the same name gets a ` (1)` suffix) and previewed in the slot.
+The node **never deletes** a file: emptying a slot, clearing the node or removing a row only
+forgets the reference, and the copies stay in `input/ntx_media/`.
+
+Pictures, videos and audios can also be **edited** from their slot (rotation, mirrors, crop,
+maximum size, time span — see *Frontend*). The edits are **recorded, not applied**: the file on
+disk is left untouched, and the settings travel with the media in the bundle for the consuming
+node to apply.
+
+The node **re-runs only when something changes**: its cache fingerprint is made of the slot
+contents plus the size and modification time of every referenced file, so it executes when a
+slot or an edit changes, when a file is rewritten on disk, and after a server restart. A slot
+whose file is **missing** from the server fails the prompt with
+`Missing <kind> file in slot <n> : <file>` — the **Load missing** command (see *Frontend*)
+restores such files from a local folder.
+
+**NTX_MEDIA_REFS** is a dictionary with three lists, `pictures`, `videos` and `audios`, holding
+one entry per **filled** slot, in slot order:
+
+| Key | Description |
+|---|---|
+| `slot` | 0-based index of the slot the entry comes from (gaps are possible). |
+| `name` | The original file name, as shown in the slot. |
+| `file` | The file relative to the ComfyUI folder named by `type`, e.g. `ntx_media/clip.mp4`. |
+| `type` | The ComfyUI folder holding the file (`input`). |
+| `path` | The absolute path of the file on the server, resolved at execution time. |
+| `edit` | The recorded edits, always present with every key (defaults when nothing was edited) — see below. |
+
+The `edit` record depends on the kind of media, and its keys are meant to be applied **in this
+order**:
+
+- **pictures**: `rotate` (`0`, `90`, `180` or `270`, clockwise), `mirror_h` / `mirror_v`
+  (booleans), `crop` (`{x, y, width, height}` in pixels of the *rotated and mirrored* picture,
+  or `null`), `max_size` (longest side in pixels, `0` for no limit);
+- **videos**: `start` / `end` (seconds; `end` is `null` for "up to the end"), then `mirror_h`,
+  `mirror_v`, `crop` (in pixels of the mirrored frame) and `max_size` as for pictures — no
+  rotation;
+- **audios**: `start` / `end` only.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `media_state` | STRING (hidden) | Managed by the frontend, not edited by hand: a JSON object with the number of rows and one list per kind (`pictures`, `videos`, `audios`), each slot being `null` or `{name, file, type, edit?}`. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `media` | NTX_MEDIA_REFS | The bundle described above. Empty slots are skipped; the lists are empty when nothing is loaded. |
+
+### Frontend
+
+The raw `media_state` widget is replaced by the slot panel. Its top bar holds:
+
+- **Add slots** — appends a row: 3 picture slots, 1 video slot, 1 audio slot.
+- **Remove slots** — removes the last row (disabled at one row). When a slot of that row is
+  filled, a confirmation lists the files about to be forgotten; the files themselves stay in
+  `input/ntx_media/`.
+- **Load missing** — checks every loaded file on the server and, when some are missing (a
+  workflow opened on another machine, a cleaned input folder), opens a **folder picker**: the
+  missing files are looked up **by name** in the chosen folder and its subfolders
+  (case-insensitively, the original name first, then the stored name) and uploaded from there,
+  the slot keeping its edits. A **report** then lists the files *found on the server*, the ones
+  *uploaded from the folder* (with their source path, and the name they were stored under when
+  it differs) and the ones *still missing* with the reason. When nothing is missing the report
+  is shown directly, without asking for a folder. Disabled while nothing is loaded.
+- **Clear** — empties every slot, after confirmation.
+
+**Loading files**
+
+- Click an **empty** slot to browse (the dialog only offers the slot's kind: images, videos or
+  audios; several files can be picked), or drop files on it. The first file takes the slot,
+  further files spill over into the **next free slots of the same kind**; a file of another
+  kind, an unsupported type or an empty file is skipped with a toast, as are files for which
+  no free slot remains.
+- Dropping files on the **panel background** (outside any slot) fills the first free slots of
+  each file's kind.
+- Dropping on, or clicking, a **filled** slot replaces its content.
+- Accepted extensions: pictures `png jpg jpeg webp bmp gif tif tiff`, videos
+  `mp4 mov mkv webm avi m4v mpg mpeg`, audios `wav mp3 flac ogg m4a aac opus`.
+
+**Filled slots**
+
+- Pictures show a thumbnail (of the *edited* picture when edits are recorded), videos their
+  first frame — they play, muted, while hovered, mirrored and from the start of their span
+  when edited — and audios a compact player, started at the span's start when trimmed.
+- **×** (top-right, on hover) empties the slot.
+- **☰** grip (bottom-right; at the end of an audio row) — **hold and drag** to move the file to
+  another slot **of the same kind**; dropping on a filled slot **swaps** the two. A ghost
+  follows the pointer and the target slot lights up; releasing elsewhere cancels.
+- **🔍** (pictures) opens the picture at full size in a lightbox, with its dimensions; close
+  with **Close**, **Escape** or a click outside.
+- **✎** opens the editor of the slot's kind (below). The pencil is highlighted when edits are
+  recorded, and its tooltip summarizes them.
+
+**Picture editor** (✎ on a picture)
+
+- **↶ Rotate** / **↷ Rotate** turn the picture by 90°; **↔ Mirror** / **↕ Mirror** toggle the
+  mirrors. Rotating or mirroring while a crop exists **carries the crop along**, so it keeps
+  covering the same pixels.
+- **▣ Crop** toggles crop mode: **drag on the picture** to draw the rectangle, **drag inside** it
+  to move it, drag one of its **eight handles** (corners and side midpoints) to resize it —
+  a side handle keeps the opposite side in place and, when an aspect ratio is set, keeps the
+  rectangle centred on the other axis. In crop mode two selectors constrain every drag:
+  **aspect** (`free`, `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `9:16`, `16:9`, `9:21`, `21:9`) and
+  **multiples of** (`1`, `2`, `4`, `5`, `8`, `10`, `16`, `32`, `50`, `100`) — both are honoured
+  exactly at the same time, the rectangle growing in steps of the smallest size satisfying both
+  (e.g. `16:9` with multiples of `32` steps by 512×288). **Clear crop** removes the rectangle.
+- **max size** caps the longest side of the output: `max` (no limit), `512`, `832`, `1024`,
+  `1280`, `1600`, `1920` or `2048`.
+- The info line shows the original size, the size after rotation, the crop rectangle and the
+  resulting output size.
+- **Reset** deletes every edit (the original picture is shown again), **Apply** records the
+  edits on the slot and closes, **Cancel** (or **Escape**) closes without changing the slot.
+
+**Video editor** (✎ on a video)
+
+- **↔ Mirror**, **↕ Mirror**, **▣ Crop** (with the same aspect / multiples selectors and
+  handles as the picture editor) and **max size** work on the frames as in the picture editor;
+  there is no rotation.
+- The preview shows the frames with the mirrors and the crop overlay applied; click on it (or
+  press **Space**) to play or pause.
+- The **timeline** under the preview shows the whole video with the **kept span** highlighted
+  between two bars: **drag a bar** to move the start or the end (the preview seeks to it), click
+  or drag elsewhere to scrub; the yellow marker is the playhead, whose time is printed on the
+  right. Playback loops inside the kept span. The span cannot be shorter than 0.1 s.
+- Transport row: **◀▎** / **▎▶** step one frame (1/25 s) back or forward, **▶** / **❚❚** play
+  or pause, **🔊** / **🔇** toggle the sound, **⇤ start** / **end ⇥** set the start or the end
+  of the span at the playhead, the two fields take the times in seconds (the kept length is
+  shown next to them), **⏮ First** / **Last ⏭** jump to the ends of the span.
+- **keep** row: **first 1s** / **2s** / **3s** and **last 1s** / **2s** / **3s** select the
+  first or last seconds of the video in one click (the whole video when it is shorter), **all**
+  keeps everything; the button matching the current span is highlighted. At its right:
+  - **📷 Save frame** captures the **current frame** as a PNG (named after the video and the
+    time, e.g. `clip_2.40s.png`), uploads it and loads it in the **first free picture slot**,
+    adding a row of slots when none is free. The new picture takes over the video's mirrors,
+    crop and max size as its own edits.
+  - **♪ Save audio** writes the audio of the **kept span** as a FLAC file (named after the
+    video and the span, e.g. `clip_1.00-2.50.flac`, extracted on the server at the native
+    sample rate, mono or stereo) into `input/ntx_media/` and loads it in the **first free audio
+    slot**, adding a row when none is free. A video without audio track reports it instead.
+  - The result, or the error, of the last save is printed in the row.
+- **Reset**, **Accept**, **Cancel** as in the picture editor.
+
+**Audio editor** (✎ on an audio)
+
+- The **waveform** of the file, lit inside the kept span, with the playhead; click on it to
+  seek.
+- The same **timeline** (start and end bars, scrubbing), transport row (**◀▎** / **▎▶** step
+  0.1 s, **▶** / **❚❚**, **⇤ start** / **end ⇥**, time fields, **⏮ First** / **Last ⏭**) and
+  **keep** row (**first** / **last 1s, 2s, 3s**, **all**) as the video editor; **Space** plays
+  or pauses, playback loops inside the span, minimum span 0.1 s.
+- **Reset**, **Accept**, **Cancel** as above.
