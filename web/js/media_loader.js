@@ -416,6 +416,17 @@ function viewURL(item) {
 }
 
 // upload one file through the core route, into the loader's input subfolder
+// ask the server to write the audio of a span of a video as a FLAC file in the loader's subfolder
+async function extractAudio(item, start, end) {
+    const resp = await api.fetchApi(`/${API_PREFIX}/media_loader/extract_audio`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file: item.file, type: item.type || "input", start, end }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || `extraction failed (${resp.status})`);
+    return { name: data.name, file: data.file, type: data.type || "input" };
+}
+
 async function uploadFile(file) {
     const body = new FormData();
     body.append("image", file, file.name);
@@ -596,6 +607,41 @@ function makeMediaWidget(node, inputName, initialValue) {
         node.setSize([Math.max(NODE_MIN_WIDTH, node.size[0]), min[1]]);
     }
 
+    // the first free slot of a kind, adding a row of slots when every one is taken
+    function freeOrNewIndex(kind) {
+        let index = freeIndex(kind, 0);
+        if (index < 0) {
+            addRow();
+            index = freeIndex(kind, 0);
+        }
+        return index;
+    }
+
+    // the video editor's "Save frame" and "Save audio" : the frame is uploaded like a dropped
+    // file, the audio is extracted by the server ; both land in the first free slot of their kind
+    const editorActions = {
+        async saveFrame(blob, name, edit) {
+            const index = freeOrNewIndex("pictures");
+            const file = new File([blob], name, { type: "image/png" });
+            await upload(file, "pictures", index);
+            const live = state.pictures[index];
+            if (!live) throw new Error("the frame could not be uploaded");
+            if (isEdited(edit)) { live.edit = edit; commit(); }
+            return `frame saved as ${live.name}, in picture slot ${index + 1}`;
+        },
+        async saveAudio(item, start, end) {
+            const index = freeOrNewIndex("audios");
+            const key = `audios:${index}`;
+            busy.add(key); render();
+            try {
+                state.audios[index] = await extractAudio(item, start, end);
+            } finally {
+                busy.delete(key); commit();
+            }
+            return `audio saved as ${state.audios[index].name}, in audio slot ${index + 1}`;
+        },
+    };
+
     // one more row: 3 picture slots, 1 video slot, 1 audio slot
     function addRow() {
         state.rows += 1;
@@ -743,7 +789,7 @@ function makeMediaWidget(node, inputName, initialValue) {
                         if (!live || live.file !== item.file) return;   // the slot changed meanwhile
                         if (edit) live.edit = edit; else delete live.edit;
                         commit();
-                    });
+                    }, editorActions);
                 } }, "✎"));
             slot.append(gripFor(kind, index, item));
         } else {

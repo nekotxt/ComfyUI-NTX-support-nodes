@@ -1,12 +1,17 @@
 from comfy_api.latest import io
 
+import av
 import folder_paths
+import numpy as np
 
+import asyncio
 import hashlib
 import json
 import os
+import re
+from pathlib import Path
 
-from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY
+from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX
 from .logging import logger
 from .utils import MEDIA_REFS_TYPE
 
@@ -257,3 +262,126 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         MediaLoader,
     ]
+
+# ===== AUDIO EXTRACTION =======================================================================================================================
+
+# the "Save audio" command of the video editor : the audio of the kept span is written as a FLAC
+# file in the loader's input subfolder, to be loaded in an audio slot
+
+# a file name safe to write in the input subfolder
+def safe_name(name: str) -> str:
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.basename(name or "")).strip("._") or "audio"
+    return name[:120]
+
+# a name not yet used in the directory, "name (n).ext" style like the core upload route
+def unique_path(directory: Path, name: str) -> Path:
+    stem, ext = os.path.splitext(name)
+    path = directory / name
+    counter = 1
+    while path.exists():
+        path = directory / f"{stem} ({counter}){ext}"
+        counter += 1
+    return path
+
+# decode the audio of a video between start and end seconds (end None : to the end), as a float32
+# array [C, T] and its sample rate ; None when the video has no audio stream
+def decode_audio_span(video_path: str, start: float, end: float | None):
+    with av.open(video_path) as container:
+        stream = next((s for s in container.streams if s.type == "audio"), None)
+        if stream is None:
+            return None, 0
+        rate = int(stream.rate)
+        channels = 1 if stream.layout.nb_channels == 1 else 2
+        layout = "mono" if channels == 1 else "stereo"
+        resampler = av.AudioResampler(format="fltp", layout=layout, rate=rate)
+        # land a little before the span : seeking stops on a keyframe, the frames are then trimmed
+        if start > 0:
+            try:
+                container.seek(int(max(0.0, start - 1.0) * av.time_base), backward=True)
+            except Exception:
+                pass
+        chunks = []
+        cursor = None
+        for frame in container.decode(stream):
+            if cursor is None or frame.time is not None:
+                cursor = frame.time if frame.time is not None else (cursor or 0.0)
+            for out in resampler.resample(frame):
+                samples = out.to_ndarray()                    # [C, n] for a planar format
+                n = samples.shape[1]
+                t0 = out.time if out.time is not None else cursor
+                t1 = t0 + n / rate
+                cursor = t1
+                if end is not None and t0 >= end:
+                    break
+                if t1 <= start:
+                    continue
+                i0 = max(0, int(round((start - t0) * rate)))
+                i1 = n if end is None else min(n, int(round((end - t0) * rate)))
+                if i1 > i0:
+                    chunks.append(samples[:, i0:i1])
+            if end is not None and cursor is not None and cursor >= end:
+                break
+        if not chunks:
+            return np.zeros((channels, 0), dtype=np.float32), rate
+        return np.concatenate(chunks, axis=1).astype(np.float32), rate
+
+# write a float32 [C, T] array as a FLAC file
+def write_flac(samples: np.ndarray, rate: int, file_path: Path):
+    layout = "mono" if samples.shape[0] == 1 else "stereo"
+    with av.open(str(file_path), mode="w", format="flac") as container:
+        stream = container.add_stream("flac", rate=rate, layout=layout)
+        frame = av.AudioFrame.from_ndarray(np.ascontiguousarray(samples.T).reshape(1, -1), format="flt", layout=layout)
+        frame.sample_rate = rate
+        frame.pts = 0
+        container.mux(stream.encode(frame))
+        container.mux(stream.encode(None))
+
+def extract_audio(file: str, file_type: str, start: float, end: float | None) -> dict:
+    annotated = f"{file} [{file_type}]"
+    if not folder_paths.exists_annotated_filepath(annotated):
+        raise FileNotFoundError(f"missing video file : {file}")
+    video_path = folder_paths.get_annotated_filepath(annotated)
+    samples, rate = decode_audio_span(video_path, start, end)
+    if samples is None:
+        raise ValueError("this video has no audio track")
+    if samples.shape[1] == 0:
+        raise ValueError("no audio in the kept span")
+    directory = Path(folder_paths.get_input_directory()) / MEDIA_SUBFOLDER
+    directory.mkdir(parents=True, exist_ok=True)
+    stem = os.path.splitext(os.path.basename(file))[0]
+    span = f"{start:.2f}-{end:.2f}" if end is not None else f"{start:.2f}-end"
+    out_path = unique_path(directory, safe_name(f"{stem}_{span}.flac"))
+    write_flac(samples, rate, out_path)
+    logger.info(f"MediaLoader : audio of [{file}] {span}s saved as [{out_path.name}] ({samples.shape[1] / rate:.2f}s, {rate}Hz, {samples.shape[0]}ch)")
+    return {"name": out_path.name, "file": f"{MEDIA_SUBFOLDER}/{out_path.name}", "type": "input",
+            "duration": samples.shape[1] / rate, "sample_rate": rate, "channels": int(samples.shape[0])}
+
+from aiohttp import web
+from server import PromptServer
+
+@PromptServer.instance.routes.post(f"/{API_PREFIX}/media_loader/extract_audio")
+async def extract_audio_route(request):
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "expected a JSON body"}, status=400)
+    file = str(data.get("file") or "")
+    file_type = str(data.get("type") or "input")
+    if not file or "\\" in file or ".." in file.split("/"):
+        return web.json_response({"error": "invalid file"}, status=400)
+    try:
+        start = max(0.0, float(data.get("start") or 0))
+        end = data.get("end")
+        end = None if end is None else float(end)
+    except (TypeError, ValueError):
+        return web.json_response({"error": "invalid span"}, status=400)
+    if end is not None and end <= start:
+        return web.json_response({"error": "invalid span"}, status=400)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(None, extract_audio, file, file_type, start, end)
+    except (FileNotFoundError, ValueError) as e:
+        return web.json_response({"error": str(e)}, status=400)
+    except Exception as e:
+        logger.warning(f"MediaLoader : audio extraction failed : {e}")
+        return web.json_response({"error": f"extraction failed : {e}"}, status=500)
+    return web.json_response(result)

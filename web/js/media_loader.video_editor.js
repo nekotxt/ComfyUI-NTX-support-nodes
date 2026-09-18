@@ -21,8 +21,15 @@
 // start and end bars and the playhead, a transport row, and the Reset / Accept /
 // Cancel buttons at the bottom.
 //
-// openVideoEditor(item, url, onApply) shows the modal editor for a slot item ;
-// the edits are worked on a copy and only reach the item through Accept.
+// openVideoEditor(item, url, onApply, actions) shows the modal editor for a
+// slot item ; the edits are worked on a copy and only reach the item through
+// Accept. `actions` are callbacks the panel provides for the "Save frame" and
+// "Save audio" buttons :
+//   saveFrame(blob, name, edit) : a PNG of the current frame, to be loaded in a
+//     picture slot with `edit` (the frame edits of the video) as its edits,
+//   saveAudio(item, start, end) : the audio of the kept span, to be extracted
+//     and loaded in an audio slot.
+// Both return a promise, resolved with a short message for the user.
 
 import { MAX_SIZES, ASPECTS, MULTIPLES, HANDLES, HANDLE_CURSORS, dragRect, resizeRect } from "./media_loader.editor.js";
 
@@ -186,6 +193,9 @@ const CSS = `
 .nmv-quick { display: flex; align-items: center; gap: 6px; }
 .nmv-quick label { color: #8a93a3; margin-right: 2px; }
 .nmv-quick .nmv-sep { width: 1px; height: 18px; background: #303642; margin: 0 4px; }
+.nmv-quick .nmv-spacer { flex: 1; }
+.nmv-quick .nmv-msg { color: #8a93a3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.nmv-quick .nmv-msg.err { color: #e08a8a; }
 .nmv-info { display: flex; gap: 16px; color: #8a93a3; min-height: 16px; white-space: nowrap; overflow: hidden; }
 .nmv-info b { color: #c8cfda; font-weight: normal; }
 .nmv-foot { display: flex; align-items: center; gap: 6px; }
@@ -240,8 +250,10 @@ function tickStep(duration) {
 
 // open the editor on a slot item ; onApply(edit) receives the new edit record
 // (or null when every edit was removed) when the user accepts
-export function openVideoEditor(item, url, onApply) {
+export function openVideoEditor(item, url, onApply, actions = {}) {
     injectCSS();
+    let saving = null;              // "frame" | "audio" while a save runs
+    let message = "", messageErr = false;
 
     let edit = normalizeVideoEdit(item.edit);
     let cropping = false;
@@ -552,7 +564,52 @@ export function openVideoEditor(item, url, onApply) {
             el("span", { class: "nmv-sep" }),
             el("button", { class: "nmv-btn" + (edit.start === 0 && edit.end == null ? " on" : ""),
                 title: "Keep the whole video", onclick: () => { edit.start = 0; edit.end = null; seek(0); refresh(); } }, "all"),
+            el("span", { class: "nmv-spacer" }),
+            message ? el("span", { class: "nmv-msg" + (messageErr ? " err" : ""), title: message }, message) : null,
+            actions.saveFrame ? el("button", { class: "nmv-btn", disabled: !!saving,
+                title: "Save the current frame as a picture, in the first free picture slot",
+                onclick: saveFrame }, saving === "frame" ? "saving\u2026" : "\ud83d\udcf7 Save frame") : null,
+            actions.saveAudio ? el("button", { class: "nmv-btn", disabled: !!saving,
+                title: "Save the audio of the kept span as a FLAC file, in the first free audio slot",
+                onclick: saveAudio }, saving === "audio" ? "saving\u2026" : "\u266a Save audio") : null,
         );
+    }
+
+    // ── save frame / save audio ──
+    function say(text, err = false) { message = text; messageErr = err; drawQuick(); }
+    async function runSave(what, job) {
+        if (saving) return;
+        saving = what; say("");
+        try {
+            say(await job());
+        } catch (err) {
+            say(err?.message || String(err), true);
+        } finally {
+            saving = null; drawQuick();
+        }
+    }
+    // the current frame, at the video's own resolution, as a PNG
+    function saveFrame() {
+        runSave("frame", async () => {
+            video.pause();
+            const [fw, fh] = frameSize();
+            const shot = document.createElement("canvas");
+            shot.width = fw; shot.height = fh;
+            shot.getContext("2d").drawImage(video, 0, 0, fw, fh);
+            const blob = await new Promise((resolve, reject) => shot.toBlob(b => b ? resolve(b) : reject(new Error("could not capture the frame")), "image/png"));
+            const stem = item.name.replace(/\.[^.]+$/, "");
+            const name = `${stem}_${video.currentTime.toFixed(2)}s.png`;
+            // the picture takes over the frame edits (mirror, crop, max size) as its own
+            const frameEdit = { rotate: 0, mirror_h: edit.mirror_h, mirror_v: edit.mirror_v, crop: edit.crop ? { ...edit.crop } : null, max_size: edit.max_size };
+            return await actions.saveFrame(blob, name, frameEdit);
+        });
+    }
+    // the audio of the kept span, extracted by the server as a FLAC file
+    function saveAudio() {
+        runSave("audio", async () => {
+            video.pause();
+            return await actions.saveAudio(item, edit.start, edit.end);
+        });
     }
 
     function drawInfo() {
