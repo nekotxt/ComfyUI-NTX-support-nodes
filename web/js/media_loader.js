@@ -29,7 +29,7 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 import { ADDON_PREFIX, API_PREFIX } from "./config.js";
-import { openEditor, isEdited, describeEdit, paintEdited } from "./media_loader.editor.js";
+import { openEditor, isEdited, describeEdit, paintEdited, outputSize, ASPECTS } from "./media_loader.editor.js";
 import { openVideoEditor, isVideoEdited, describeVideoEdit, normalizeVideoEdit } from "./media_loader.video_editor.js";
 import { openAudioEditor, isAudioEdited, describeAudioEdit, normalizeAudioEdit } from "./media_loader.audio_editor.js";
 
@@ -190,6 +190,22 @@ const CSS = `
     object-fit: contain;
     pointer-events: none;
     background: #0a0c10;
+}
+.nml-slot.pic { container-type: inline-size; }
+.nml-slot .nml-size {
+    position: absolute;
+    left: 0; right: 0; top: 0;
+    padding: 2px 4px;
+    background: rgba(8, 10, 14, .72);
+    color: #c8cfda;
+    font-family: ui-monospace, monospace;
+    font-size: clamp(7px, 9cqw, 10px);      /* shrinks with the slot, the remove button overlays it on hover */
+    letter-spacing: -.2px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
 }
 .nml-slot .nml-name {
     position: absolute;
@@ -396,6 +412,29 @@ function toast(severity, summary, detail) {
     } catch {
         console.log(`[MediaLoader] ${summary}: ${detail}`);
     }
+}
+
+// the aspect ratio of a size, among the ones the crop menu offers : the exact one when there
+// is one, the closest one marked as approximate when it is within 10 %, nothing otherwise
+const ASPECT_TOLERANCE = 0.10;
+function aspectLabel(width, height) {
+    if (!(width > 0) || !(height > 0)) return "";
+    let best = null;
+    for (const aspect of ASPECTS) {
+        if (aspect === "free") continue;
+        const [a, b] = aspect.split(":").map(Number);
+        if (width * b === height * a) return aspect;
+        const deviation = Math.abs(width / height - a / b) / (a / b);
+        if (!best || deviation < best.deviation) best = { aspect, deviation };
+    }
+    return best && best.deviation <= ASPECT_TOLERANCE ? `≈${best.aspect}` : "";
+}
+
+// the size overlay of a picture slot : the size of the edited picture and its aspect ratio
+function sizeLabel(width, height, edit) {
+    const [ow, oh] = outputSize(width, height, edit);
+    const aspect = aspectLabel(ow, oh);
+    return `${ow}×${oh}${aspect ? ` · ${aspect}` : ""}`;
 }
 
 // whether the file of a slot item is still on the server (a HEAD on the view route)
@@ -917,16 +956,21 @@ function makeMediaWidget(node, inputName, initialValue) {
         if (kind === "pictures") {
             const img = el("img", { src: url, alt: item.name, draggable: false });
             slot.append(img);
-            // an edited picture is previewed through a canvas drawn once the picture is loaded ;
-            // the img stays (hidden) as the source of the move ghost
-            if (isEdited(item.edit)) {
-                img.addEventListener("load", () => {
-                    if (!img.isConnected) return;
+            // the size overlay needs the picture's dimensions, known once it is loaded ; an
+            // edited picture is then also previewed through a canvas, the img staying (hidden)
+            // as the source of the move ghost
+            const size = el("div", { class: "nml-size" });
+            img.addEventListener("load", () => {
+                if (!img.isConnected) return;
+                size.textContent = sizeLabel(img.naturalWidth, img.naturalHeight, item.edit);
+                size.title = `edited size ${size.textContent}, original ${img.naturalWidth}×${img.naturalHeight}`;
+                if (isEdited(item.edit)) {
                     const canvas = paintEdited(img, item.edit, 256);
                     img.style.display = "none";
                     slot.insertBefore(canvas, img);
-                });
-            }
+                }
+            });
+            slot.append(size);
             slot.append(el("div", { class: "nml-name" }, item.name));
             slot.append(el("div", { class: "nml-zoom", title: "View at full size",
                 onclick: (ev) => { ev.stopPropagation(); lightbox(item); } }, "\ud83d\udd0d"));
