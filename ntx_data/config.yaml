@@ -1,5 +1,7 @@
 cache:
     max_loras: 0
+    use_for_media_loader: true
+    max_gb_for_media_loader: 4
 tokens:
     civitai: 
 cloud_storage_id:

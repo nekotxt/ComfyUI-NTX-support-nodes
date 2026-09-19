@@ -8,13 +8,15 @@ import torch
 from PIL import Image, ImageOps
 
 import asyncio
+import threading
+from collections import OrderedDict
 import hashlib
 import json
 import os
 import re
 from pathlib import Path
 
-from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX
+from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, USE_MEDIA_LOADER_CACHE, MEDIA_CACHE_MAX_BYTES
 from .logging import logger
 from .utils import MEDIA_REFS_TYPE
 
@@ -347,6 +349,75 @@ def load_audio_span(path: str, edit: dict) -> dict | None:
         return None
     return {"waveform": torch.from_numpy(samples)[None, ...], "sample_rate": rate}
 
+# ----- media cache ----------------------------------------------------------------------------------------------------------------------------
+
+# The decoded media are kept in memory, shared by every Media Splitter node, so that several
+# splitters fed by the same loader (or the same splitter run again with an unchanged bundle) do
+# not decode the files and apply the edits over and over. An item is identified by the kind of
+# data, the file (relative to its ComfyUI folder, assumed immutable during a session) and the
+# edits applied ; it is dropped, least recently used first, when the cache outgrows its byte
+# budget. Both come from the "cache" section of config.yaml : "use_for_media_loader" switches
+# the cache off altogether (USE_MEDIA_LOADER_CACHE) and "max_gb_for_media_loader" sets the
+# budget (MEDIA_CACHE_MAX_BYTES, 4 GB by default).
+
+_media_cache: "OrderedDict[tuple, tuple[object, int]]" = OrderedDict()
+_media_cache_bytes = 0
+_media_cache_lock = threading.Lock()
+
+def media_cache_key(kind: str, entry: dict, edit: dict) -> tuple:
+    return (kind, entry.get("type", "input"), entry["file"], json.dumps(edit, sort_keys=True))
+
+# the memory a cached item takes : the tensors it holds
+def media_value_bytes(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return value.numel() * value.element_size()
+    if isinstance(value, dict) and isinstance(value.get("waveform"), torch.Tensor):
+        return value["waveform"].numel() * value["waveform"].element_size()
+    return 0
+
+# a cached item : a copy of the dict for an AUDIO, so that a consumer editing its keys leaves
+# the cache alone (the tensors themselves are shared)
+def media_value_share(value):
+    return dict(value) if isinstance(value, dict) else value
+
+# load through the cache : `loader` is called only on a miss ; returns the value and whether it
+# came from the cache
+def cached_media(kind: str, entry: dict, edit: dict, loader):
+    global _media_cache_bytes
+    if not USE_MEDIA_LOADER_CACHE:
+        return loader(), False
+    key = media_cache_key(kind, entry, edit)
+    with _media_cache_lock:
+        hit = _media_cache.get(key)
+        if hit is not None:
+            _media_cache.move_to_end(key)
+            return media_value_share(hit[0]), True
+    value = loader()
+    size = media_value_bytes(value)
+    if size <= MEDIA_CACHE_MAX_BYTES:
+        with _media_cache_lock:
+            if key in _media_cache:
+                _media_cache_bytes -= _media_cache[key][1]
+            _media_cache[key] = (value, size)
+            _media_cache_bytes += size
+            while _media_cache_bytes > MEDIA_CACHE_MAX_BYTES and len(_media_cache) > 1:
+                _, (_, dropped) = _media_cache.popitem(last=False)
+                _media_cache_bytes -= dropped
+    else:
+        logger.warning(f"MediaSplitter : [{entry['file']}] ({size / 1024 ** 2:.0f} MB) is too large for the media cache "
+                       f"({MEDIA_CACHE_MAX_BYTES / 1024 ** 2:.0f} MB)")
+    return media_value_share(value), False
+
+def clear_media_cache():
+    global _media_cache_bytes
+    with _media_cache_lock:
+        _media_cache.clear()
+        _media_cache_bytes = 0
+
+def media_cache_stats() -> dict:
+    with _media_cache_lock:
+        return {"items": len(_media_cache), "bytes": _media_cache_bytes, "max_bytes": MEDIA_CACHE_MAX_BYTES}
+
 class MediaSplitter(io.ComfyNode):
     """Split a media bundle into one output per slot.
 
@@ -354,6 +425,10 @@ class MediaSplitter(io.ComfyNode):
     (rotation, mirrors, crop, maximum size for the frames ; the kept span for videos and
     audios) and the result is delivered on the output of its slot. The outputs of the empty
     slots are None.
+
+    The decoded media are kept in a cache shared by every splitter (see cached_media), keyed by
+    file and edits, so that several splitters fed by the same loader decode each file once ;
+    the cache is disabled by USE_MEDIA_LOADER_CACHE.
     """
 
     @classmethod
@@ -383,30 +458,42 @@ class MediaSplitter(io.ComfyNode):
         by_slot = lambda kind: {int(entry["slot"]): entry for entry in media.get(kind, []) if isinstance(entry, dict)}
         pictures, videos, audios = by_slot("pictures"), by_slot("videos"), by_slot("audios")
 
+        cached = lambda hit: " (cached)" if hit else ""
+
         picture_out = [None] * SPLIT_PICTURES
         for slot, entry in pictures.items():
             if slot < SPLIT_PICTURES:
-                picture_out[slot] = load_picture(entry["path"], normalize_edit(entry.get("edit")))
-                logger.info(f"picture {slot + 1} : [{entry['name']}] -> {picture_out[slot].shape[2]}x{picture_out[slot].shape[1]}")
+                edit = normalize_edit(entry.get("edit"))
+                picture_out[slot], hit = cached_media("picture", entry, edit, lambda: load_picture(entry["path"], edit))
+                logger.info(f"picture {slot + 1} : [{entry['name']}] -> {picture_out[slot].shape[2]}x{picture_out[slot].shape[1]}{cached(hit)}")
 
         video_out, video_audio_out = [None] * SPLIT_VIDEOS, [None] * SPLIT_VIDEOS
         for slot, entry in videos.items():
             if slot < SPLIT_VIDEOS:
                 edit = normalize_video_edit(entry.get("edit"))
-                video_out[slot] = load_video_frames(entry["path"], edit)
-                video_audio_out[slot] = load_audio_span(entry["path"], edit)
+                video_out[slot], hit_frames = cached_media("video_frames", entry, edit, lambda: load_video_frames(entry["path"], edit))
+                # the audio only depends on the span
+                span = {"start": edit["start"], "end": edit["end"]}
+                video_audio_out[slot], hit_audio = cached_media("video_audio", entry, span, lambda: load_audio_span(entry["path"], span))
                 frames = video_out[slot]
                 logger.info(f"video {slot + 1} : [{entry['name']}] -> "
                             + (f"{frames.shape[0]} frames {frames.shape[2]}x{frames.shape[1]}" if frames is not None else "no frames")
-                            + (", with audio" if video_audio_out[slot] is not None else ", no audio"))
+                            + cached(hit_frames)
+                            + (", with audio" if video_audio_out[slot] is not None else ", no audio") + cached(hit_audio))
 
         audio_out = [None] * SPLIT_AUDIOS
         for slot, entry in audios.items():
             if slot < SPLIT_AUDIOS:
-                audio_out[slot] = load_audio_span(entry["path"], normalize_audio_edit(entry.get("edit")))
+                edit = normalize_audio_edit(entry.get("edit"))
+                audio_out[slot], hit = cached_media("audio", entry, edit, lambda: load_audio_span(entry["path"], edit))
                 audio = audio_out[slot]
                 logger.info(f"audio {slot + 1} : [{entry['name']}] -> "
-                            + (f"{audio['waveform'].shape[2] / audio['sample_rate']:.2f}s at {audio['sample_rate']}Hz" if audio is not None else "no audio"))
+                            + (f"{audio['waveform'].shape[2] / audio['sample_rate']:.2f}s at {audio['sample_rate']}Hz" if audio is not None else "no audio")
+                            + cached(hit))
+
+        if USE_MEDIA_LOADER_CACHE:
+            stats = media_cache_stats()
+            logger.info(f"media cache : {stats['items']} items, {stats['bytes'] / 1024 ** 2:.0f} / {stats['max_bytes'] / 1024 ** 2:.0f} MB")
 
         return io.NodeOutput(*picture_out, *video_out, *video_audio_out, *audio_out)
 

@@ -82,3 +82,5 @@ DOWNLOAD_MISSING_LORAS = CONFIGURATION.get("download_missing_loras", False) and 
 CLOUD_STORAGE_ID = CONFIGURATION.get("cloud_storage_id", "")
 API_TOKENS = CONFIGURATION.get("tokens", {})
 TEMPLATES_SUBDIR = CONFIGURATION.get("templates_subdir", "")
+USE_MEDIA_LOADER_CACHE = CONFIGURATION.get("cache", {}).get("use_for_media_loader", True)
+MEDIA_CACHE_MAX_BYTES = CONFIGURATION.get("cache", {}).get("max_gb_for_media_loader", 4) * 1024 ** 3
