@@ -2084,6 +2084,11 @@ order**:
   rotation;
 - **audios**: `start` / `end` only.
 
+Picture and video records also carry the settings of the editor's crop tool, `crop_aspect`
+(`free` or one of the ratios below) and `crop_multiple` (`1` to `100`): they are the user's
+preferences for the slot rather than edits — they do not change the media, and a record holding
+only them does not count as edited.
+
 ### Inputs
 
 | Input | Type | Description |
@@ -2112,6 +2117,23 @@ The raw `media_state` widget is replaced by the slot panel. Its top bar holds:
   *uploaded from the folder* (with their source path, and the name they were stored under when
   it differs) and the ones *still missing* with the reason. When nothing is missing the report
   is shown directly, without asking for a folder. Disabled while nothing is loaded.
+- **Export** — copies every loaded file into a **new folder of `output/ntx_media/`** named after
+  the current time (`yymmddHHMMSS`, e.g. `260919113805`; a `_1`, `_2`… suffix when that second
+  is already taken), along with a **`media.json`** describing the slots: the same `pictures` /
+  `videos` / `audios` lists as the `media` output, each entry with its `slot`, `name` and full
+  `edit` record but **without** the `file`, `type` and `path` fields, plus the node's `rows`.
+  Each copy takes its slot's name, made unique inside the folder when two slots share one (the
+  JSON then names the copy). Slots whose file is missing on the server are skipped and listed in
+  the result toast. Disabled while nothing is loaded.
+- **Import** — the reverse: opens a **folder picker** and loads an exported folder into the
+  node. The folder must hold exactly one `media.json` (found even when a parent folder is
+  picked; a folder holding several exports is refused), which is validated before anything
+  changes. When the node holds files, a confirmation asks to replace them. The node is then
+  resized to the JSON's `rows` (more if an entry's slot needs it), emptied, and every named file
+  of the folder is **uploaded like a dropped file** — so the slots reference the copies in
+  `input/ntx_media/`, not the picked folder — with its `edit` record restored. Files that are not
+  in the folder, empty, of the wrong kind, or failing to upload are skipped and listed in the
+  result toast.
 - **Clear** — empties every slot, after confirmation.
 
 **Loading files**
@@ -2132,6 +2154,9 @@ The raw `media_state` widget is replaced by the slot panel. Its top bar holds:
 - Pictures show a thumbnail (of the *edited* picture when edits are recorded), videos their
   first frame — they play, muted, while hovered, mirrored and from the start of their span
   when edited — and audios a compact player, started at the span's start when trimmed.
+- Picture slots show, along their top edge, the **size of the edited picture** and its **aspect
+  ratio** among the ones of the crop tool: the exact one when there is one (`1024×576 · 16:9`),
+  the closest one marked `≈` when it is within 10 % (`1000×600 · ≈16:9`), nothing beyond that.
 - **×** (top-right, on hover) empties the slot.
 - **☰** grip (bottom-right; at the end of an audio row) — **hold and drag** to move the file to
   another slot **of the same kind**; dropping on a filled slot **swaps** the two. A ghost
@@ -2199,3 +2224,73 @@ The raw `media_state` widget is replaced by the slot panel. Its top bar holds:
   **keep** row (**first** / **last 1s, 2s, 3s**, **all**) as the video editor; **Space** plays
   or pauses, playback loops inside the span, minimum span 0.1 s.
 - **Reset**, **Accept**, **Cancel** as above.
+
+---
+
+## MediaSplitter
+
+![MediaSplitter node](images/MediaSplitter.png)
+
+Splits the **NTX_MEDIA_REFS** bundle of a **MediaLoader** into one output per slot, with every
+media **decoded and its recorded edits applied**: pictures are rotated, mirrored, cropped and
+scaled down to their maximum size; videos are trimmed to their kept span, then mirrored,
+cropped and scaled; audios (the audio track of a video, or an audio slot) are trimmed to their
+span. The outputs of the **empty slots are `None`**, so a downstream switch can react to a slot
+left free.
+
+The node shows the outputs of a number of **rows** of slots — the same rows as the loader — and
+this number is changed on the node (see *Frontend*). For *R* rows the outputs are, **grouped by
+kind and in this order**: `picture_1` … `picture_3R` (IMAGE), `video_1` … `video_R` (IMAGE, the
+frames of the kept span as a batch), `video_audio_1` … `video_audio_R` (AUDIO, the audio track
+of the same span, `None` for a video without one) and `audio_1` … `audio_R` (AUDIO). A new node
+starts with **3 rows** (18 outputs); the maximum is **10 rows** (60 outputs). Slots of the
+bundle beyond the node's rows are ignored.
+
+Decoding details: pictures are read with their EXIF orientation applied and converted to RGB
+(an animated file yields its first frame); video frames are decoded from a little before the
+span's start and kept while their timestamp is inside it; the maximum size is applied with a
+Lanczos downscale; audio is decoded at the file's own sample rate, mono or stereo (more channels
+are mixed down to stereo).
+
+The decoded media are kept in a **cache shared by every Media Splitter** of the session, keyed
+by the file (relative to its ComfyUI folder — the files of `input/ntx_media/` are assumed not to
+change during a session) and by the edits applied to it (the crop tool preferences do not
+count): several splitters fed by the same loader, or the same splitter run again, decode each
+file once, and the log marks the outputs served from it with `(cached)`. The cache is bounded by
+a byte budget — least recently used items are dropped first, and an item larger than the whole
+budget is delivered but not kept, with a warning. Both are set in the `cache` section of
+`input/ntx_data/config.yaml`: `use_for_media_loader` (`true` by default) switches the cache
+off altogether when `false`, and `max_gb_for_media_loader` (`4` by default) is the budget in
+gigabytes. Each run logs the cache's item count and size.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `media` | NTX_MEDIA_REFS | The bundle of a MediaLoader node. |
+| `rows` | INT (hidden) | Rows of slots the outputs cover (`1` to `10`, default `3`); managed by the frontend through the **Add slots** / **Remove slots** buttons, not edited by hand. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `picture_1` … `picture_3R` | IMAGE | The edited picture of the slot as a batch of one; `None` when the slot is empty. |
+| `video_1` … `video_R` | IMAGE | The frames of the video's kept span, edited, as a batch; `None` when the slot is empty. |
+| `video_audio_1` … `video_audio_R` | AUDIO | The audio track of the same span; `None` when the slot is empty or the video has no audio. |
+| `audio_1` … `audio_R` | AUDIO | The audio of the slot, trimmed to its span; `None` when the slot is empty. |
+
+### Frontend
+
+The node declares the outputs of the maximum number of rows, untyped; the frontend shows only
+the ones of the current rows, named and typed as above, in the grouped order.
+
+- **Add slots** — adds a row of outputs: 3 pictures, 1 video, 1 video audio, 1 audio (disabled at
+  10 rows).
+- **Remove slots** — removes the last row (disabled at one row). When outputs of that row are
+  connected, a confirmation names them; their wires are dropped when confirmed. The outputs
+  that stay keep their wires while moving to their new position.
+
+Right-click menu options on the node:
+
+- **Clean media cache** — empties the shared cache of decoded media and frees its memory; a
+  toast reports how many items and megabytes were released.
