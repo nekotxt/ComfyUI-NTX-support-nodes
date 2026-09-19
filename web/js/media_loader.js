@@ -523,6 +523,17 @@ function viewURL(item) {
 
 // upload one file through the core route, into the loader's input subfolder
 // ask the server to write the audio of a span of a video as a FLAC file in the loader's subfolder
+// ask the server to copy the loaded files and a description of the slots into a new folder
+async function exportMedia(mediaState) {
+    const resp = await api.fetchApi(`/${API_PREFIX}/media_loader/export`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ media_state: mediaState }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || `export failed (${resp.status})`);
+    return data;
+}
+
 async function extractAudio(item, start, end) {
     const resp = await api.fetchApi(`/${API_PREFIX}/media_loader/extract_audio`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -886,6 +897,25 @@ function makeMediaWidget(node, inputName, initialValue) {
         }
     }
 
+    // ── export ──
+    let exporting = false;
+    async function exportAll() {
+        if (exporting) return;
+        exporting = true;
+        render();
+        try {
+            const result = await exportMedia(JSON.stringify(state));
+            const detail = `${result.copied} file${result.copied === 1 ? "" : "s"} copied to output/ntx_media/${result.name}`
+                + (result.missing?.length ? ` \u2014 ${result.missing.length} missing : ${result.missing.join(", ")}` : "");
+            toast(result.missing?.length ? "warn" : "success", "Media exported", detail);
+        } catch (err) {
+            toast("error", "Export failed", err.message);
+        } finally {
+            exporting = false;
+            render();
+        }
+    }
+
     async function clearAll() {
         const count = loadedCount();
         if (!count) return;
@@ -1063,6 +1093,9 @@ function makeMediaWidget(node, inputName, initialValue) {
             el("button", { class: "nml-btn", disabled: !count || loadingMissing,
                 title: "Check that every loaded file is still on the server, and upload the missing ones from a folder of this machine",
                 onclick: (ev) => { ev.stopPropagation(); loadMissing(); } }, loadingMissing ? "checking\u2026" : "Load missing"),
+            el("button", { class: "nml-btn", disabled: !count || exporting,
+                title: "Copy every loaded file, with a media.json describing the slots, into a new folder of output/ntx_media named after the current time",
+                onclick: (ev) => { ev.stopPropagation(); exportAll(); } }, exporting ? "exporting\u2026" : "Export"),
             el("button", { class: "nml-btn danger", disabled: !count, title: "Empty every slot",
                 onclick: (ev) => { ev.stopPropagation(); clearAll(); } }, "Clear"));
     }

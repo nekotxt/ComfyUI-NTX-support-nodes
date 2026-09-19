@@ -15,6 +15,8 @@ import hashlib
 import json
 import os
 import re
+import shutil
+from datetime import datetime
 from pathlib import Path
 
 from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, USE_MEDIA_LOADER_CACHE, MEDIA_CACHE_MAX_BYTES
@@ -655,11 +657,83 @@ def extract_audio(file: str, file_type: str, start: float, end: float | None) ->
 from aiohttp import web
 from server import PromptServer
 
+# ===== EXPORT =================================================================================================================================
+
+# the "Export" command of the Media Loader : the loaded files are copied into a new folder of
+# output/ntx_media named after the current time, along with a media.json describing the slots
+# (the same information as the "media" output, without the file / type / path fields)
+EXPORT_SUBFOLDER = "ntx_media"
+EXPORT_JSON = "media.json"
+
+def export_media(media_state: str) -> dict:
+    state = parse_media_state(media_state)
+    rows = max(len(state["videos"]), 1)
+    stamp = datetime.now().strftime("%y%m%d%H%M%S")
+    folder = Path(folder_paths.get_output_directory()) / EXPORT_SUBFOLDER / stamp
+    counter = 1
+    while folder.exists():
+        folder = folder.with_name(f"{stamp}_{counter}")
+        counter += 1
+    folder.mkdir(parents=True, exist_ok=False)
+
+    description = {"rows": rows}
+    copied, missing = 0, []
+    used_names = set()
+    for kind, slots in state.items():
+        description[kind] = []
+        for index, slot in enumerate(slots):
+            if slot is None:
+                continue
+            annotated = annotated_name(slot)
+            if not folder_paths.exists_annotated_filepath(annotated):
+                missing.append(f"{slot.get('name') or slot['file']} ({kind[:-1]} {index + 1})")
+                continue
+            source = Path(folder_paths.get_annotated_filepath(annotated))
+            # the copy takes the slot's name, made unique inside the export
+            name = safe_name(slot.get("name") or source.name)
+            stem, ext = os.path.splitext(name)
+            n = 1
+            while name.lower() in used_names or name.lower() == EXPORT_JSON:
+                name = f"{stem} ({n}){ext}"
+                n += 1
+            used_names.add(name.lower())
+            shutil.copy2(source, folder / name)
+            copied += 1
+            entry = {"slot": index, "name": name}
+            if kind == "pictures":
+                entry["edit"] = normalize_edit(slot.get("edit"))
+            elif kind == "videos":
+                entry["edit"] = normalize_video_edit(slot.get("edit"))
+            else:
+                entry["edit"] = normalize_audio_edit(slot.get("edit"))
+            description[kind].append(entry)
+
+    (folder / EXPORT_JSON).write_text(json.dumps(description, indent=4), encoding="utf-8")
+    logger.info(f"MediaLoader : {copied} files exported to [{folder}]" + (f", {len(missing)} missing" if missing else ""))
+    return {"folder": str(folder), "name": folder.name, "copied": copied, "missing": missing}
+
 # the "Clean media cache" command of the Media Splitter's right-click menu
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/media_loader/clear_cache")
 async def clear_media_cache_route(request):
     freed = clear_media_cache()
     return web.json_response({"cleared": True, **freed})
+
+# the "Export" command of the Media Loader
+@PromptServer.instance.routes.post(f"/{API_PREFIX}/media_loader/export")
+async def export_media_route(request):
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "expected a JSON body"}, status=400)
+    media_state = data.get("media_state")
+    if not isinstance(media_state, str):
+        return web.json_response({"error": "missing media_state"}, status=400)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(None, export_media, media_state)
+    except Exception as e:
+        logger.warning(f"MediaLoader : export failed : {e}")
+        return web.json_response({"error": f"export failed : {e}"}, status=500)
+    return web.json_response(result)
 
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/media_loader/extract_audio")
 async def extract_audio_route(request):
