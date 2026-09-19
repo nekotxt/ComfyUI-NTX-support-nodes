@@ -75,15 +75,39 @@ def annotated_name(slot: dict) -> str:
 #   3. crop it to "crop" = {x, y, width, height}, in pixels of the rotated and mirrored picture
 #      (None : no crop)
 #   4. scale it down so that its longer side is at most "max_size" pixels (0 : no limit)
+# The record also carries the settings of the editor's crop tool, "crop_aspect" (an aspect ratio
+# of EDIT_ASPECTS, "free" for none) and "crop_multiple" (a size multiple of EDIT_MULTIPLES) : they
+# do not change the picture, they are the user's preferences for the slot, kept so that the
+# editor reopens with them and passed along in the bundle for completeness.
 # The loader only records these settings, it never touches the file : applying them is up to the
 # node consuming the bundle
 EDIT_ROTATIONS = (0, 90, 180, 270)
 EDIT_MAX_SIZES = (0, 512, 832, 1024, 1280, 1600, 1920, 2048)
+EDIT_ASPECTS = ("free", "1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9", "9:21", "21:9")
+EDIT_MULTIPLES = (1, 2, 4, 5, 8, 10, 16, 32, 50, 100)
 
-def normalize_edit(edit) -> dict:
-    result = {"rotate": 0, "mirror_h": False, "mirror_v": False, "crop": None, "max_size": 0}
+# the crop tool settings of a record, validated
+def normalize_crop_settings(edit) -> dict:
+    result = {"crop_aspect": "free", "crop_multiple": 1}
     if not isinstance(edit, dict):
         return result
+    aspect = edit.get("crop_aspect")
+    if aspect in EDIT_ASPECTS:
+        result["crop_aspect"] = aspect
+    try:
+        multiple = int(edit.get("crop_multiple", 1))
+    except (TypeError, ValueError):
+        multiple = 1
+    if multiple in EDIT_MULTIPLES:
+        result["crop_multiple"] = multiple
+    return result
+
+def normalize_edit(edit) -> dict:
+    result = {"rotate": 0, "mirror_h": False, "mirror_v": False, "crop": None, "max_size": 0,
+              "crop_aspect": "free", "crop_multiple": 1}
+    if not isinstance(edit, dict):
+        return result
+    result.update(normalize_crop_settings(edit))
     try:
         rotate = int(edit.get("rotate", 0))
     except (TypeError, ValueError):
@@ -108,6 +132,7 @@ def normalize_edit(edit) -> dict:
         result["max_size"] = max_size
     return result
 
+# whether the record changes the picture (the crop tool settings do not count)
 def is_edited(edit: dict) -> bool:
     return edit["rotate"] != 0 or edit["mirror_h"] or edit["mirror_v"] or edit["crop"] is not None or edit["max_size"] != 0
 
@@ -116,8 +141,10 @@ def is_edited(edit: dict) -> bool:
 #   2. mirror the frames horizontally ("mirror_h") and / or vertically ("mirror_v")
 #   3. crop them to "crop" = {x, y, width, height}, in pixels of the mirrored frame (None : no crop)
 #   4. scale them down so that the longer side is at most "max_size" pixels (0 : no limit)
+# plus the crop tool settings "crop_aspect" and "crop_multiple", as for pictures
 def normalize_video_edit(edit) -> dict:
-    result = {"mirror_h": False, "mirror_v": False, "crop": None, "max_size": 0, "start": 0.0, "end": None}
+    result = {"mirror_h": False, "mirror_v": False, "crop": None, "max_size": 0, "start": 0.0, "end": None,
+              "crop_aspect": "free", "crop_multiple": 1}
     if not isinstance(edit, dict):
         return result
     # the frame edits are the picture ones without the rotation
@@ -125,6 +152,7 @@ def normalize_video_edit(edit) -> dict:
     for key in ("mirror_h", "mirror_v", "crop", "max_size"):
         result[key] = frame[key]
     result.update(normalize_span(edit))
+    result.update(normalize_crop_settings(edit))
     return result
 
 def is_video_edited(edit: dict) -> bool:
@@ -379,8 +407,12 @@ _media_cache: "OrderedDict[tuple, tuple[object, int]]" = OrderedDict()
 _media_cache_bytes = 0
 _media_cache_lock = threading.Lock()
 
+# the crop tool settings are preferences, not edits : they are left out of the key
+CACHE_KEY_IGNORED = ("crop_aspect", "crop_multiple")
+
 def media_cache_key(kind: str, entry: dict, edit: dict) -> tuple:
-    return (kind, entry.get("type", "input"), entry["file"], json.dumps(edit, sort_keys=True))
+    applied = {key: value for key, value in edit.items() if key not in CACHE_KEY_IGNORED}
+    return (kind, entry.get("type", "input"), entry["file"], json.dumps(applied, sort_keys=True))
 
 # the memory a cached item takes : the tensors it holds
 def media_value_bytes(value) -> int:

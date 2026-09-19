@@ -6,7 +6,8 @@
 // item, which the node hands out in its NTX_MEDIA_REFS bundle for a downstream
 // node to apply. An edit record is
 //   { rotate: 0 | 90 | 180 | 270, mirror_h: bool, mirror_v: bool,
-//     crop: { x, y, width, height } | null, max_size: 0 | 512 | 832 | ... }
+//     crop: { x, y, width, height } | null, max_size: 0 | 512 | 832 | ...,
+//     crop_aspect: "free" | "1:1" | ..., crop_multiple: 1 | 2 | ... }
 // and describes this pipeline, in this order :
 //   1. rotate the original picture clockwise by `rotate` degrees,
 //   2. mirror it horizontally (mirror_h) and / or vertically (mirror_v),
@@ -17,7 +18,10 @@
 // covering the same pixels of the picture. The crop rectangle is drawn by
 // dragging on the picture, moved by dragging inside it, and resized by its
 // eight handles (corners and side midpoints) ; every one of these honours the
-// aspect ratio and the size multiple chosen in the toolbar.
+// aspect ratio and the size multiple chosen in the toolbar. Those two are
+// tool settings rather than edits : they are remembered in the record
+// (crop_aspect, crop_multiple) so the editor reopens with them, but they do
+// not make the picture "edited" and they survive a Reset.
 //
 // openEditor(item, url, onApply) shows the modal editor for a slot item ; the
 // edits are worked on a copy and only reach the item through Apply.
@@ -33,7 +37,20 @@ export const ASPECTS = ["free", "1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9
 export const MULTIPLES = [1, 2, 4, 5, 8, 10, 16, 32, 50, 100];
 
 export function defaultEdit() {
-    return { rotate: 0, mirror_h: false, mirror_v: false, crop: null, max_size: 0 };
+    return { rotate: 0, mirror_h: false, mirror_v: false, crop: null, max_size: 0, crop_aspect: "free", crop_multiple: 1 };
+}
+
+// the crop tool settings of a record, validated
+export function cropSettings(edit) {
+    const aspect = ASPECTS.includes(edit?.crop_aspect) ? edit.crop_aspect : "free";
+    const multiple = parseInt(edit?.crop_multiple, 10);
+    return { crop_aspect: aspect, crop_multiple: MULTIPLES.includes(multiple) ? multiple : 1 };
+}
+
+// whether a record carries crop tool settings worth keeping
+export function hasCropSettings(edit) {
+    const s = cropSettings(edit);
+    return s.crop_aspect !== "free" || s.crop_multiple !== 1;
 }
 
 // a well formed copy of an edit record (anything odd falls back to the default)
@@ -51,9 +68,11 @@ export function normalizeEdit(edit) {
     }
     const m = parseInt(edit.max_size, 10);
     if (MAX_SIZES.includes(m)) e.max_size = m;
+    Object.assign(e, cropSettings(edit));
     return e;
 }
 
+// the tool settings do not count : only what changes the picture does
 export function isEdited(edit) {
     const e = normalizeEdit(edit);
     return e.rotate !== 0 || e.mirror_h || e.mirror_v || !!e.crop || e.max_size !== 0;
@@ -345,8 +364,8 @@ export function openEditor(item, url, onApply) {
 
     let edit = normalizeEdit(item.edit);
     let cropping = false;
-    let aspect = "free";
-    let mult = 1;
+    let aspect = edit.crop_aspect;
+    let mult = edit.crop_multiple;
     let img = null;                 // the loaded picture
     let scale = 1;                  // canvas px per picture px
     let drag = null;                // an ongoing crop drag
@@ -382,9 +401,9 @@ export function openEditor(item, url, onApply) {
                 onclick: () => { cropping = !cropping; stage.classList.toggle("cropping", cropping); canvas.style.cursor = ""; layout(); } }, "▣ Crop"),
             cropping ? [
                 el("label", {}, "aspect"),
-                select(ASPECTS, aspect, (v) => { aspect = v; }),
+                select(ASPECTS, aspect, (v) => { aspect = v; edit.crop_aspect = v; }),
                 el("label", {}, "multiples of"),
-                select(MULTIPLES, mult, (v) => { mult = parseInt(v, 10); }),
+                select(MULTIPLES, mult, (v) => { mult = parseInt(v, 10); edit.crop_multiple = mult; }),
                 el("button", { class: "nme-btn", disabled: !edit.crop, title: "Remove the crop rectangle",
                     onclick: () => { edit.crop = null; layout(); } }, "Clear crop"),
             ] : null,
@@ -398,10 +417,10 @@ export function openEditor(item, url, onApply) {
     // ── footer ──
     modal.append(el("div", { class: "nme-foot" },
         el("button", { class: "nme-btn danger", title: "Delete every edit and restore the original picture",
-            onclick: () => { edit = defaultEdit(); layout(); } }, "Reset"),
+            onclick: () => { edit = { ...defaultEdit(), ...cropSettings(edit) }; layout(); } }, "Reset"),
         el("span", { class: "nme-spacer" }),
         el("button", { class: "nme-btn primary", title: "Keep these edits and close",
-            onclick: () => { onApply(isEdited(edit) ? normalizeEdit(edit) : null); close(); } }, "Apply"),
+            onclick: () => { onApply(isEdited(edit) || hasCropSettings(edit) ? normalizeEdit(edit) : null); close(); } }, "Apply"),
         el("button", { class: "nme-btn", title: "Discard the changes made here and close", onclick: close }, "Cancel"),
     ));
 

@@ -6,7 +6,8 @@
 // it records a set of edits on the slot item, which the node hands out in its
 // NTX_MEDIA_REFS bundle for a downstream node to apply. A video's edit record is
 //   { mirror_h: bool, mirror_v: bool, crop: { x, y, width, height } | null,
-//     max_size: 0 | 512 | 832 | ..., start: seconds, end: seconds | null }
+//     max_size: 0 | 512 | 832 | ..., start: seconds, end: seconds | null,
+//     crop_aspect: "free" | "1:1" | ..., crop_multiple: 1 | 2 | ... }
 // and describes this pipeline, in this order :
 //   1. keep only the span from `start` to `end` (null : up to the end),
 //   2. mirror the frames horizontally (mirror_h) and / or vertically (mirror_v),
@@ -14,7 +15,9 @@
 //   4. scale them down so the longer side is at most `max_size` (0 : no limit).
 // Mirroring while a crop exists carries the crop along, so it keeps covering the
 // same pixels. The crop rectangle is drawn, moved and resized exactly as in the
-// picture editor, whose geometry this module imports.
+// picture editor, whose geometry this module imports ; as there, the aspect
+// ratio and size multiple of the crop tool are remembered in the record
+// (crop_aspect, crop_multiple) without counting as edits.
 //
 // The interface : the edit commands on top, the video preview drawn on a canvas
 // (so the mirrors and the crop overlay show live), a timeline under it with the
@@ -31,7 +34,7 @@
 //     and loaded in an audio slot.
 // Both return a promise, resolved with a short message for the user.
 
-import { MAX_SIZES, ASPECTS, MULTIPLES, HANDLES, HANDLE_CURSORS, dragRect, resizeRect } from "./media_loader.editor.js";
+import { MAX_SIZES, ASPECTS, MULTIPLES, HANDLES, HANDLE_CURSORS, dragRect, resizeRect, cropSettings, hasCropSettings } from "./media_loader.editor.js";
 
 // the shortest span a video can be trimmed to, in seconds
 const MIN_SPAN = 0.1;
@@ -43,7 +46,7 @@ const QUICK_SPANS = [1, 2, 3];
 // ── Edit records ──────────────────────────────────────────────────────────────
 
 export function defaultVideoEdit() {
-    return { mirror_h: false, mirror_v: false, crop: null, max_size: 0, start: 0, end: null };
+    return { mirror_h: false, mirror_v: false, crop: null, max_size: 0, start: 0, end: null, crop_aspect: "free", crop_multiple: 1 };
 }
 
 // a well formed copy of a video edit record (anything odd falls back to the default)
@@ -63,9 +66,11 @@ export function normalizeVideoEdit(edit) {
     if (Number.isFinite(start) && start > 0) e.start = round3(start);
     const end = edit.end == null ? null : parseFloat(edit.end);
     if (end != null && Number.isFinite(end) && end > e.start) e.end = round3(end);
+    Object.assign(e, cropSettings(edit));
     return e;
 }
 
+// the crop tool settings do not count : only what changes the video does
 export function isVideoEdited(edit) {
     const e = normalizeVideoEdit(edit);
     return e.mirror_h || e.mirror_v || !!e.crop || e.max_size !== 0 || e.start > 0 || e.end != null;
@@ -257,8 +262,8 @@ export function openVideoEditor(item, url, onApply, actions = {}) {
 
     let edit = normalizeVideoEdit(item.edit);
     let cropping = false;
-    let aspect = "free";
-    let mult = 1;
+    let aspect = edit.crop_aspect;
+    let mult = edit.crop_multiple;
     let ready = false;              // metadata loaded
     let scale = 1;                  // canvas px per frame px
     let drag = null;                // an ongoing crop drag
@@ -337,9 +342,9 @@ export function openVideoEditor(item, url, onApply, actions = {}) {
                 onclick: () => { cropping = !cropping; canvas.style.cursor = ""; layout(); } }, "▣ Crop"),
             cropping ? [
                 el("label", {}, "aspect"),
-                select(ASPECTS, aspect, (v) => { aspect = v; }),
+                select(ASPECTS, aspect, (v) => { aspect = v; edit.crop_aspect = v; }),
                 el("label", {}, "multiples of"),
-                select(MULTIPLES, mult, (v) => { mult = parseInt(v, 10); }),
+                select(MULTIPLES, mult, (v) => { mult = parseInt(v, 10); edit.crop_multiple = mult; }),
                 el("button", { class: "nmv-btn", disabled: !edit.crop, title: "Remove the crop rectangle",
                     onclick: () => { edit.crop = null; layout(); } }, "Clear crop"),
             ] : null,
@@ -353,10 +358,10 @@ export function openVideoEditor(item, url, onApply, actions = {}) {
     // ── footer ──
     modal.append(el("div", { class: "nmv-foot" },
         el("button", { class: "nmv-btn danger", title: "Delete every edit and restore the original video",
-            onclick: () => { edit = defaultVideoEdit(); seek(0); layout(); } }, "Reset"),
+            onclick: () => { edit = { ...defaultVideoEdit(), ...cropSettings(edit) }; seek(0); layout(); } }, "Reset"),
         el("span", { class: "nmv-spacer" }),
         el("button", { class: "nmv-btn primary", title: "Keep these edits and close",
-            onclick: () => { onApply(isVideoEdited(edit) ? normalizeVideoEdit(edit) : null); close(); } }, "Accept"),
+            onclick: () => { onApply(isVideoEdited(edit) || hasCropSettings(edit) ? normalizeVideoEdit(edit) : null); close(); } }, "Accept"),
         el("button", { class: "nmv-btn", title: "Discard the changes made here and close", onclick: close }, "Cancel"),
     ));
 
@@ -600,7 +605,7 @@ export function openVideoEditor(item, url, onApply, actions = {}) {
             const stem = item.name.replace(/\.[^.]+$/, "");
             const name = `${stem}_${video.currentTime.toFixed(2)}s.png`;
             // the picture takes over the frame edits (mirror, crop, max size) as its own
-            const frameEdit = { rotate: 0, mirror_h: edit.mirror_h, mirror_v: edit.mirror_v, crop: edit.crop ? { ...edit.crop } : null, max_size: edit.max_size };
+            const frameEdit = { rotate: 0, mirror_h: edit.mirror_h, mirror_v: edit.mirror_v, crop: edit.crop ? { ...edit.crop } : null, max_size: edit.max_size, ...cropSettings(edit) };
             return await actions.saveFrame(blob, name, frameEdit);
         });
     }
