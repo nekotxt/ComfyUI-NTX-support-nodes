@@ -833,6 +833,30 @@ function makeMediaWidget(node, inputName, initialValue) {
         }
     }
 
+    // open the folder picker : the files of the chosen folder (subfolders included), or null
+    // when the picker was cancelled
+    function pickFolder() {
+        return new Promise((resolve) => {
+            let timer = 0;
+            const done = (list) => {
+                clearTimeout(timer);
+                folderPicker.removeEventListener("change", onChange);
+                folderPicker.removeEventListener("cancel", onCancel);
+                window.removeEventListener("focus", onFocus);
+                resolve(list);
+            };
+            const onChange = () => { const list = [...folderPicker.files]; folderPicker.value = ""; done(list); };
+            const onCancel = () => done(null);
+            // browsers without the cancel event : the window gets its focus back once the
+            // dialog closes, and a selection follows within a moment when there is one
+            const onFocus = () => { clearTimeout(timer); timer = setTimeout(() => done(null), 1000); };
+            folderPicker.addEventListener("change", onChange);
+            folderPicker.addEventListener("cancel", onCancel);
+            setTimeout(() => window.addEventListener("focus", onFocus), 100);
+            folderPicker.click();
+        });
+    }
+
     async function loadMissing() {
         if (loadingMissing) return;
         loadingMissing = true;
@@ -851,26 +875,7 @@ function makeMediaWidget(node, inputName, initialValue) {
                 ]);
                 return;
             }
-            // pick the folder
-            const files = await new Promise((resolve) => {
-                let timer = 0;
-                const done = (list) => {
-                    clearTimeout(timer);
-                    folderPicker.removeEventListener("change", onChange);
-                    folderPicker.removeEventListener("cancel", onCancel);
-                    window.removeEventListener("focus", onFocus);
-                    resolve(list);
-                };
-                const onChange = () => { const list = [...folderPicker.files]; folderPicker.value = ""; done(list); };
-                const onCancel = () => done(null);
-                // browsers without the cancel event : the window gets its focus back once the
-                // dialog closes, and a selection follows within a moment when there is one
-                const onFocus = () => { clearTimeout(timer); timer = setTimeout(() => done(null), 1000); };
-                folderPicker.addEventListener("change", onChange);
-                folderPicker.addEventListener("cancel", onCancel);
-                setTimeout(() => window.addEventListener("focus", onFocus), 100);
-                folderPicker.click();
-            });
+            const files = await pickFolder();
             if (!files) return;                     // the picker was cancelled
             const uploaded = [], still = [];
             for (const slot of missing) {
@@ -893,6 +898,103 @@ function makeMediaWidget(node, inputName, initialValue) {
             ]);
         } finally {
             loadingMissing = false;
+            render();
+        }
+    }
+
+    // ── import ──
+    // The reverse of Export : a folder holding a media.json and the files it names is loaded
+    // into the node, replacing its content ; the files are uploaded like dropped ones, so the
+    // slots end up referencing the copies in input/ntx_media, not the picked folder.
+    let importing = false;
+    const IMPORT_JSON = "media.json";
+
+    // the media.json of the picked files, with the folder it sits in as a prefix for its files
+    async function readImportDescription(files) {
+        const jsons = files.filter(f => f.name.toLowerCase() === IMPORT_JSON);
+        if (!jsons.length) throw new Error(`the folder holds no ${IMPORT_JSON}`);
+        if (jsons.length > 1) throw new Error(`the folder holds several ${IMPORT_JSON} (${jsons.map(f => f.webkitRelativePath).join(", ")}) : pick the folder of one export`);
+        const json = jsons[0];
+        const path = json.webkitRelativePath || json.name;
+        const base = path.slice(0, path.length - json.name.length);        // "export/" or ""
+        let description;
+        try {
+            description = JSON.parse(await json.text());
+        } catch (err) {
+            throw new Error(`${IMPORT_JSON} is not valid JSON : ${err.message}`);
+        }
+        if (!description || typeof description !== "object") throw new Error(`${IMPORT_JSON} does not describe a media set`);
+        for (const kind of Object.keys(KINDS)) {
+            if (description[kind] != null && !Array.isArray(description[kind])) throw new Error(`${IMPORT_JSON} : "${kind}" is not a list`);
+            for (const entry of description[kind] ?? []) {
+                if (!entry || typeof entry !== "object" || !Number.isInteger(entry.slot) || entry.slot < 0 || typeof entry.name !== "string" || !entry.name) {
+                    throw new Error(`${IMPORT_JSON} : a ${KINDS[kind].label} entry lacks its slot or name`);
+                }
+            }
+        }
+        return { description, base };
+    }
+
+    async function importAll() {
+        if (importing) return;
+        const files = await pickFolder();
+        if (!files) return;
+        importing = true;
+        render();
+        try {
+            let description, base;
+            try {
+                ({ description, base } = await readImportDescription(files));
+            } catch (err) {
+                toast("error", "Import failed", err.message);
+                return;
+            }
+            // the node is replaced : ask first when something is loaded
+            const count = loadedCount();
+            if (count) {
+                const ok = await confirmDialog("Import media",
+                    `Replace the ${count} loaded file${count > 1 ? "s" : ""} of this node with the content of the folder ? The files stay in the input folder.`);
+                if (!ok) return;
+            }
+            // as many rows as the description asks for, and at least as many as its slots need
+            let rows = parseInt(description.rows, 10);
+            if (!Number.isFinite(rows)) rows = MIN_ROWS;
+            for (const [kind, spec] of Object.entries(KINDS)) {
+                for (const entry of description[kind] ?? []) rows = Math.max(rows, Math.ceil((entry.slot + 1) / spec.perRow));
+            }
+            state = emptyState(Math.max(MIN_ROWS, rows));
+            commit();
+            fitNode();
+            // upload every file of the description into its slot
+            const byPath = new Map(files.map(f => [(f.webkitRelativePath || f.name).toLowerCase(), f]));
+            let loaded = 0;
+            const missing = [];
+            for (const kind of Object.keys(KINDS)) {
+                for (const entry of description[kind] ?? []) {
+                    const label = `${entry.name} (${KINDS[kind].label} ${entry.slot + 1})`;
+                    const file = byPath.get((base + entry.name).toLowerCase());
+                    if (!file) { missing.push(`${label} : not in the folder`); continue; }
+                    if (!file.size) { missing.push(`${label} : empty file`); continue; }
+                    if (!kindOf(file) || kindOf(file) !== kind) { missing.push(`${label} : not a ${KINDS[kind].label} file`); continue; }
+                    const key = `${kind}:${entry.slot}`;
+                    busy.add(key); render();
+                    try {
+                        const item = await uploadFile(file);
+                        if (entry.edit && typeof entry.edit === "object") item.edit = entry.edit;
+                        state[kind][entry.slot] = item;
+                        loaded++;
+                    } catch (err) {
+                        missing.push(`${label} : upload failed, ${err.message}`);
+                    } finally {
+                        busy.delete(key); commit();
+                    }
+                }
+            }
+            toast(missing.length ? "warn" : "success", "Media imported",
+                `${loaded} file${loaded === 1 ? "" : "s"} loaded in ${rows} row${rows > 1 ? "s" : ""} of slots`
+                + (missing.length ? ` \u2014 ${missing.length} skipped : ${missing.join(" ; ")}` : ""));
+        } finally {
+            importing = false;
             render();
         }
     }
@@ -1096,6 +1198,9 @@ function makeMediaWidget(node, inputName, initialValue) {
             el("button", { class: "nml-btn", disabled: !count || exporting,
                 title: "Copy every loaded file, with a media.json describing the slots, into a new folder of output/ntx_media named after the current time",
                 onclick: (ev) => { ev.stopPropagation(); exportAll(); } }, exporting ? "exporting\u2026" : "Export"),
+            el("button", { class: "nml-btn", disabled: importing,
+                title: "Load the content of an exported folder (its media.json and files) into this node, replacing what is loaded",
+                onclick: (ev) => { ev.stopPropagation(); importAll(); } }, importing ? "importing\u2026" : "Import"),
             el("button", { class: "nml-btn danger", disabled: !count, title: "Empty every slot",
                 onclick: (ev) => { ev.stopPropagation(); clearAll(); } }, "Clear"));
     }
