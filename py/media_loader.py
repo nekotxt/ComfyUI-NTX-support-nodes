@@ -8,6 +8,7 @@ import torch
 from PIL import Image, ImageOps
 
 import asyncio
+import gc
 import threading
 from collections import OrderedDict
 import hashlib
@@ -263,10 +264,24 @@ class MediaLoader(io.ComfyNode):
 
 # ===== MEDIA SPLITTER =========================================================================================================================
 
-# the slots the splitter exposes : the first ones of each kind of the bundle
-SPLIT_PICTURES = 9
-SPLIT_VIDEOS = 3
-SPLIT_AUDIOS = 3
+# The splitter exposes the slots of a loader with the same number of rows : for R rows, its
+# outputs are, in this order, 3R pictures, R videos, R video audios and R audios. As the number
+# of outputs of a node is fixed, the node declares the outputs of the maximum number of rows as
+# untyped outputs, and the frontend (web/js/media_splitter.js) shows the ones of the current
+# rows with their names and types ; the row count travels in the "rows" widget.
+MAX_SPLIT_ROWS = 10
+DEFAULT_SPLIT_ROWS = 3
+SPLIT_OUTPUTS_PER_ROW = 6
+SPLIT_OUTPUTS = MAX_SPLIT_ROWS * SPLIT_OUTPUTS_PER_ROW
+
+# the outputs of a splitter with `rows` rows, as (name, kind, slot) tuples
+def split_layout(rows: int) -> list[tuple[str, str, int]]:
+    rows = max(1, min(MAX_SPLIT_ROWS, int(rows)))
+    layout = [(f"picture_{i + 1}", "pictures", i) for i in range(3 * rows)]
+    layout += [(f"video_{i + 1}", "video_frames", i) for i in range(rows)]
+    layout += [(f"video_audio_{i + 1}", "video_audio", i) for i in range(rows)]
+    layout += [(f"audio_{i + 1}", "audios", i) for i in range(rows)]
+    return layout
 
 # apply the frame edits of a picture or video record to a batch of frames [B, H, W, C] :
 # rotate (pictures only), mirror, crop, then scale down to the maximum size
@@ -408,11 +423,19 @@ def cached_media(kind: str, entry: dict, edit: dict, loader):
                        f"({MEDIA_CACHE_MAX_BYTES / 1024 ** 2:.0f} MB)")
     return media_value_share(value), False
 
-def clear_media_cache():
+# drop every cached item and give the memory back : the tensors are released as soon as nothing
+# references them any more, the collector is run for the cycles they may sit in
+def clear_media_cache() -> dict:
     global _media_cache_bytes
     with _media_cache_lock:
+        freed = {"items": len(_media_cache), "bytes": _media_cache_bytes}
         _media_cache.clear()
         _media_cache_bytes = 0
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    logger.info(f"MediaSplitter : media cache cleared, {freed['items']} items, {freed['bytes'] / 1024 ** 2:.0f} MB freed")
+    return freed
 
 def media_cache_stats() -> dict:
     with _media_cache_lock:
@@ -436,66 +459,65 @@ class MediaSplitter(io.ComfyNode):
         return io.Schema(
             node_id=f"{ADDON_PREFIX}MediaSplitter",
             display_name=f"{ADDON_PREFIX} Media Splitter",
-            description=f"Split a media bundle of the Media Loader into its slots : the first {SPLIT_PICTURES} pictures, "
-                        f"{SPLIT_VIDEOS} videos (frames and audio) and {SPLIT_AUDIOS} audios, decoded with their edits applied. "
-                        "The outputs of the empty slots are None.",
+            description="Split a media bundle of the Media Loader into its slots : the pictures, the videos (frames "
+                        "and audio) and the audios of as many rows of slots as the node shows, decoded with their edits "
+                        "applied. The outputs of the empty slots are None.",
             category=f"{ADDON_CATEGORY}/images",
             inputs=[
                 MEDIA_REFS_TYPE.Input("media", tooltip="The media bundle of a Media Loader node."),
+                # the rows of slots the outputs cover ; the frontend edits it with its Add / Remove slots buttons
+                io.Int.Input("rows", default=DEFAULT_SPLIT_ROWS, min=1, max=MAX_SPLIT_ROWS, socketless=True),
             ],
-            outputs=[
-                *[io.Image.Output(f"picture_{i + 1}") for i in range(SPLIT_PICTURES)],
-                *[io.Image.Output(f"video_{i + 1}") for i in range(SPLIT_VIDEOS)],
-                *[io.Audio.Output(f"video_audio_{i + 1}") for i in range(SPLIT_VIDEOS)],
-                *[io.Audio.Output(f"audio_{i + 1}") for i in range(SPLIT_AUDIOS)],
-            ],
+            # generic outputs : the frontend names and types the ones of the current rows
+            outputs=[io.AnyType.Output(f"output_{i + 1}") for i in range(SPLIT_OUTPUTS)],
         )
 
     @classmethod
-    def execute(cls, media) -> io.NodeOutput:
+    def execute(cls, media, rows=DEFAULT_SPLIT_ROWS) -> io.NodeOutput:
         logger.node_name("MediaSplitter")
         media = media if isinstance(media, dict) else {}
         by_slot = lambda kind: {int(entry["slot"]): entry for entry in media.get(kind, []) if isinstance(entry, dict)}
-        pictures, videos, audios = by_slot("pictures"), by_slot("videos"), by_slot("audios")
-
+        entries = {"pictures": by_slot("pictures"), "videos": by_slot("videos"), "audios": by_slot("audios")}
+        layout = split_layout(rows)
         cached = lambda hit: " (cached)" if hit else ""
 
-        picture_out = [None] * SPLIT_PICTURES
-        for slot, entry in pictures.items():
-            if slot < SPLIT_PICTURES:
+        # decode each slot once, the outputs of the layout then pick from these
+        loaded = {}
+        for name, kind, slot in layout:
+            entry = entries["videos" if kind.startswith("video") else kind].get(slot)
+            if entry is None or (kind, slot) in loaded:
+                continue
+            if kind == "pictures":
                 edit = normalize_edit(entry.get("edit"))
-                picture_out[slot], hit = cached_media("picture", entry, edit, lambda: load_picture(entry["path"], edit))
-                logger.info(f"picture {slot + 1} : [{entry['name']}] -> {picture_out[slot].shape[2]}x{picture_out[slot].shape[1]}{cached(hit)}")
-
-        video_out, video_audio_out = [None] * SPLIT_VIDEOS, [None] * SPLIT_VIDEOS
-        for slot, entry in videos.items():
-            if slot < SPLIT_VIDEOS:
+                value, hit = cached_media("picture", entry, edit, lambda: load_picture(entry["path"], edit))
+                logger.info(f"{name} : [{entry['name']}] -> {value.shape[2]}x{value.shape[1]}{cached(hit)}")
+            elif kind == "video_frames":
                 edit = normalize_video_edit(entry.get("edit"))
-                video_out[slot], hit_frames = cached_media("video_frames", entry, edit, lambda: load_video_frames(entry["path"], edit))
+                value, hit = cached_media("video_frames", entry, edit, lambda: load_video_frames(entry["path"], edit))
+                logger.info(f"{name} : [{entry['name']}] -> "
+                            + (f"{value.shape[0]} frames {value.shape[2]}x{value.shape[1]}" if value is not None else "no frames") + cached(hit))
+            elif kind == "video_audio":
                 # the audio only depends on the span
+                edit = normalize_video_edit(entry.get("edit"))
                 span = {"start": edit["start"], "end": edit["end"]}
-                video_audio_out[slot], hit_audio = cached_media("video_audio", entry, span, lambda: load_audio_span(entry["path"], span))
-                frames = video_out[slot]
-                logger.info(f"video {slot + 1} : [{entry['name']}] -> "
-                            + (f"{frames.shape[0]} frames {frames.shape[2]}x{frames.shape[1]}" if frames is not None else "no frames")
-                            + cached(hit_frames)
-                            + (", with audio" if video_audio_out[slot] is not None else ", no audio") + cached(hit_audio))
-
-        audio_out = [None] * SPLIT_AUDIOS
-        for slot, entry in audios.items():
-            if slot < SPLIT_AUDIOS:
+                value, hit = cached_media("video_audio", entry, span, lambda: load_audio_span(entry["path"], span))
+                logger.info(f"{name} : [{entry['name']}] -> "
+                            + (f"{value['waveform'].shape[2] / value['sample_rate']:.2f}s at {value['sample_rate']}Hz" if value is not None else "no audio") + cached(hit))
+            else:
                 edit = normalize_audio_edit(entry.get("edit"))
-                audio_out[slot], hit = cached_media("audio", entry, edit, lambda: load_audio_span(entry["path"], edit))
-                audio = audio_out[slot]
-                logger.info(f"audio {slot + 1} : [{entry['name']}] -> "
-                            + (f"{audio['waveform'].shape[2] / audio['sample_rate']:.2f}s at {audio['sample_rate']}Hz" if audio is not None else "no audio")
-                            + cached(hit))
+                value, hit = cached_media("audio", entry, edit, lambda: load_audio_span(entry["path"], edit))
+                logger.info(f"{name} : [{entry['name']}] -> "
+                            + (f"{value['waveform'].shape[2] / value['sample_rate']:.2f}s at {value['sample_rate']}Hz" if value is not None else "no audio") + cached(hit))
+            loaded[(kind, slot)] = value
 
         if USE_MEDIA_LOADER_CACHE:
             stats = media_cache_stats()
             logger.info(f"media cache : {stats['items']} items, {stats['bytes'] / 1024 ** 2:.0f} / {stats['max_bytes'] / 1024 ** 2:.0f} MB")
 
-        return io.NodeOutput(*picture_out, *video_out, *video_audio_out, *audio_out)
+        # the outputs of the layout, then None on the unused ones
+        outputs = [loaded.get((kind, slot)) for _, kind, slot in layout]
+        outputs += [None] * (SPLIT_OUTPUTS - len(outputs))
+        return io.NodeOutput(*outputs)
 
 # ===== INITIALIZATION =========================================================================================================================
 
@@ -600,6 +622,12 @@ def extract_audio(file: str, file_type: str, start: float, end: float | None) ->
 
 from aiohttp import web
 from server import PromptServer
+
+# the "Clean media cache" command of the Media Splitter's right-click menu
+@PromptServer.instance.routes.post(f"/{API_PREFIX}/media_loader/clear_cache")
+async def clear_media_cache_route(request):
+    freed = clear_media_cache()
+    return web.json_response({"cleared": True, **freed})
 
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/media_loader/extract_audio")
 async def extract_audio_route(request):
