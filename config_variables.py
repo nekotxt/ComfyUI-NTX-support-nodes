@@ -30,6 +30,7 @@ if not COMFY_EXTRAS_DIR_str in sys.path:
 MODEL_TYPES = ["vae", "checkpoints", "loras"]
 MODELS_DIR = Path.cwd() / "models"
 
+
 # user configuration files
 
 class SettingsSolver():
