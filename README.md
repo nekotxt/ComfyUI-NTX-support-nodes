@@ -682,18 +682,19 @@ Differences from LoadPrompt:
 ![ReplaceTextParameters node](images/ReplaceTextParameters.png)
 
 Replaces named placeholders inside a text with values taken from a parameters dictionary.
-Placeholders are written as `%name%` or `%%name%%` (the double-`%%` form is resolved first,
-so it survives inside text that also uses single `%` signs). A placeholder whose name is not
-found in the dictionary is replaced with an **empty string**.
+Placeholders are written as `%name%`. A placeholder whose name is not found in the
+dictionary is replaced with an **empty string**. Once every placeholder has been resolved,
+the result is treated as a path: every `/` and `\` becomes the path separator of the
+operating system, and consecutive separators are compacted into a single one.
 
-The special form `%date:FORMAT%` (or `%%date:FORMAT%%`) inserts the current date/time instead
+The special form `%date:FORMAT%` inserts the current date/time instead
 of a dictionary value. `FORMAT` uses JavaScript-style tokens, converted internally to Python
 `strftime`: `YYYY`/`yy` (year), `MMMM`/`MMM`/`MM` (month name / short name / number),
 `DD` (day), `DDDD` (day of year), `HH` (hour), `mm` (minutes), `ss` (seconds).
 
 ### Example
 
-With `text` = `in the style of %artist%, generated %%date:YYYY-MM-DD%%` and a `parameters`
+With `text` = `in the style of %artist%, generated %date:YYYY-MM-DD%` and a `parameters`
 dictionary containing `{"artist": "anime"}`, the output is
 `in the style of anime, generated 2026-07-02`.
 

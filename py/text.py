@@ -58,7 +58,7 @@ PREFIX_SUFFIX_PARAMETER_DOC = """
 DATE_PARAMETER_DOC = """
     The parameter name 'date:<format>' is reserved: it is not looked up in the
     dictionary, but replaced with the current date/time rendered with <format>.
-    For instance '%%date:YYYY-MM-DD%%' gives a text such as '2026-09-09'.
+    For instance '%date:YYYY-MM-DD%' gives a text such as '2026-09-09'.
     The placeholders recognised in <format> are:
         YYYY, yyyy  4-digit year        MMMM  month name (January)
         YY, yy      2-digit year        MMM   short month name (Jan)
@@ -67,10 +67,10 @@ DATE_PARAMETER_DOC = """
         mm          minutes             ss    seconds
     'hh' is accepted as well, but it is a 24-hour clock too, not a 12-hour one.
     Any other character of <format> is kept as it is, so it can be used as a
-    separator ('%%date:YYYY_MM_DD-HH.mm%%')."""
+    separator ('%date:YYYY_MM_DD-HH.mm%')."""
 
 def _split_marker(match:str):
-    """Split the content of a marker, i.e. what sits between the '%' (or '%%')
+    """Split the content of a marker, i.e. what sits between the '%'
     delimiters, into its (prefix, name, suffix): 'prefix*name#suffix', both
     separators being optional. '*' and '#' are reserved and cannot be used in a
     parameter name, which makes the three parts unambiguous."""
@@ -98,19 +98,18 @@ def _resolve_parameter(match:str, parameters:dict):
     return "" if value == "" else prefix + value + suffix
 
 def _replace_parameters(text:str, parameters:dict):
-    # replace double % first
-    # pattern = r'%%([^%]+)%%'
-    # matches = re.findall(pattern, text)
-    # for match in matches:
-    #     text = text.replace(f"%%{match}%%", _resolve_parameter(match, parameters))
-
-    # replace single % next
     pattern = r'%([^%]+)%'
     matches = re.findall(pattern, text)
     for match in matches:
         text = text.replace(f"%{match}%", _resolve_parameter(match, parameters))
 
     return text
+
+def _normalise_separators(path:str):
+    """Both '/' and '\\' become the path separator of the operating system,
+    and a run of separators is compacted into a single one."""
+
+    return re.sub(r'[\\/]+', lambda _: os.sep, path)
 
 class ReplaceTextParameters(io.ComfyNode):
     @classmethod
@@ -120,14 +119,16 @@ class ReplaceTextParameters(io.ComfyNode):
             display_name=f"{ADDON_PREFIX} Replace Text Parameters",
             description=f"""
     Replace text parameters.
-    The parameters must be in the form '%%name%%' or '%name%'
-    For instance, if text='in the style of %%artist%%'
+    The parameters must be in the form '%name%'
+    For instance, if text='in the style of %artist%'
     and parameters contains an entry 'artist': 'anime'
     then the returned text will be 'in the style of anime'
     If the parameter name is not found in the dictionary, it will be replaced with an empty string.{PREFIX_SUFFIX_PARAMETER_DOC}{DATE_PARAMETER_DOC}
     A multiline text is treated as a list of path segments: each line is formatted
     and stripped on its own, blank results are dropped, and the remaining pieces
-    are joined with the path separator of the operating system.
+    are joined with the path separator of the operating system; every '/' and '\\'
+    of the result becomes that separator too, and consecutive separators are
+    compacted into a single one.
     """,
             category=f"{ADDON_CATEGORY}/text",
             inputs=[
@@ -148,7 +149,7 @@ class ReplaceTextParameters(io.ComfyNode):
         # Each line is formatted and stripped on its own; the pieces that are
         # left after dropping the blank ones are joined as path segments.
         pieces = [_replace_parameters(line, parameters).strip() for line in text.splitlines()]
-        result = os.sep.join(piece for piece in pieces if piece != "")
+        result = _normalise_separators(os.sep.join(piece for piece in pieces if piece != ""))
 
         return io.NodeOutput(result, ui=ui.PreviewText(result))
 
@@ -166,12 +167,13 @@ class FileNameTemplate(io.ComfyNode):
             display_name=f"{ADDON_PREFIX} File Name From Template",
             description=f"""
     Build a file name by replacing the parameters of a template.
-    The parameters must be in the form '%%name%%' or '%name%', and are taken from
-    opt_textparams, from the connected inputs p0, p1, ... (as '%%p0%%', '%%p1%%', ...)
+    The parameters must be in the form '%name%', and are taken from
+    opt_textparams, from the connected inputs p0, p1, ... (as '%p0%', '%p1%', ...)
     and, when model_name is given, from its file name stem, truncated to
-    model_name_max_length and with the spaces replaced by '_' (as '%%model_name%%').
-    A parameter which is not found is replaced with an empty string, and the
-    doubled path separators of the result are collapsed into a single one.{PREFIX_SUFFIX_PARAMETER_DOC}{DATE_PARAMETER_DOC}
+    model_name_max_length and with the spaces replaced by '_' (as '%model_name%').
+    A parameter which is not found is replaced with an empty string; every '/' and
+    '\\' of the result becomes the path separator of the operating system, and
+    consecutive separators are compacted into a single one.{PREFIX_SUFFIX_PARAMETER_DOC}{DATE_PARAMETER_DOC}
     """,
             category=f"{ADDON_CATEGORY}/text",
             inputs=[
@@ -197,11 +199,7 @@ class FileNameTemplate(io.ComfyNode):
         for i in range(0, len(param_list)):
             opt_textparams[f"p{i}"] = param_list[i]
 
-        filename = _replace_parameters(template, opt_textparams)
-
-        # remove doubles
-        filename = filename.replace("\\\\", "\\")
-        filename = filename.replace("//", "/")
+        filename = _normalise_separators(_replace_parameters(template, opt_textparams))
 
         return io.NodeOutput(filename)
 
@@ -267,7 +265,7 @@ class ComplexPrompt(io.ComfyNode):
     - replace text parameters
     - extract loras from positive prompt and add them to the lora stack
     - return final clean prompts and lora stack
-    The text parameters must be in the form '%%name%%' or '%name%', and a parameter
+    The text parameters must be in the form '%name%', and a parameter
     which is not found in text_params is replaced with an empty string.{PREFIX_SUFFIX_PARAMETER_DOC}{DATE_PARAMETER_DOC}
     """,
             category=f"{ADDON_CATEGORY}/text",
