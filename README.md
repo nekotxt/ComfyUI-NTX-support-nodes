@@ -1546,78 +1546,51 @@ Right-click menu option on the node:
 
 ---
 
-## LoadImageAndCrop
-
-![LoadImageAndCrop node](images/LoadImageAndCrop.png)
-
-Loads an image from the ComfyUI **input** folder and returns it together with its mask, with an
-optional **crop rectangle** drawn directly on the node's image preview. Apart from the crop, the
-node behaves exactly like the standard *Load Image*: the same file list and **choose file to
-upload** button, and the same right-click **Open in Mask Editor** entry to paint a mask — the
-editor writes its result back into the `image` widget, so painting a mask and cropping can be
-combined freely. The image decoding is delegated to the core loader, so animated formats, EXIF
-orientation and alpha channels are handled identically.
-
-The rectangle is expressed in pixels of the loaded image and is always clamped to it, so a
-workflow reloaded against a smaller image never keeps a rectangle hanging outside — it is shrunk
-to fit, or dropped entirely when nothing is left of it. When no rectangle is set (its width or
-height is `0`), the whole image is returned untouched.
-
-The mask follows the crop when it covers the image. An image **without an alpha channel** has no
-real mask — the loader returns a placeholder instead — and in that case the node outputs an empty
-mask of the cropped size rather than cropping the placeholder.
-
-### Inputs
-
-| Input | Type | Description |
-|---|---|---|
-| `image` | COMBO | The image file to load, picked among the images of the input folder, or uploaded with the **choose file to upload** button. Files produced by the mask editor are accepted too. |
-| `crop_x` | INT (hidden) | Left edge of the crop rectangle, in pixels of the loaded image (0–16384, default `0`). Managed by the frontend, not edited by hand. |
-| `crop_y` | INT (hidden) | Top edge of the crop rectangle, in pixels (0–16384, default `0`). Managed by the frontend, not edited by hand. |
-| `crop_width` | INT (hidden) | Width of the crop rectangle, in pixels (0–16384, default `0` = no crop). Managed by the frontend, not edited by hand. |
-| `crop_height` | INT (hidden) | Height of the crop rectangle, in pixels (0–16384, default `0` = no crop). Managed by the frontend, not edited by hand. |
-
-### Outputs
-
-| Output | Type | Description |
-|---|---|---|
-| `image` | IMAGE | The loaded image, cropped to the rectangle when one is set, otherwise whole. |
-| `mask` | MASK | The image's mask, cropped the same way; an empty mask of the cropped size when the image carries no alpha channel. |
-
-### Frontend
-
-- The crop rectangle is drawn and edited **on the image preview**, which dims everything the crop
-  leaves out and shows the crop size in image pixels above its top edge:
-  - **drag on the image** where there is no rectangle yet to draw a new one;
-  - **drag inside the rectangle** to move it, keeping its size;
-  - **drag one of the eight handles** to resize it — the four corners, plus the middle of each
-    side (the side handles are left out on a side too short to hold them).
-  The mouse cursor tells which of the three a drag would do. The rectangle never leaves the image,
-  and dragging on the preview edits the crop instead of moving the node.
-- **clear crop** — removes the rectangle, so the whole image is returned.
-- **crop snap** — constrains the **width and height** of the rectangle to a multiple of the
-  selected value: `1` (default, free), `2`, `4`, `5`, `8`, `10`, `16`, `32`, `50` or `100`.
-  Snapping applies while drawing and resizing; moving the rectangle keeps its size and is
-  unaffected. A side is rounded to the *nearest* multiple, never grows past the image border and
-  never shrinks below one step. The setting travels with the workflow but is deliberately kept out
-  of the prompt sent to the server, so changing it never re-runs the node.
-- The crop is only offered for a **single image**. A multi-frame file (an animated GIF or WEBP) is
-  drawn by ComfyUI as a grid of thumbnails, which a single rectangle cannot describe; the stored
-  rectangle is left alone and still applied when the workflow runs.
-
----
 
 ## LoadImageAndEdit
 
 ![LoadImageAndEdit node](images/LoadImageAndEdit.png)
 
-Loads an image from the ComfyUI **input** folder and returns it together with its mask. It is a
-plain clone of the standard *Load Image*: the same file list and **choose file to upload** button,
-the same right-click **Open in Mask Editor** entry, the same image preview, and the decoding itself
-is delegated to the core loader, so animated formats, EXIF orientation and alpha channels are
-handled identically.
+Loads an image from the ComfyUI **input** folder and returns it together with its mask. The loading
+half is the standard *Load Image*: the same file list and **choose file to upload** button, the same
+right-click **Open in Mask Editor** entry, the same image preview, and the decoding itself is
+delegated to the core loader, so animated formats, EXIF orientation and alpha channels are handled
+identically.
 
-The one thing it changes is what happens when an image is **pasted** on it (Ctrl+V with the node
+It adds two things: an **image editor** on the preview, and a **fast paste**.
+
+### The image editor
+
+A pencil icon sits in the top right corner of the image preview — blue once the picture carries
+edits. Clicking it opens the editor of the *Media Loader*'s picture slots: **rotate** by 90°,
+**mirror** horizontally or vertically, **crop** with an optional aspect ratio and size multiple, and
+a **max size** limiting the longer side. It is the same editor, the same record and the same
+pipeline, so a picture behaves the same wherever it is edited in this pack.
+
+**The file on disk is never touched.** The edits are a record kept in the node's hidden
+`edit_settings` widget, so they serialize with the workflow and travel with a copy of the node. The
+preview simply *draws* the picture through that record; the original is what the node still holds.
+
+When the node runs, the edits are applied to the image **and to its mask**, in the same order and
+with the same resampling, so a mask painted in the mask editor still covers what it was painted on.
+An image with no alpha channel has no real mask — the loader hands back a placeholder — and in that
+case the node outputs an empty mask of the edited size rather than editing the placeholder.
+
+The **mask editor is deliberately untouched**: it is the core one and it still opens on the
+**original** picture, because the edited version only ever exists as something drawn on the preview.
+Paint a mask first or edit the picture first, the result is the same.
+
+The record belongs to the picture it was made on, so it is **dropped when the `image` widget moves
+to another file** — a crop made on a portrait picture means nothing on the next one. The mask editor
+is the exception: it writes a `clipspace-…` derivative of the *same* picture back into the widget,
+with the same dimensions, so the record is carried across it.
+
+For a **multi-frame file** (an animated GIF or WEBP) the edits are applied to every frame, but the
+preview shows the edited **first frame** only.
+
+### The fast paste
+
+The second change is what happens when an image is **pasted** on the node (Ctrl+V with the node
 selected) — and it changes nothing about what is stored, only how long it takes.
 
 The core node uploads a pasted image into `input/pasted`, under the `image.png`, `image (1).png`,
@@ -1661,16 +1634,24 @@ core handlers, so they behave exactly like the stock node, destination folder in
 | Input | Type | Description |
 |---|---|---|
 | `image` | COMBO | The image file to load, picked among the images of the input folder, pasted on the node, dropped on it, or uploaded with the **choose file to upload** button. Files produced by the mask editor are accepted too. |
+| `edit_settings` | STRING (hidden) | The edit record written by the picture editor, as JSON (`rotate`, `mirror_h`, `mirror_v`, `crop`, `max_size`). Empty means no edit. Managed by the frontend, not edited by hand. |
 
 ### Outputs
 
 | Output | Type | Description |
 |---|---|---|
-| `image` | IMAGE | The loaded image. |
-| `mask` | MASK | The image's mask; an empty 64×64 mask when the image carries no alpha channel, as with the core loader. |
+| `image` | IMAGE | The loaded image, with the edits applied when there are any, otherwise whole. |
+| `mask` | MASK | The image's mask, edited the same way; an empty mask of the edited size when the image carries no alpha channel. |
 
 ### Frontend
 
+- The pencil icon is drawn **on the image preview** and hidden on a preview too small to hold it
+  without covering what it is drawn on. The preview widget reads `previewImages ?? node.imgs` when
+  it draws, so the edited picture is handed to it through that argument and `node.imgs` keeps the
+  original — which is exactly what leaves the core mask editor working on the original, since it
+  takes its picture from `node.imgs`.
+- The edited preview is drawn on a canvas, synchronously, at most 1024 px on its longer side. The
+  size caption under the preview reports the **edited** dimensions, including the max size.
 - Only `pasteFiles` is taken over, and only on this node — the paste is posted to the addon's own
   `/<API_PREFIX>/load_image/upload_pasted` route, which answers the same
   `{name, subfolder, type}` as the core `/upload/image`. Everything else on the node is core code.

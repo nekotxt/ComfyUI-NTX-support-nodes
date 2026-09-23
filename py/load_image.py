@@ -6,11 +6,15 @@ import torch
 
 import asyncio
 import hashlib
+import json
 import os
 import threading
 
 from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX
 from .logging import logger
+# the picture edits of the Load Image & Edit node are the ones of the Media Loader's picture slots,
+# recorded by the same editor (web/js/media_loader.editor.js) and applied by the same pipeline
+from .media_loader import apply_frame_edits, is_edited, normalize_edit
 
 # ===== Image loading utilities ================================================================================================================
 
@@ -47,6 +51,51 @@ def crop_image_and_mask(image, mask, x: int, y: int, width: int, height: int):
 
     return cropped_image, cropped_mask
 
+# the edit record the Load Image & Edit node keeps in its hidden edit_settings widget : the same
+# record the Media Loader stores on a picture slot (rotate, mirror, crop, max size - see
+# media_loader.normalize_edit for the pipeline it describes), as the JSON the editor wrote
+def parse_edit_settings(edit_settings: str) -> dict:
+    try:
+        record = json.loads(edit_settings or "{}")
+    except (TypeError, ValueError):
+        logger.warning(f"LoadImageAndEdit : unreadable edit settings, the picture is left untouched")
+        record = {}
+    return normalize_edit(record)
+
+# an edit record in words, for the log (the frontend twin is describeEdit of media_loader.editor.js)
+def describe_edit(edit: dict) -> str:
+    parts = []
+    if edit["rotate"]:
+        parts.append(f"rotated {edit['rotate']}°")
+    if edit["mirror_h"]:
+        parts.append("mirrored horizontally")
+    if edit["mirror_v"]:
+        parts.append("mirrored vertically")
+    if edit["crop"]:
+        parts.append(f"cropped to {edit['crop']['width']}x{edit['crop']['height']}")
+    if edit["max_size"]:
+        parts.append(f"max {edit['max_size']}px")
+    return ", ".join(parts)
+
+# apply an edit record to a loaded image [B, H, W, C] and its mask [B, H, W]
+def apply_image_edits(image, mask, edit: dict):
+    edited_image = apply_frame_edits(image, edit)
+
+    # the mask only follows the edits when it actually covers the image : the loader hands back a
+    # placeholder 64x64 mask for images without an alpha channel, and editing that one would be
+    # meaningless, so an empty mask of the edited size is returned instead
+    if mask.shape[1] == image.shape[1] and mask.shape[2] == image.shape[2]:
+        # the mask goes through as three channels rather than one : comfy.utils.lanczos, which the
+        # max size step resamples with, treats a one channel batch as greyscale and hands it back
+        # without its channel axis, which would come out of apply_frame_edits transposed. Three
+        # channels also means the mask is resampled exactly like the image it belongs to.
+        edited_mask = apply_frame_edits(mask.unsqueeze(-1).repeat(1, 1, 1, 3), edit)[..., 0]
+    else:
+        edited_mask = torch.zeros((mask.shape[0], edited_image.shape[1], edited_image.shape[2]),
+                                  dtype=mask.dtype, device=mask.device)
+
+    return edited_image, edited_mask.contiguous()
+
 # ===== NODES ==================================================================================================================================
 
 class LoadImageAndCrop(io.ComfyNode):
@@ -70,7 +119,7 @@ class LoadImageAndCrop(io.ComfyNode):
             display_name=f"{ADDON_PREFIX} Load Image & Crop",
             description="Load an image from the input directory, like the core Load Image node "
                         "(mask painting included), with an optional crop rectangle drawn on the preview.",
-            category=f"{ADDON_CATEGORY}/images",
+            category=f"{ADDON_CATEGORY}/deprecated/images",
             inputs=[
                 io.Combo.Input(
                     "image",
@@ -133,19 +182,30 @@ class LoadImageAndCrop(io.ComfyNode):
         return True
 
 class LoadImageAndEdit(io.ComfyNode):
-    """Load Image with a fast path for pasted images.
+    """Load Image with a picture editor on the preview, and a fast path for pasted images.
 
-    A plain clone of the core Load Image node - same file list, same upload button, same mask
-    painting, same image / mask outputs, and the decoding itself is delegated to the core node.
-    What it changes is invisible until an image is *pasted* on it (Ctrl+V with the node selected),
-    which the frontend half in web/js/load_image.edit.js redirects to this module's own upload
-    route instead of the core /upload/image one.
+    The loading half is the core Load Image node - same file list, same upload button, same mask
+    painting, same image / mask outputs, and the decoding is delegated to the core node.
 
-    Both routes do the same thing - write the image into input/pasted, reusing an existing file
-    when the same bytes are already there - but the core one rediscovers that by re-reading and
-    re-hashing every "image (N).png" of the folder on every single paste, which grows into several
-    seconds once the folder holds a few hundred files. This one keeps the hashes in a register
-    file next to the images, so each file is hashed once in its lifetime (see store_pasted_image).
+    What it adds is an **editor**, opened by the pencil icon drawn over the image preview: the very
+    editor the picture slots of the Media Loader use, recording the same rotate / mirror / crop /
+    max size record (see media_loader.normalize_edit). The record lives in the hidden edit_settings
+    widget, so it serializes with the workflow and reaches this node like any other widget. The
+    file on disk is never touched: the frontend only redraws the preview through the edited record
+    (see web/js/load_image.edit.js), and the edits are applied here, at execution, to the image
+    *and* to its mask, so a painted mask follows the picture it was painted on.
+
+    The mask editor is deliberately left untouched - it is the core one, and it still works on the
+    **original** picture, because the edited version only ever exists as something drawn on the
+    preview, never as the node's `imgs`.
+
+    What it also changes is invisible until an image is *pasted* on it (Ctrl+V with the node
+    selected), which the frontend redirects to this module's own upload route instead of the core
+    /upload/image one. Both routes do the same thing - write the image into input/pasted, reusing
+    an existing file when the same bytes are already there - but the core one rediscovers that by
+    re-reading and re-hashing every "image (N).png" of the folder on every single paste, which
+    grows into several seconds once the folder holds a few hundred files. This one keeps the hashes
+    in a register file next to the images, so each file is hashed once (see store_pasted_image).
 
     Dragging a file onto the node and the "choose file to upload" button are left strictly alone :
     they keep the core handlers, hence the core behaviour, destination folder included.
@@ -157,8 +217,9 @@ class LoadImageAndEdit(io.ComfyNode):
             node_id=f"{ADDON_PREFIX}LoadImageAndEdit",
             display_name=f"{ADDON_PREFIX} Load Image & Edit",
             description="Load an image from the input directory, like the core Load Image node "
-                        "(mask painting included), with pasted images uploaded through a hash register "
-                        "so pasting stays fast however many images the input/pasted folder holds.",
+                        "(mask painting included), with a picture editor on the preview (rotate, mirror, "
+                        "crop, max size) and pasted images uploaded through a hash register so pasting "
+                        "stays fast however many images the input/pasted folder holds.",
             category=f"{ADDON_CATEGORY}/images",
             inputs=[
                 io.Combo.Input(
@@ -169,6 +230,10 @@ class LoadImageAndEdit(io.ComfyNode):
                     tooltip="The image to load. Paste one with Ctrl+V, drop a file on the node, or use the "
                             "upload button. Right click the node and pick 'Open in Mask Editor' to paint a mask.",
                 ),
+                # the edit record : hidden and socketless, it is written by the editor the pencil
+                # icon on the preview opens, and holds the JSON of a Media Loader picture edit
+                io.String.Input("edit_settings", default="", socketless=True,
+                                extra_dict={"hidden": True}),
             ],
             outputs=[
                 io.Image.Output("image"),
@@ -177,21 +242,29 @@ class LoadImageAndEdit(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, image) -> io.NodeOutput:
+    def execute(cls, image, edit_settings) -> io.NodeOutput:
         logger.node_name("LoadImageAndEdit")
 
         # the core node does the decoding : animated formats, exif orientation, alpha -> mask,
         # and the clipspace files the mask editor produces
         loaded_image, loaded_mask = nodes.LoadImage().load_image(image)
+        size = f"{loaded_image.shape[2]}x{loaded_image.shape[1]}"
 
-        logger.info(f"loaded [{image}] ({loaded_image.shape[2]}x{loaded_image.shape[1]})")
+        edit = parse_edit_settings(edit_settings)
+        if not is_edited(edit):
+            logger.info(f"loaded [{image}] ({size}), no edit")
+            return io.NodeOutput(loaded_image, loaded_mask)
 
-        return io.NodeOutput(loaded_image, loaded_mask)
+        edited_image, edited_mask = apply_image_edits(loaded_image, loaded_mask, edit)
+        logger.info(f"loaded [{image}] ({size}), edited to "
+                    f"{edited_image.shape[2]}x{edited_image.shape[1]} ({describe_edit(edit)})")
+
+        return io.NodeOutput(edited_image, edited_mask)
 
     @classmethod
-    def fingerprint_inputs(cls, image):
-        # what the executor cannot see is the content of the file behind the name, which the mask
-        # editor rewrites in place
+    def fingerprint_inputs(cls, image, edit_settings):
+        # the widget values are part of the cache key already ; what the executor cannot see is the
+        # content of the file behind the name, which the mask editor rewrites in place
         image_path = folder_paths.get_annotated_filepath(image)
         digest = hashlib.sha256()
         with open(image_path, "rb") as file:
