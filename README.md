@@ -1607,6 +1607,82 @@ mask of the cropped size rather than cropping the placeholder.
 
 ---
 
+## LoadImageAndEdit
+
+![LoadImageAndEdit node](images/LoadImageAndEdit.png)
+
+Loads an image from the ComfyUI **input** folder and returns it together with its mask. It is a
+plain clone of the standard *Load Image*: the same file list and **choose file to upload** button,
+the same right-click **Open in Mask Editor** entry, the same image preview, and the decoding itself
+is delegated to the core loader, so animated formats, EXIF orientation and alpha channels are
+handled identically.
+
+The one thing it changes is what happens when an image is **pasted** on it (Ctrl+V with the node
+selected) — and it changes nothing about what is stored, only how long it takes.
+
+The core node uploads a pasted image into `input/pasted`, under the `image.png`, `image (1).png`,
+`image (2).png` … series, and before choosing a name it compares the incoming bytes with the bytes
+of every file already in that series, so the same image pasted twice is stored once. That
+comparison re-reads and re-hashes those files **on every paste**. It costs nothing on a fresh
+install and grows with the folder: on an `input/pasted` holding 1135 images and 3.7 GB, a single
+paste reads the whole 3.7 GB and takes **3.6 s warm, 14.5 s cold**, during which the ComfyUI server
+answers nothing else.
+
+This node keeps the same rule — an image whose bytes are already in the folder is reused rather
+than stored again — but reads the hashes from a **register file** kept next to the images instead
+of recomputing them. A file is hashed once in its lifetime, so a paste costs one hash of the
+incoming image plus a directory listing: **about 3 ms** on that same folder, whatever it holds.
+
+Dragging a file onto the node and the **choose file to upload** button are deliberately left on the
+core handlers, so they behave exactly like the stock node, destination folder included.
+
+### The register file
+
+`input/pasted/_ntx_pasted_hashes.txt`, one line per image, tab separated:
+
+```
+<sha256>    <size in bytes>    <mtime in ns>    <file name>
+```
+
+- It is **rebuilt from the folder whenever it does not describe it any more**, so images added,
+  renamed or deleted behind its back — by the core *Load Image*, by another node, by hand — are
+  picked up on the next paste. Only the files it does not already cover are hashed.
+- A file whose **size or modification time** moved is re-hashed rather than trusted, so an image
+  rewritten in place (what the mask editor does) never resolves to a stale hash.
+- **Deleting it is harmless.** The next paste rebuilds it.
+- The first paste after the node is installed hashes everything already in `input/pasted`, which is
+  the one time the old cost is paid — around 11 s for the 1135-image folder above. A line is
+  logged when more than 20 files are hashed at once, so a long first paste is never a mystery.
+- It is invisible to ComfyUI: the image lists of the loader nodes and the sidebar only scan the
+  root of `input`, not its subfolders.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `image` | COMBO | The image file to load, picked among the images of the input folder, pasted on the node, dropped on it, or uploaded with the **choose file to upload** button. Files produced by the mask editor are accepted too. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `image` | IMAGE | The loaded image. |
+| `mask` | MASK | The image's mask; an empty 64×64 mask when the image carries no alpha channel, as with the core loader. |
+
+### Frontend
+
+- Only `pasteFiles` is taken over, and only on this node — the paste is posted to the addon's own
+  `/<API_PREFIX>/load_image/upload_pasted` route, which answers the same
+  `{name, subfolder, type}` as the core `/upload/image`. Everything else on the node is core code.
+- The upload runs on a worker thread on the server, so even the first, hashing paste leaves the
+  ComfyUI server responsive — unlike the core route, which does its hashing on the event loop.
+- Should the route fail for any reason, the paste is **handed back to the core handler** rather
+  than lost: the image still lands in `input/pasted`, the slow way, and a warning is logged in the
+  browser console.
+- A paste carrying several images loads the first one, like the stock *Load Image* node.
+
+---
+
 ## GroupControl
 
 ![GroupControl node](images/GroupControl.png)
