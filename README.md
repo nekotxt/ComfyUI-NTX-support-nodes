@@ -1617,6 +1617,10 @@ core handlers, so they behave exactly like the stock node, destination folder in
 <sha256>    <size in bytes>    <mtime in ns>    <file name>
 ```
 
+The upload route serves the [Media Loader](#medialoader)'s picture slots too, whose **Paste picture
+from clipboard** entry stores into `input/ntx_media/`. Each folder carries its own register, and the
+destination is named by the request among a fixed list of two, so it can never be steered elsewhere.
+
 - It is **rebuilt from the folder whenever it does not describe it any more**, so images added,
   renamed or deleted behind its back — by the core *Load Image*, by another node, by hand — are
   picked up on the next paste. Only the files it does not already cover are hashed.
@@ -2206,6 +2210,21 @@ The raw `media_state` widget is replaced by the slot panel. Its top bar holds:
 - Dropping on, or clicking, a **filled** slot replaces its content.
 - Accepted extensions: pictures `png jpg jpeg webp bmp gif tif tiff`, videos
   `mp4 mov mkv webm avi m4v mpg mpeg`, audios `wav mp3 flac ogg m4a aac opus`.
+- **Paste picture from clipboard**, in the node's right-click menu, loads the picture held by the
+  clipboard into the **first free picture slot**. A clipboard holding no picture is not an error
+  and does nothing; when every picture slot is taken, a toast says so. The picture is stored in
+  `input/ntx_media/` like any other, as `image.png`, `image (1).png` … — but through the addon's
+  own upload route rather than the core one, so that series never becomes slow to extend (see
+  [LoadImageAndEdit](#loadimageandedit) for what that route does and why). Dropped files and the
+  file dialog keep the core route: they carry their own names and never build such a series.
+
+  Reading the clipboard unprompted needs the browser's `clipboard-read` permission, and plenty of
+  setups simply refuse it: an embedded browser with no permission dialog to ask through, a browser
+  whose clipboard setting is blocked, a page reached over plain `http://` from another machine.
+  When that happens the entry **asks for the keystroke instead** — a small dialog opens and
+  **Ctrl+V** pastes the picture, Escape or Cancel closes it. A paste *event* carries its data with
+  no permission at all, so this path works everywhere. Where the permission *is* granted the
+  dialog never appears and the entry stays a single click.
 
 **Filled slots**
 

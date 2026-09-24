@@ -14,7 +14,7 @@ from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX
 from .logging import logger
 # the picture edits of the Load Image & Edit node are the ones of the Media Loader's picture slots,
 # recorded by the same editor (web/js/media_loader.editor.js) and applied by the same pipeline
-from .media_loader import apply_frame_edits, is_edited, normalize_edit
+from .media_loader import MEDIA_SUBFOLDER, apply_frame_edits, is_edited, normalize_edit
 
 # ===== Image loading utilities ================================================================================================================
 
@@ -308,6 +308,10 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
 # time : it is rebuilt from the folder on the next paste.
 
 PASTED_SUBFOLDER = "pasted"            # subfolder of the input directory, the core route's own
+# the subfolders of the input directory a paste may be stored in : the one the core route uses, and
+# the Media Loader's own, whose picture slots paste through this route too. The client names one of
+# them, so the list is what keeps a request from steering a write anywhere else.
+PASTED_SUBFOLDERS = (PASTED_SUBFOLDER, MEDIA_SUBFOLDER)
 PASTED_REGISTER = "_ntx_pasted_hashes.txt"
 PASTED_DEFAULT_STEM = "image"          # what a pasted image is named when the browser gives no name
 PASTED_DEFAULT_EXT = ".png"
@@ -405,7 +409,7 @@ def _sync_register(folder: str) -> dict[str, tuple[str, int, int]]:
 
     pending = [name for name in live if not is_known(name)]
     if len(pending) > PASTED_SEED_NOTICE:
-        logger.info(f"LoadImageAndEdit : hashing {len(pending)} images of {PASTED_SUBFOLDER}/ into "
+        logger.info(f"LoadImageAndEdit : hashing {len(pending)} images of {os.path.basename(folder)}/ into "
                     f"[{PASTED_REGISTER}] - a file is hashed once, so this is paid only the first time")
 
     entries: dict[str, tuple[str, int, int]] = {}
@@ -424,10 +428,14 @@ def _sync_register(folder: str) -> dict[str, tuple[str, int, int]]:
         _write_register(folder, entries)
     return entries
 
-# store one pasted image in input/pasted, reusing an existing file when the same bytes are already
-# there, and return the {name, subfolder, type} the frontend needs to fill the image widget
-def store_pasted_image(data: bytes, filename: str) -> dict:
-    folder = os.path.join(folder_paths.get_input_directory(), PASTED_SUBFOLDER)
+# store one pasted image in a subfolder of the input directory, reusing an existing file when the
+# same bytes are already there, and return the {name, subfolder, type} the frontend needs to fill
+# the widget or the slot it came from. Each subfolder carries its own register.
+def store_pasted_image(data: bytes, filename: str, subfolder: str = PASTED_SUBFOLDER) -> dict:
+    if subfolder not in PASTED_SUBFOLDERS:
+        raise ValueError(f"unexpected subfolder [{subfolder}]")
+
+    folder = os.path.join(folder_paths.get_input_directory(), subfolder)
     os.makedirs(folder, exist_ok=True)
     stem, ext = _safe_stem(filename)
     digest = hashlib.sha256(data).hexdigest()
@@ -435,11 +443,12 @@ def store_pasted_image(data: bytes, filename: str) -> dict:
     with _register_lock:
         entries = _sync_register(folder)
 
-        # same bytes already in the folder : reuse that file, like the core route does
+        # same bytes already in the folder : reuse that file, like the core route does. The lookup
+        # is by content, so an identical image is found whatever name it was stored under.
         for name in sorted(entries):
             if entries[name][0] == digest:
-                logger.info(f"LoadImageAndEdit : pasted image already stored as [{PASTED_SUBFOLDER}/{name}]")
-                return {"name": name, "subfolder": PASTED_SUBFOLDER, "type": "input", "duplicate": True}
+                logger.info(f"LoadImageAndEdit : pasted image already stored as [{subfolder}/{name}]")
+                return {"name": name, "subfolder": subfolder, "type": "input", "duplicate": True}
 
         # otherwise the first free name of the "image.png", "image (1).png", ... series
         index = 0
@@ -456,17 +465,18 @@ def store_pasted_image(data: bytes, filename: str) -> dict:
         entries[name] = (digest, stat.st_size, stat.st_mtime_ns)
         _write_register(folder, entries)
 
-    logger.info(f"LoadImageAndEdit : pasted image saved as [{PASTED_SUBFOLDER}/{name}]")
-    return {"name": name, "subfolder": PASTED_SUBFOLDER, "type": "input", "duplicate": False}
+    logger.info(f"LoadImageAndEdit : pasted image saved as [{subfolder}/{name}]")
+    return {"name": name, "subfolder": subfolder, "type": "input", "duplicate": False}
 
 # ===== JAVASCRIPT API =========================================================================================================================
 
 from aiohttp import web
 from server import PromptServer
 
-# the paste handler of the Load Image & Edit node : same contract as the core /upload/image route
-# (a multipart body carrying an "image" file, a {name, subfolder, type} answer), the destination
-# folder being always input/pasted
+# The paste handler of the Load Image & Edit node and of the Media Loader's picture slots : same
+# contract as the core /upload/image route (a multipart body carrying an "image" file, a
+# {name, subfolder, type} answer), with the destination named by the optional "subfolder" field -
+# one of PASTED_SUBFOLDERS, input/pasted when it is left out.
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/load_image/upload_pasted")
 async def upload_pasted_image_route(request):
     try:
@@ -480,8 +490,12 @@ async def upload_pasted_image_route(request):
     if not data:
         return web.json_response({"error": "empty image"}, status=400)
     filename = getattr(image, "filename", "") or PASTED_DEFAULT_STEM + PASTED_DEFAULT_EXT
+    subfolder = str(post.get("subfolder") or PASTED_SUBFOLDER)
+    if subfolder not in PASTED_SUBFOLDERS:
+        return web.json_response({"error": f"unexpected subfolder [{subfolder}]"}, status=400)
     try:
-        result = await asyncio.get_running_loop().run_in_executor(None, store_pasted_image, data, filename)
+        result = await asyncio.get_running_loop().run_in_executor(
+            None, store_pasted_image, data, filename, subfolder)
     except Exception as e:
         logger.warning(f"LoadImageAndEdit : pasted upload failed : {e}")
         return web.json_response({"error": f"upload failed : {e}"}, status=500)

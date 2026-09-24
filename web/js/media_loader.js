@@ -29,6 +29,7 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 import { ADDON_PREFIX, API_PREFIX } from "./config.js";
+import { registerNodeMenu } from "./menu.js";
 import { openEditor, isEdited, describeEdit, paintEdited, outputSize, ASPECTS } from "./media_loader.editor.js";
 import { openVideoEditor, isVideoEdited, describeVideoEdit, normalizeVideoEdit } from "./media_loader.video_editor.js";
 import { openAudioEditor, isAudioEdited, describeAudioEdit, normalizeAudioEdit } from "./media_loader.audio_editor.js";
@@ -48,6 +49,16 @@ const KINDS = {
 };
 const DEFAULT_ROWS = 3;
 const MIN_ROWS = 1;
+
+// a picture pasted from the clipboard has no name of its own : it is stored under
+// this one, continuing into "image (1).png", "image (2).png", ... like the core
+// route does. The extension has to match the bytes, because kindOf() sorts a file
+// by its extension and the slot preview is served by it.
+const PASTED_STEM = "image";
+const PASTED_EXTENSIONS = {
+    "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
+    "image/gif": ".gif", "image/bmp": ".bmp", "image/avif": ".avif",
+};
 
 // the extensions each kind accepts when files are dropped (the file dialog filters by mime type)
 const EXTENSIONS = {
@@ -131,6 +142,13 @@ const CSS = `
 .nml-report ul { margin: 0; padding-left: 16px; }
 .nml-report li { line-height: 1.5; }
 .nml-report li span { color: #6b7484; }
+.nml-paste-hint { font-size: 11px; line-height: 1.6; color: #b9c0cc; }
+.nml-paste-catch {
+    width: 100%; height: 52px; box-sizing: border-box; padding: 6px; resize: none;
+    background: #1b1f27; color: #8d95a3; border: 1px dashed #59637a; border-radius: 4px;
+    font: inherit; font-size: 11px;
+}
+.nml-paste-catch:focus { outline: none; border-color: #7fb8d8; }
 .nml-report .nml-report-foot { display: flex; justify-content: flex-end; }
 
 .nml-cols {
@@ -556,6 +574,112 @@ async function uploadFile(file) {
     return { name: file.name, file: path, type: data.type || "input" };
 }
 
+// Upload a picture coming from the clipboard, through the addon's own route
+// (py/load_image.py) rather than the core one.
+//
+// Every clipboard image arrives named "image.png", so the core route would store
+// them as the "image.png", "image (1).png", ... series and, before taking a name,
+// re-read and re-hash every file of that series to avoid storing the same bytes
+// twice. That check costs nothing today and turns into seconds once the folder
+// holds a few hundred of them. The addon's route applies the very same rule from
+// a hash register kept next to the images, so a file is hashed once in its
+// lifetime. Dropped files and the file picker keep the core route: they carry
+// their own names and never build such a series.
+async function uploadPastedFile(file) {
+    const body = new FormData();
+    body.append("image", file, file.name);
+    body.append("subfolder", MEDIA_SUBFOLDER);
+    const resp = await api.fetchApi(`/${API_PREFIX}/load_image/upload_pasted`, { method: "POST", body });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || `upload failed (${resp.status})`);
+    const path = data.subfolder ? `${data.subfolder}/${data.name}` : data.name;
+    return { name: data.name, file: path, type: data.type || "input" };
+}
+
+// a clipboard blob, as a File the slots can take : they sort a file by its
+// extension, so the name has to carry the type
+function pictureFile(blob) {
+    const ext = PASTED_EXTENSIONS[blob.type] ?? ".png";
+    return new File([blob], PASTED_STEM + ext, { type: blob.type });
+}
+
+// The picture sitting in the clipboard, as a File, or null when the clipboard
+// holds no image. Throws when the clipboard cannot be read at all, which is a
+// different thing from an empty one and is what askForPaste() answers.
+async function clipboardPicture() {
+    if (!navigator.clipboard?.read) {
+        // the Clipboard API is only handed to secure contexts : ComfyUI reached
+        // on http://127.0.0.1 is one, the same server reached over plain http
+        // from another machine is not
+        throw new Error("no Clipboard API on this page");
+    }
+
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+        const type = item.types.find((t) => t.startsWith("image/"));
+        if (!type) continue;
+        return pictureFile(await item.getType(type));
+    }
+    return null;
+}
+
+// Ask the user to paste, for the browsers that will not hand the clipboard over
+// on their own.
+//
+// Reading the clipboard unprompted needs the "clipboard-read" permission, which
+// plenty of setups simply refuse : an embedded browser with no permission UI to
+// ask through, a browser whose clipboard setting is blocked, a page reached over
+// plain http from another machine. A paste *event*, on the other hand, carries
+// its data with no permission at all, anywhere - it is what the Load Image &
+// Edit node has always used. So when the clipboard cannot be read, ask for the
+// keystroke instead.
+//
+// Resolves with the pasted picture, or null when the user cancelled or pasted
+// something that is not a picture.
+function askForPaste() {
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (file) => {
+            if (settled) return;
+            settled = true;
+            window.removeEventListener("keydown", onKey, true);
+            overlay.remove();
+            resolve(file);
+        };
+        const onKey = (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); finish(null); } };
+
+        // a real textarea, not a contenteditable : the core paste handler steps
+        // aside for textareas and inputs, so it will not act on this paste too
+        // and drop a Load Image node on the canvas behind the dialog
+        const catcher = el("textarea", { class: "nml-paste-catch", placeholder: "Ctrl+V here" });
+        catcher.addEventListener("paste", (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const items = [...(ev.clipboardData?.items ?? [])];
+            const blob = items.find((i) => i.kind === "file" && i.type.startsWith("image/"))?.getAsFile();
+            finish(blob ? pictureFile(blob) : null);
+            if (!blob) toast("warn", "Nothing pasted", "the clipboard holds no picture");
+        });
+
+        const overlay = el("div", {
+            class: "nml-report-overlay",
+            onclick: (ev) => { if (ev.target === overlay) finish(null); },
+        }, el("div", { class: "nml-report" },
+            el("h3", {}, "Paste a picture"),
+            el("div", { class: "nml-paste-hint" },
+                "This browser does not let the page read the clipboard on its own.",
+                el("br"),
+                "Press ", el("b", {}, "Ctrl+V"), " to paste a picture into the first free slot."),
+            catcher,
+            el("div", { class: "nml-report-foot" },
+                el("button", { class: "nml-btn", onclick: () => finish(null) }, "Cancel"))));
+
+        window.addEventListener("keydown", onKey, true);
+        document.body.append(overlay);
+        catcher.focus();
+    });
+}
+
 // ── Widget ────────────────────────────────────────────────────────────────────
 
 function makeMediaWidget(node, inputName, initialValue) {
@@ -598,7 +722,7 @@ function makeMediaWidget(node, inputName, initialValue) {
 
     // load files starting at a given slot: the first file takes that slot (replacing whatever is
     // there), the others spill over into the next free slots of the same kind
-    async function addFiles(files, kind, index) {
+    async function addFiles(files, kind, index, uploader = uploadFile) {
         let target = index;
         let first = true;
         const uploads = [];
@@ -629,23 +753,42 @@ function makeMediaWidget(node, inputName, initialValue) {
                 continue;
             }
             target = slot + 1;
-            uploads.push(upload(file, useKind, slot));
+            uploads.push(upload(file, useKind, slot, uploader));
         }
         await Promise.all(uploads);
     }
 
-    async function upload(file, kind, index) {
+    async function upload(file, kind, index, uploader = uploadFile) {
         const key = `${kind}:${index}`;
         busy.add(key);
         render();
         try {
-            state[kind][index] = await uploadFile(file);
+            state[kind][index] = await uploader(file);
         } catch (err) {
             toast("error", "Upload failed", `${file.name}: ${err.message}`);
         } finally {
             busy.delete(key);
             commit();
         }
+    }
+
+    // The "Paste picture from clipboard" entry of the node's right click menu: the
+    // picture held by the clipboard lands in the first free picture slot. A
+    // clipboard holding no picture is not an error and does nothing; a clipboard
+    // that cannot be read at all is reported, as is a panel with no free slot -
+    // that last one by addFiles, which already warns when every slot is taken.
+    async function pasteFromClipboard() {
+        let file;
+        try {
+            file = await clipboardPicture();
+        } catch {
+            // the browser refuses to hand the clipboard over : ask for the
+            // keystroke instead, which needs no permission anywhere
+            file = await askForPaste();
+        }
+        if (!file) return;
+
+        await addFiles([file], "pictures", null, uploadPastedFile);
     }
 
     function remove(kind, index) {
@@ -1224,6 +1367,8 @@ function makeMediaWidget(node, inputName, initialValue) {
     };
 
     widget.__isMediaLoaderUI = true;
+    // what the node's right click menu drives, the panel's own state being a closure
+    widget.__nmlApi = { pasteFromClipboard };
 
     // node-level hooks, installed once (rebuildMediaUI may build the widget again on the same node)
     if (!node.__nmlNodeHooksInstalled) {
@@ -1285,6 +1430,15 @@ function rebuildMediaUI(node, force = false) {
 }
 
 // ── Extension registration ────────────────────────────────────────────────────
+
+// RMB entries of the loader, grouped into the addon submenu
+registerNodeMenu((node) => {
+    if (node?.comfyClass !== NODE_ID) return [];
+    return [{
+        content: "Paste picture from clipboard",
+        callback: () => { void getMediaWidget(node)?.__nmlApi?.pasteFromClipboard?.(); },
+    }];
+});
 
 app.registerExtension({
     name: API_PREFIX + ".media_loader",
