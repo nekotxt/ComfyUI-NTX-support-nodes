@@ -2221,6 +2221,7 @@ The raw `media_state` widget is replaced by the slot panel. Its top bar holds:
   Reading the clipboard unprompted needs the browser's `clipboard-read` permission, and plenty of
   setups simply refuse it: an embedded browser with no permission dialog to ask through, a browser
   whose clipboard setting is blocked, a page reached over plain `http://` from another machine.
+  
   When that happens the entry **asks for the keystroke instead** — a small dialog opens and
   **Ctrl+V** pastes the picture, Escape or Cancel closes it. A paste *event* carries its data with
   no permission at all, so this path works everywhere. Where the permission *is* granted the
