@@ -43,7 +43,8 @@ MIN_ROWS = 1
 # file name shown in the slot. A picture, a video or an audio may carry the edits recorded by the
 # frontend editors (web/js/media_loader.editor.js, media_loader.video_editor.js,
 # media_loader.audio_editor.js), as an "edit" dict, see normalize_edit, normalize_video_edit and
-# normalize_audio_edit
+# normalize_audio_edit. A filled slot switched off by its toggle carries "enabled": false (the key
+# is left out when the slot is on, see is_enabled)
 def parse_media_state(media_state: str) -> dict[str, list]:
     try:
         state = json.loads(media_state or "{}")
@@ -66,6 +67,10 @@ def parse_media_state(media_state: str) -> dict[str, list]:
         slots = (slots + [None] * count)[:count]
         parsed[kind] = slots
     return parsed
+
+# whether a slot (or a bundle entry) is on : only an explicit false switches it off
+def is_enabled(slot: dict) -> bool:
+    return slot.get("enabled", True) is not False
 
 # the annotated file name ("subdir/file.png [input]") understood by folder_paths
 def annotated_name(slot: dict) -> str:
@@ -246,6 +251,7 @@ class MediaLoader(io.ComfyNode):
                     "file": slot["file"],
                     "type": slot.get("type", "input"),
                     "path": path,
+                    "enabled": is_enabled(slot),
                 }
                 if kind == "pictures":
                     entry["edit"] = normalize_edit(slot.get("edit"))
@@ -256,8 +262,9 @@ class MediaLoader(io.ComfyNode):
                 media[kind].append(entry)
             check = {"pictures": is_edited, "videos": is_video_edited, "audios": is_audio_edited}[kind]
             edited = sum(1 for entry in media[kind] if "edit" in entry and check(entry["edit"]))
+            off = sum(1 for entry in media[kind] if not entry["enabled"])
             logger.info(f"{kind} : {len(media[kind])} / {len(slots)} slots loaded"
-                        + (f", {edited} edited" if edited else ""))
+                        + (f", {edited} edited" if edited else "") + (f", {off} off" if off else ""))
 
         return io.NodeOutput(media)
 
@@ -481,7 +488,7 @@ class MediaSplitter(io.ComfyNode):
     Every picture, video and audio of the bundle is decoded, its recorded edits are applied
     (rotation, mirrors, crop, maximum size for the frames ; the kept span for videos and
     audios) and the result is delivered on the output of its slot. The outputs of the empty
-    slots are None.
+    slots, and of the slots switched off on the loader, are None.
 
     The decoded media are kept in a cache shared by every splitter (see cached_media), keyed by
     file and edits, so that several splitters fed by the same loader decode each file once ;
@@ -495,7 +502,7 @@ class MediaSplitter(io.ComfyNode):
             display_name=f"{ADDON_PREFIX} Media Splitter",
             description="Split a media bundle of the Media Loader into its slots : the pictures, the videos (frames "
                         "and audio) and the audios of as many rows of slots as the node shows, decoded with their edits "
-                        "applied. The outputs of the empty slots are None.",
+                        "applied. The outputs of the empty slots, and of the slots switched off on the loader, are None.",
             category=f"{ADDON_CATEGORY}/images",
             inputs=[
                 MEDIA_REFS_TYPE.Input("media", tooltip="The media bundle of a Media Loader node."),
@@ -510,7 +517,14 @@ class MediaSplitter(io.ComfyNode):
     def execute(cls, media, rows=DEFAULT_SPLIT_ROWS) -> io.NodeOutput:
         logger.node_name("MediaSplitter")
         media = media if isinstance(media, dict) else {}
-        by_slot = lambda kind: {int(entry["slot"]): entry for entry in media.get(kind, []) if isinstance(entry, dict)}
+        # the slots switched off on the loader are left out, as if they were empty (for a video,
+        # both its frames and its audio)
+        by_slot = lambda kind: {int(entry["slot"]): entry for entry in media.get(kind, [])
+                                if isinstance(entry, dict) and is_enabled(entry)}
+        off = sum(1 for kind in ("pictures", "videos", "audios") for entry in media.get(kind, [])
+                  if isinstance(entry, dict) and not is_enabled(entry))
+        if off:
+            logger.info(f"{off} slot{'s' if off > 1 else ''} switched off, output as None")
         entries = {"pictures": by_slot("pictures"), "videos": by_slot("videos"), "audios": by_slot("audios")}
         layout = split_layout(rows)
         cached = lambda hit: " (cached)" if hit else ""
@@ -661,7 +675,8 @@ from server import PromptServer
 
 # the "Export" command of the Media Loader : the loaded files are copied into a new folder of
 # output/ntx_media named after the current time, along with a media.json describing the slots
-# (the same information as the "media" output, without the file / type / path fields)
+# (the same information as the "media" output - edits and on / off state included - without the
+# file / type / path fields)
 EXPORT_SUBFOLDER = "ntx_media"
 EXPORT_JSON = "media.json"
 
@@ -699,7 +714,7 @@ def export_media(media_state: str) -> dict:
             used_names.add(name.lower())
             shutil.copy2(source, folder / name)
             copied += 1
-            entry = {"slot": index, "name": name}
+            entry = {"slot": index, "name": name, "enabled": is_enabled(slot)}
             if kind == "pictures":
                 entry["edit"] = normalize_edit(slot.get("edit"))
             elif kind == "videos":

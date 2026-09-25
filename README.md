@@ -2134,6 +2134,7 @@ one entry per **filled** slot, in slot order:
 | `type` | The ComfyUI folder holding the file (`input`). |
 | `path` | The absolute path of the file on the server, resolved at execution time. |
 | `edit` | The recorded edits, always present with every key (defaults when nothing was edited) — see below. |
+| `enabled` | The slot's on / off toggle (`true` / `false`). The loader itself ignores it — a slot switched off is still resolved, validated and output — it is only a flag for the consumer: the **MediaSplitter** outputs `None` for a slot that is off. |
 
 The `edit` record depends on the kind of media, and its keys are meant to be applied **in this
 order**:
@@ -2155,7 +2156,7 @@ only them does not count as edited.
 
 | Input | Type | Description |
 |---|---|---|
-| `media_state` | STRING (hidden) | Managed by the frontend, not edited by hand: a JSON object with the number of rows and one list per kind (`pictures`, `videos`, `audios`), each slot being `null` or `{name, file, type, edit?}`. |
+| `media_state` | STRING (hidden) | Managed by the frontend, not edited by hand: a JSON object with the number of rows and one list per kind (`pictures`, `videos`, `audios`), each slot being `null` or `{name, file, type, edit?, enabled?}` (`enabled` is only stored, as `false`, when the slot is switched off). |
 
 ### Outputs
 
@@ -2182,8 +2183,8 @@ The raw `media_state` widget is replaced by the slot panel. Its top bar holds:
 - **Export** — copies every loaded file into a **new folder of `output/ntx_media/`** named after
   the current time (`yymmddHHMMSS`, e.g. `260919113805`; a `_1`, `_2`… suffix when that second
   is already taken), along with a **`media.json`** describing the slots: the same `pictures` /
-  `videos` / `audios` lists as the `media` output, each entry with its `slot`, `name` and full
-  `edit` record but **without** the `file`, `type` and `path` fields, plus the node's `rows`.
+  `videos` / `audios` lists as the `media` output, each entry with its `slot`, `name`, full
+  `edit` record and `enabled` state but **without** the `file`, `type` and `path` fields, plus the node's `rows`.
   Each copy takes its slot's name, made unique inside the folder when two slots share one (the
   JSON then names the copy). Slots whose file is missing on the server are skipped and listed in
   the result toast. Disabled while nothing is loaded.
@@ -2193,7 +2194,8 @@ The raw `media_state` widget is replaced by the slot panel. Its top bar holds:
   changes. When the node holds files, a confirmation asks to replace them. The node is then
   resized to the JSON's `rows` (more if an entry's slot needs it), emptied, and every named file
   of the folder is **uploaded like a dropped file** — so the slots reference the copies in
-  `input/ntx_media/`, not the picked folder — with its `edit` record restored. Files that are not
+  `input/ntx_media/`, not the picked folder — with its `edit` record and on / off state
+  restored (an entry without `enabled`, from an older export, loads switched on). Files that are not
   in the folder, empty, of the wrong kind, or failing to upload are skipped and listed in the
   result toast.
 - **Clear** — empties every slot, after confirmation.
@@ -2236,6 +2238,12 @@ The raw `media_state` widget is replaced by the slot panel. Its top bar holds:
   ratio** among the ones of the crop tool: the exact one when there is one (`1024×576 · 16:9`),
   the closest one marked `≈` when it is within 10 % (`1000×600 · ≈16:9`), nothing beyond that.
 - **×** (top-right, on hover) empties the slot.
+- **●** / **○** toggles the slot **on** (full circle) or **off** (empty circle); it sits left of
+  the 🔍 on pictures and left of the ✎ on videos and audios. A slot that is off keeps its file
+  and edits, its preview is **greyed out** and the toggle stays visible; the loader outputs it
+  as usual with `enabled: false`, and the **MediaSplitter** outputs `None` for it, as for an
+  empty slot. The state moves with the file when it is dragged to another slot; replacing the
+  file switches the slot back on.
 - **☰** grip (bottom-right; at the end of an audio row) — **hold and drag** to move the file to
   another slot **of the same kind**; dropping on a filled slot **swaps** the two. A ghost
   follows the pointer and the target slot lights up; releasing elsewhere cancels.
@@ -2314,7 +2322,8 @@ media **decoded and its recorded edits applied**: pictures are rotated, mirrored
 scaled down to their maximum size; videos are trimmed to their kept span, then mirrored,
 cropped and scaled; audios (the audio track of a video, or an audio slot) are trimmed to their
 span. The outputs of the **empty slots are `None`**, so a downstream switch can react to a slot
-left free.
+left free — and so are the outputs of the slots **switched off** on the loader (its ●/○ toggle):
+for a video slot, both `video_n` and `video_audio_n`.
 
 The node shows the outputs of a number of **rows** of slots — the same rows as the loader — and
 this number is changed on the node (see *Frontend*). For *R* rows the outputs are, **grouped by

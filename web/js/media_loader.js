@@ -23,7 +23,10 @@
 // editors of media_loader.video_editor.js and media_loader.audio_editor.js from
 // theirs. The editors record rotate / mirror / crop / max size / time range
 // settings on the item (`edit`, see those modules), the file itself is never
-// touched. Files are uploaded through the core /upload/image
+// touched. Every filled slot also has an on / off toggle : a slot switched off
+// carries `enabled: false` (the key is dropped when it is switched back on) and
+// is greyed out ; the loader still outputs it, flagged, and the Media Splitter
+// treats it as an empty slot. Files are uploaded through the core /upload/image
 // route, in the input/ntx_media subfolder, and previewed straight from /view.
 
 import { app } from "../../../scripts/app.js";
@@ -237,8 +240,8 @@ const CSS = `
     text-overflow: ellipsis;
     pointer-events: none;
 }
-.nml-slot.pic .nml-name { padding-right: 56px; }   /* three icons at the right of a picture caption */
-.nml-slot.vid .nml-name { padding-right: 38px; }   /* two icons at the right of a video caption */
+.nml-slot.pic .nml-name { padding-right: 74px; }   /* four icons at the right of a picture caption */
+.nml-slot.vid .nml-name { padding-right: 56px; }   /* three icons at the right of a video caption */
 .nml-slot .nml-remove {
     position: absolute;
     top: 2px; right: 2px;
@@ -292,6 +295,27 @@ const CSS = `
 .nml-slot:hover .nml-zoom, .nml-slot:hover .nml-edit { opacity: 1; }
 .nml-slot .nml-zoom:hover, .nml-slot .nml-edit:hover { background: #2a303b; color: #fff; }
 .nml-slot .nml-edit.on { opacity: 1; color: #e0a94c; }
+/* the on / off toggle, left of the magnifier (of the pencil for a video) ; always shown when off */
+.nml-slot .nml-toggle {
+    position: absolute;
+    bottom: 2px; right: 56px;
+    width: 16px; height: 16px;
+    line-height: 16px;
+    text-align: center;
+    border-radius: 3px;
+    background: rgba(8, 10, 14, .72);
+    color: #fff;
+    font-size: 11px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .12s;
+}
+.nml-slot.vid .nml-toggle { right: 38px; }
+.nml-slot:hover .nml-toggle, .nml-slot.off .nml-toggle { opacity: 1; }
+.nml-slot .nml-toggle:hover { background: #2a303b; }
+/* a slot switched off : its preview greyed out */
+.nml-slot.off img, .nml-slot.off video, .nml-slot.off canvas { filter: grayscale(1) brightness(.45); }
+.nml-slot.off .nml-glyph, .nml-slot.off .nml-aname, .nml-slot.off audio { filter: grayscale(1); opacity: .4; }
 
 .nml-light {
     position: fixed;
@@ -357,7 +381,7 @@ const CSS = `
     text-overflow: ellipsis;
 }
 /* in the audio row the grip sits inline, after the player */
-.nml-arow .nml-grip, .nml-arow .nml-edit { position: static; opacity: 1; flex-shrink: 0; }
+.nml-arow .nml-grip, .nml-arow .nml-edit, .nml-arow .nml-toggle { position: static; opacity: 1; flex-shrink: 0; }
 
 .nml-arow {
     display: flex;
@@ -796,6 +820,14 @@ function makeMediaWidget(node, inputName, initialValue) {
         commit();
     }
 
+    // switch a slot on or off : only the off state is recorded on the item
+    function toggle(kind, index) {
+        const live = state[kind][index];
+        if (!live) return;
+        if (live.enabled === false) delete live.enabled; else live.enabled = false;
+        commit();
+    }
+
     // move an item to another slot of the same kind, swapping with whatever is there
     function move(kind, from, to) {
         if (from === to || !state[kind][from]) return;
@@ -855,6 +887,15 @@ function makeMediaWidget(node, inputName, initialValue) {
         grip.addEventListener("pointerdown", (ev) => startMove(ev, grip, kind, index, item));
         grip.addEventListener("click", (ev) => ev.stopPropagation());
         return grip;
+    }
+
+    // the on / off toggle of a filled slot : a full circle when on, an empty one when off
+    function toggleFor(kind, index, item) {
+        const on = item.enabled !== false;
+        return el("div", { class: "nml-toggle",
+            title: on ? "On : the Media Splitter outputs this slot — click to switch it off"
+                      : "Off : the Media Splitter outputs None for this slot, as if it were empty — click to switch it on",
+            onclick: (ev) => { ev.stopPropagation(); toggle(kind, index); } }, on ? "●" : "○");
     }
 
     function loadedCount() {
@@ -1124,6 +1165,7 @@ function makeMediaWidget(node, inputName, initialValue) {
                     try {
                         const item = await uploadFile(file);
                         if (entry.edit && typeof entry.edit === "object") item.edit = entry.edit;
+                        if (entry.enabled === false) item.enabled = false;
                         state[kind][entry.slot] = item;
                         loaded++;
                     } catch (err) {
@@ -1224,7 +1266,7 @@ function makeMediaWidget(node, inputName, initialValue) {
         const spec = KINDS[kind];
         const url = viewURL(item);
         const slot = el("div", {
-            class: `nml-slot filled ${spec.css}`,
+            class: `nml-slot filled ${spec.css}` + (item.enabled === false ? " off" : ""),
             title: `${item.name} — click to replace, drop a file to replace`,
             onclick: () => openPicker(kind, index),
         });
@@ -1247,6 +1289,7 @@ function makeMediaWidget(node, inputName, initialValue) {
             });
             slot.append(size);
             slot.append(el("div", { class: "nml-name" }, item.name));
+            slot.append(toggleFor(kind, index, item));
             slot.append(el("div", { class: "nml-zoom", title: "View at full size",
                 onclick: (ev) => { ev.stopPropagation(); lightbox(item); } }, "\ud83d\udd0d"));
             const edited = isEdited(item.edit);
@@ -1271,6 +1314,7 @@ function makeMediaWidget(node, inputName, initialValue) {
             slot.addEventListener("mouseenter", () => { video.play().catch(() => {}); });
             slot.addEventListener("mouseleave", () => { video.pause(); });
             slot.append(video, el("div", { class: "nml-name" }, item.name));
+            slot.append(toggleFor(kind, index, item));
             const edited = isVideoEdited(item.edit);
             slot.append(el("div", { class: "nml-edit" + (edited ? " on" : ""),
                 title: edited ? `Edit (${describeVideoEdit(item.edit)})` : "Edit : trim, mirror, crop, max size",
@@ -1305,7 +1349,7 @@ function makeMediaWidget(node, inputName, initialValue) {
             slot.append(el("div", { class: "nml-arow" },
                 el("span", { class: "nml-glyph" }, "♪"),
                 el("span", { class: "nml-aname", title: item.name }, item.name),
-                audio, pencil, gripFor(kind, index, item)));
+                audio, toggleFor(kind, index, item), pencil, gripFor(kind, index, item)));
         }
         slot.append(el("div", {
             class: "nml-remove",
