@@ -1,7 +1,8 @@
 // CREATED WITH CLAUDE
 
-// Adds a read-only result widget to the ReplaceTextParameters node, updated
-// with the formatted text each time the node is executed. The widget is
+// Adds a read-only result widget to the ParametricFileName and ParametricText
+// nodes (and to the deprecated ReplaceTextParameters), updated with the
+// formatted text each time the node is executed. The widget is
 // frontend-only: the backend sends the text via ui.PreviewText.
 //
 // The widget is a plain 'customtext' textarea, whose default styling
@@ -12,7 +13,9 @@
 //
 // Both widgets of the node are DOM widgets, and the layout engine shares the
 // node's free space between them, so by default the result grows with the node
-// too. Pinning its computeLayoutSize() minHeight and maxHeight to a single row
+// too. That is kept for ParametricText, whose result can span several lines.
+// For the file name nodes the result is a single path, so pinning its
+// computeLayoutSize() minHeight and maxHeight to a single row
 // (options.getMinHeight / options.getMaxHeight, which the DOM widget reads)
 // takes it out of the distribution: it always gets exactly one row, and the
 // text field, whose max height is unbounded, absorbs all the rest.
@@ -22,7 +25,12 @@ import { ComfyWidgets } from "../../../scripts/widgets.js";
 
 import { ADDON_PREFIX, API_PREFIX } from "./config.js";
 
-const NODE_ID = ADDON_PREFIX + "ReplaceTextParameters";
+// Node id -> whether its result is a single row (a file name) or free text.
+const SINGLE_ROW_RESULT = {
+    [ADDON_PREFIX + "ParametricFileName"]: true,
+    [ADDON_PREFIX + "ReplaceTextParameters"]: true,
+    [ADDON_PREFIX + "ParametricText"]: false,
+};
 const FALLBACK_ROW_HEIGHT = 20; // used until the textarea is mounted and styled
 
 // Height of one line of text in the widget, in unscaled node units: the DOM
@@ -44,7 +52,8 @@ app.registerExtension({
     name: API_PREFIX + ".text.replace_text_parameters",
 
     async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData.name !== NODE_ID) return;
+        if (!(nodeData.name in SINGLE_ROW_RESULT)) return;
+        const singleRow = SINGLE_ROW_RESULT[nodeData.name];
 
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
@@ -73,14 +82,19 @@ app.registerExtension({
                 caretColor: "transparent",
                 cursor: "default",
                 padding: "0",
-                whiteSpace: "pre",   // one row: never wrap onto a second line
-                overflow: "hidden",
             });
-            resultWidget.element.rows = 1;
 
             // Never draw the low-zoom placeholder: it is a WIDGET_BGCOLOR rect,
             // i.e. the very frame this widget is styled to not have.
             resultWidget.options.hideOnZoom = false;
+
+            if (!singleRow) return;
+
+            Object.assign(resultWidget.element.style, {
+                whiteSpace: "pre",   // one row: never wrap onto a second line
+                overflow: "hidden",
+            });
+            resultWidget.element.rows = 1;
 
             // One row, plus the widget margin the layout adds around the
             // element on both sides. Read lazily: the textarea has no computed

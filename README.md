@@ -630,7 +630,7 @@ Differences from LoadPrompt:
   output with the same name;
 - an additional `params` DICT output with **every** extra key:value pair of the selected
   library entry (empty for plain-string leaves) — useful downstream with
-  **ReplaceTextParameters**, and not limited to three values or to widget renaming;
+  **ParametricText** or **ParametricFileName**, and not limited to three values or to widget renaming;
 - when the selected library entry is a dictionary carrying extra keys besides `name` and
   `positive`, the frontend fills the param widgets from those keys when the id is selected.
   A widget is matched by its **current (user-facing) name**, so renaming e.g. `param2` to
@@ -674,49 +674,6 @@ Differences from LoadPrompt:
   keys when an id is selected);
 - the prompt text is emitted on an output named `char` instead of `prompt`;
 - there are no `id` and `image` outputs — the node outputs only `char` and `save_name`.
-
----
-
-## ReplaceTextParameters
-
-![ReplaceTextParameters node](images/ReplaceTextParameters.png)
-
-Replaces named placeholders inside a text with values taken from a parameters dictionary.
-Placeholders are written as `%name%`. A placeholder whose name is not found in the
-dictionary is replaced with an **empty string**. Once every placeholder has been resolved,
-the result is treated as a path: every `/` and `\` becomes the path separator of the
-operating system, and consecutive separators are compacted into a single one.
-
-The special form `%date:FORMAT%` inserts the current date/time instead
-of a dictionary value. `FORMAT` uses JavaScript-style tokens, converted internally to Python
-`strftime`: `YYYY`/`yy` (year), `MMMM`/`MMM`/`MM` (month name / short name / number),
-`DD` (day), `DDDD` (day of year), `HH` (hour), `mm` (minutes), `ss` (seconds).
-
-### Example
-
-With `text` = `in the style of %artist%, generated %date:YYYY-MM-DD%` and a `parameters`
-dictionary containing `{"artist": "anime"}`, the output is
-`in the style of anime, generated 2026-07-02`.
-
-### Inputs
-
-| Input | Type | Description |
-|---|---|---|
-| `text` | STRING | The text containing the placeholders. |
-| `parameters` | DICT (optional) | The `{name: value}` dictionary used for the replacements. If missing, every non-date placeholder resolves to an empty string. |
-
-### Outputs
-
-| Output | Type | Description |
-|---|---|---|
-| `text` | STRING | The text with all placeholders replaced. |
-
-### Frontend
-
-- The node body shows a read-only **result** area under the `text` widget, filled with the
-  replaced text whenever the node executes. The content is display-only and is not saved into
-  the workflow or the API prompt; if the node is skipped because its inputs are unchanged
-  (cached), the area keeps its previous content.
 
 ---
 
@@ -2436,3 +2393,103 @@ and their sizes on each run.
 | Output | Type | Description |
 |---|---|---|
 | `generated_text` | STRING | The model's answer. |
+
+---
+
+## ParametricFileName
+
+![ParametricFileName node](images/ParametricFileName.png)
+
+Builds a file name or a path from a text containing named placeholders, filled with the values
+of a parameters dictionary. Placeholders are written as `%name%`; a placeholder whose name is
+not found in the dictionary (or whose value is empty) is replaced with an **empty string**.
+
+Each line of the text is a **path segment**. Every line has its placeholders replaced on its own
+and is stripped of leading/trailing spaces; lines left blank are dropped, and the remaining ones
+are joined with the path separator of the operating system (`\` on Windows, `/` on Linux and
+macOS). Every `/` and `\` in the result becomes that separator too, and consecutive separators
+are compacted into a single one. To keep the text as it is, newlines included, use
+**ParametricText**.
+
+A placeholder can carry a **prefix** and/or a **suffix**, written out only when the value is not
+empty, so that an unused parameter takes its own separators away with it: `*` separates the
+prefix from the name, `#` separates the name from the suffix (both characters are reserved and
+cannot appear in a parameter name). With `char` = `Mario`:
+
+| Placeholder | Result | Result when `char` is missing or empty |
+|---|---|---|
+| `filename%_*char%` | `filename_Mario` | `filename` |
+| `filename%char#-%` | `filenameMario-` | `filename` |
+| `filename%_*char#-%` | `filename_Mario-` | `filename` |
+
+The special name `date:FORMAT` is not looked up in the dictionary: it inserts the current
+date/time, formatted with these tokens (any other character of `FORMAT` is kept as it is, so it
+can be used as a separator):
+
+| Token | Meaning | Token | Meaning |
+|---|---|---|---|
+| `YYYY`, `yyyy` | 4-digit year | `MMMM` | month name (January) |
+| `YY`, `yy` | 2-digit year | `MMM` | short month name (Jan) |
+| `DD`, `dd` | day of the month | `MM` | month number |
+| `DDDD`, `dddd` | day of the year | `HH` | hour (24-hour clock) |
+| `mm` | minutes | `ss` | seconds |
+
+`hh` is accepted as well, but it is a 24-hour clock too, not a 12-hour one.
+
+The placeholder syntax (prefix/suffix and `date:`) is shared with **ParametricText** and
+**ComplexPrompt**.
+
+### Example
+
+A `text` of three lines:
+
+```text
+renders/%project%
+%date:YYYY-MM-DD%
+%char#_%portrait
+```
+
+with a `parameters` dictionary `{"project": "demo", "char": "elf"}` gives, on Windows,
+`renders\demo\2026-09-29\elf_portrait`. Without a `char` entry the last line becomes
+`portrait`; without a `project` entry the first line becomes `renders/`, and the doubled
+separator is compacted: `renders\2026-09-29\portrait`.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `text` | STRING (multiline) | The template: one path segment per line, with `%name%` placeholders. |
+| `parameters` | DICT (optional) | The `{name: value}` dictionary used for the replacements. If missing, every non-date placeholder resolves to an empty string. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `text` | STRING | The resulting file name or path. |
+
+### Frontend
+
+- The node body shows a read-only one-line **result** area under the `text` widget, filled with
+  the resulting path whenever the node executes. The content is display-only and is not saved
+  into the workflow or the API prompt; if the node is skipped because its inputs are unchanged
+  (cached), the area keeps its previous content.
+
+---
+
+## ParametricText
+
+![ParametricText node](images/ParametricText.png)
+
+Same as **ParametricFileName**, for ordinary text instead of paths: only the placeholders are
+replaced, with the same syntax (`%name%`, prefix/suffix, `%date:FORMAT%`).
+
+Differences from ParametricFileName:
+
+- the lines are **not** joined into a path: newlines are kept, and so are blank lines and the
+  spaces around each line;
+- `/` and `\` are left as they are, not converted or compacted;
+- the **result** area spans several lines and shares the node's height with the `text` widget,
+  so a multi-line result can be read in full.
+
+For example, `in the style of %artist%, generated %date:YYYY-MM-DD%` with `{"artist": "anime"}`
+gives `in the style of anime, generated 2026-09-29`.

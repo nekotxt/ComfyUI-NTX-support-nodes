@@ -111,30 +111,43 @@ def _normalise_separators(path:str):
 
     return re.sub(r'[\\/]+', lambda _: os.sep, path)
 
-class ReplaceTextParameters(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id=f"{ADDON_PREFIX}ReplaceTextParameters",
-            display_name=f"{ADDON_PREFIX} Replace Text Parameters",
-            description=f"""
+PARAMETRIC_TEXT_DOC = f"""
     Replace text parameters.
     The parameters must be in the form '%name%'
     For instance, if text='in the style of %artist%'
     and parameters contains an entry 'artist': 'anime'
     then the returned text will be 'in the style of anime'
-    If the parameter name is not found in the dictionary, it will be replaced with an empty string.{PREFIX_SUFFIX_PARAMETER_DOC}{DATE_PARAMETER_DOC}
+    If the parameter name is not found in the dictionary, it will be replaced with an empty string.{PREFIX_SUFFIX_PARAMETER_DOC}{DATE_PARAMETER_DOC}"""
+
+PARAMETRIC_FILE_NAME_DOC = f"""{PARAMETRIC_TEXT_DOC}
     A multiline text is treated as a list of path segments: each line is formatted
     and stripped on its own, blank results are dropped, and the remaining pieces
     are joined with the path separator of the operating system; every '/' and '\\'
     of the result becomes that separator too, and consecutive separators are
     compacted into a single one.
-    """,
+    """
+
+def _parametric_inputs():
+    return [
+        io.String.Input("text", multiline=True, default=""),
+        DICT_TYPE.Input("parameters", optional=True),
+    ]
+
+def _format_file_name(text:str, parameters:dict):
+    # Each line is formatted and stripped on its own; the pieces that are
+    # left after dropping the blank ones are joined as path segments.
+    pieces = [_replace_parameters(line, parameters).strip() for line in text.splitlines()]
+    return _normalise_separators(os.sep.join(piece for piece in pieces if piece != ""))
+
+class ParametricFileName(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}ParametricFileName",
+            display_name=f"{ADDON_PREFIX} Parametric File Name",
+            description=PARAMETRIC_FILE_NAME_DOC,
             category=f"{ADDON_CATEGORY}/text",
-            inputs=[
-                io.String.Input("text", multiline=True, default=""),
-                DICT_TYPE.Input("parameters", optional=True),
-            ],
+            inputs=_parametric_inputs(),
             outputs=[
                 io.String.Output("text"),
             ],
@@ -142,15 +155,51 @@ class ReplaceTextParameters(io.ComfyNode):
 
     @classmethod
     def execute(cls, text, parameters=None):
+        result = _format_file_name(text, {} if parameters is None else parameters)
+        return io.NodeOutput(result, ui=ui.PreviewText(result))
 
-        if parameters is None:
-            parameters = {}
+class ParametricText(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}ParametricText",
+            display_name=f"{ADDON_PREFIX} Parametric Text",
+            description=f"""{PARAMETRIC_TEXT_DOC}
+    The rest of the text is returned as it is: newlines, slashes and surrounding
+    whitespace are kept.
+    """,
+            category=f"{ADDON_CATEGORY}/text",
+            inputs=_parametric_inputs(),
+            outputs=[
+                io.String.Output("text"),
+            ],
+        )
 
-        # Each line is formatted and stripped on its own; the pieces that are
-        # left after dropping the blank ones are joined as path segments.
-        pieces = [_replace_parameters(line, parameters).strip() for line in text.splitlines()]
-        result = _normalise_separators(os.sep.join(piece for piece in pieces if piece != ""))
+    @classmethod
+    def execute(cls, text, parameters=None):
+        result = _replace_parameters(text, {} if parameters is None else parameters)
+        return io.NodeOutput(result, ui=ui.PreviewText(result))
 
+class ReplaceTextParameters(io.ComfyNode):
+    """Deprecated: replaced by ParametricFileName, which behaves the same."""
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}ReplaceTextParameters",
+            display_name=f"{ADDON_PREFIX} Replace Text Parameters",
+            description=PARAMETRIC_FILE_NAME_DOC,
+            category=f"{ADDON_CATEGORY}/deprecated/text",
+            is_deprecated=True,
+            inputs=_parametric_inputs(),
+            outputs=[
+                io.String.Output("text"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, text, parameters=None):
+        result = _format_file_name(text, {} if parameters is None else parameters)
         return io.NodeOutput(result, ui=ui.PreviewText(result))
 
 class FileNameTemplate(io.ComfyNode):
@@ -175,7 +224,8 @@ class FileNameTemplate(io.ComfyNode):
     '\\' of the result becomes the path separator of the operating system, and
     consecutive separators are compacted into a single one.{PREFIX_SUFFIX_PARAMETER_DOC}{DATE_PARAMETER_DOC}
     """,
-            category=f"{ADDON_CATEGORY}/text",
+            category=f"{ADDON_CATEGORY}/deprecated/text",
+            is_deprecated=True,
             inputs=[
                 io.String.Input("template", default=""),
                 io.Autogrow.Input("params", template=autogrow_template),
@@ -373,6 +423,8 @@ class TextConcat(io.ComfyNode):
 
 def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
+        ParametricFileName,
+        ParametricText,
         ReplaceTextParameters,
         FileNameTemplate,
         PromptChainer,
