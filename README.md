@@ -2180,9 +2180,15 @@ The raw `media_state` widget is replaced by the slot panel. Its top bar holds:
   *uploaded from the folder* (with their source path, and the name they were stored under when
   it differs) and the ones *still missing* with the reason. When nothing is missing the report
   is shown directly, without asking for a folder. Disabled while nothing is loaded.
-- **Export** — copies every loaded file into a **new folder of `output/ntx_media/`** named after
-  the current time (`yymmddHHMMSS`, e.g. `260919113805`; a `_1`, `_2`… suffix when that second
-  is already taken), along with a **`media.json`** describing the slots: the same `pictures` /
+- **Export** — opens the browser's **folder picker on this machine** (the one running the
+  browser, not the ComfyUI server) and writes every loaded file into the picked folder, along
+  with a **`media.json`** describing the slots. The browser asks once for permission to save in
+  the folder, and the picker reopens where the last export went. A folder that already holds
+  files is only written into after a confirmation (files of the same name and its `media.json`
+  are replaced). The picker needs a Chromium browser (Chrome, Edge, Vivaldi…) and ComfyUI opened
+  on `localhost` or over HTTPS; elsewhere — or when the browser refuses the picker — the export
+  is **downloaded as `media_<yymmddHHMMSS>.zip`** instead, its files inside a `yymmddHHMMSS`
+  folder, ready for Import once unpacked. The `media.json` holds the same `pictures` /
   `videos` / `audios` lists as the `media` output, each entry with its `slot`, `name`, full
   `edit` record and `enabled` state but **without** the `file`, `type` and `path` fields, plus the node's `rows`.
   Each copy takes its slot's name, made unique inside the folder when two slots share one (the
@@ -2381,3 +2387,52 @@ Right-click menu options on the node:
 
 - **Clean media cache** — empties the shared cache of decoded media and frees its memory; a
   toast reports how many items and megabytes were released.
+
+---
+
+## TextGenerateMultiImage
+
+![TextGenerateMultiImage node](images/TextGenerateMultiImage.png)
+
+A version of ComfyUI's **Generate Text** node that sends a language model (a multimodal text
+encoder loaded as CLIP) **several separate images of different sizes** along with the prompt.
+The core node takes one IMAGE batch, so all of its images must be the same size. Here, every
+image is passed to the model on its own, **at its own size and aspect ratio**, in slot order:
+the first image of `image0`, then the rest of that batch, then `image1`, and so on. The prompt
+can refer to them as "the first image", "the second image", …
+
+How the images reach the model depends on the text encoder:
+
+- **Qwen3-VL / Qwen3.5**: each image is given to the model unchanged, and the model scales it
+  itself.
+- **Gemma 4**: each image is resized on its own to fit the model's budget of 280 image tokens
+  (about 0.65 megapixels), keeping its aspect ratio. The core node resizes a whole batch to
+  one size instead.
+- **Other encoders**: the images are joined into one batch, which works only if they are all
+  the same size; otherwise the node stops with an error asking to resize them first. Gemma 3
+  is built for a single image, so give it only one.
+
+The other settings are the core node's own and behave the same way: they are copied from
+**Generate Text** when ComfyUI starts, so they follow ComfyUI updates. The core `video` input is
+not available; to describe a video, use the core node. The log prints the number of images
+and their sizes on each run.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `clip` | CLIP | The multimodal text encoder that generates the text. |
+| `prompt` | STRING (multiline) | The request to the model. |
+| `image0`, `image1`, … | IMAGE (optional) | Up to 16 image slots; a new empty slot appears when the last one is connected. Each slot takes one image or a batch, and every image in it is passed separately. Only the RGB channels are used. |
+| `audio` | AUDIO (optional) | Audio for the models that accept it (Gemma 4). |
+| `max_length` | INT | Maximum number of generated tokens (`1` to `32768`, default `512`). |
+| `sampling_mode` | COMBO | `on` samples with the settings shown below it: `temperature` (default `0.7`), `top_k` (`64`), `top_p` (`0.95`), `min_p` (`0.05`), `repetition_penalty` (`1.05`), `seed` and `presence_penalty` (`0.0`); `off` always picks the most likely token. |
+| `thinking` | BOOLEAN (optional) | Lets the model reason before answering, when it supports it (default `false`). |
+| `use_default_template` | BOOLEAN (optional) | Wraps the prompt and the images in the model's chat template (default `true`). When off, the prompt must contain the model's own image placeholders, or the images are ignored. |
+| `mtp` | COMBO (optional) | Speculative decoding with the model's multi-token-prediction head: `auto` (default), `off`, or a fixed draft depth `2` to `5`. No effect on models without it. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `generated_text` | STRING | The model's answer. |

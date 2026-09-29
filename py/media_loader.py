@@ -15,7 +15,8 @@ import hashlib
 import json
 import os
 import re
-import shutil
+import tempfile
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -673,26 +674,19 @@ from server import PromptServer
 
 # ===== EXPORT =================================================================================================================================
 
-# the "Export" command of the Media Loader : the loaded files are copied into a new folder of
-# output/ntx_media named after the current time, along with a media.json describing the slots
-# (the same information as the "media" output - edits and on / off state included - without the
-# file / type / path fields)
-EXPORT_SUBFOLDER = "ntx_media"
+# the "Export" command of the Media Loader : the loaded files are written into a folder of the
+# client machine, along with a media.json describing the slots (the same information as the
+# "media" output - edits and on / off state included - without the file / type / path fields).
+# The server only plans the export : the frontend writes the files itself through the browser's
+# folder picker, or downloads them as a .zip built here when the browser has no such picker.
 EXPORT_JSON = "media.json"
 
-def export_media(media_state: str) -> dict:
+def export_plan(media_state: str) -> dict:
+    # the name each loaded file takes in the export, the media.json naming them, and the slots
+    # whose file is missing on the server
     state = parse_media_state(media_state)
-    rows = max(len(state["videos"]), 1)
-    stamp = datetime.now().strftime("%y%m%d%H%M%S")
-    folder = Path(folder_paths.get_output_directory()) / EXPORT_SUBFOLDER / stamp
-    counter = 1
-    while folder.exists():
-        folder = folder.with_name(f"{stamp}_{counter}")
-        counter += 1
-    folder.mkdir(parents=True, exist_ok=False)
-
-    description = {"rows": rows}
-    copied, missing = 0, []
+    description = {"rows": max(len(state["videos"]), 1)}
+    files, missing = [], []
     used_names = set()
     for kind, slots in state.items():
         description[kind] = []
@@ -712,8 +706,7 @@ def export_media(media_state: str) -> dict:
                 name = f"{stem} ({n}){ext}"
                 n += 1
             used_names.add(name.lower())
-            shutil.copy2(source, folder / name)
-            copied += 1
+            files.append({"name": name, "file": slot["file"], "type": slot.get("type", "input"), "source": source})
             entry = {"slot": index, "name": name, "enabled": is_enabled(slot)}
             if kind == "pictures":
                 entry["edit"] = normalize_edit(slot.get("edit"))
@@ -722,10 +715,23 @@ def export_media(media_state: str) -> dict:
             else:
                 entry["edit"] = normalize_audio_edit(slot.get("edit"))
             description[kind].append(entry)
+    return {"description": description, "files": files, "missing": missing}
 
-    (folder / EXPORT_JSON).write_text(json.dumps(description, indent=4), encoding="utf-8")
-    logger.info(f"MediaLoader : {copied} files exported to [{folder}]" + (f", {len(missing)} missing" if missing else ""))
-    return {"folder": str(folder), "name": folder.name, "copied": copied, "missing": missing}
+def export_zip(media_state: str):
+    # the export as a .zip in a temporary file (deleted when closed), its files inside a folder
+    # named after the current time so that unpacking it gives a folder the Import command takes
+    plan = export_plan(media_state)
+    stamp = datetime.now().strftime("%y%m%d%H%M%S")
+    archive = tempfile.TemporaryFile()
+    # media files are already compressed : they are stored as they are
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
+        for f in plan["files"]:
+            zf.write(f["source"], f"{stamp}/{f['name']}")
+        zf.writestr(f"{stamp}/{EXPORT_JSON}", json.dumps(plan["description"], indent=4), compress_type=zipfile.ZIP_DEFLATED)
+    size = archive.tell()
+    archive.seek(0)
+    logger.info(f"MediaLoader : {len(plan['files'])} files zipped for export ({size} bytes)" + (f", {len(plan['missing'])} missing" if plan["missing"] else ""))
+    return archive, size, f"media_{stamp}.zip", plan
 
 # the "Clean media cache" command of the Media Splitter's right-click menu
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/media_loader/clear_cache")
@@ -733,22 +739,58 @@ async def clear_media_cache_route(request):
     freed = clear_media_cache()
     return web.json_response({"cleared": True, **freed})
 
-# the "Export" command of the Media Loader
-@PromptServer.instance.routes.post(f"/{API_PREFIX}/media_loader/export")
-async def export_media_route(request):
+async def read_media_state(request):
     try:
         data = await request.json()
     except Exception:
-        return web.json_response({"error": "expected a JSON body"}, status=400)
+        return None, web.json_response({"error": "expected a JSON body"}, status=400)
     media_state = data.get("media_state")
     if not isinstance(media_state, str):
-        return web.json_response({"error": "missing media_state"}, status=400)
+        return None, web.json_response({"error": "missing media_state"}, status=400)
+    return media_state, None
+
+# the "Export" command of the Media Loader, writing into a folder picked on the client : what to
+# write there (the files to fetch from /view, under which name, and the media.json)
+@PromptServer.instance.routes.post(f"/{API_PREFIX}/media_loader/export_plan")
+async def export_plan_route(request):
+    media_state, error = await read_media_state(request)
+    if error:
+        return error
     try:
-        result = await asyncio.get_running_loop().run_in_executor(None, export_media, media_state)
+        plan = await asyncio.get_running_loop().run_in_executor(None, export_plan, media_state)
     except Exception as e:
         logger.warning(f"MediaLoader : export failed : {e}")
         return web.json_response({"error": f"export failed : {e}"}, status=500)
-    return web.json_response(result)
+    return web.json_response({"description": plan["description"], "missing": plan["missing"],
+                              "files": [{k: f[k] for k in ("name", "file", "type")} for f in plan["files"]]})
+
+# the "Export" command of the Media Loader in a browser without a folder picker : the export as a
+# .zip download ; the missing slots are listed in the X-NTX-Missing header (JSON)
+@PromptServer.instance.routes.post(f"/{API_PREFIX}/media_loader/export_zip")
+async def export_zip_route(request):
+    media_state, error = await read_media_state(request)
+    if error:
+        return error
+    try:
+        archive, size, filename, plan = await asyncio.get_running_loop().run_in_executor(None, export_zip, media_state)
+    except Exception as e:
+        logger.warning(f"MediaLoader : export failed : {e}")
+        return web.json_response({"error": f"export failed : {e}"}, status=500)
+    try:
+        response = web.StreamResponse(headers={
+            "Content-Type": "application/zip",
+            "Content-Length": str(size),
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-NTX-Missing": json.dumps(plan["missing"], ensure_ascii=True),
+            "X-NTX-Count": str(len(plan["files"])),
+        })
+        await response.prepare(request)
+        while chunk := archive.read(1 << 20):
+            await response.write(chunk)
+        await response.write_eof()
+        return response
+    finally:
+        archive.close()
 
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/media_loader/extract_audio")
 async def extract_audio_route(request):

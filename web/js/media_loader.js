@@ -43,6 +43,7 @@ const WIDGET_TYPE = "NTX_MEDIA_SLOTS";
 
 // where uploads go, relative to the ComfyUI input directory (MEDIA_SUBFOLDER in python)
 const MEDIA_SUBFOLDER = "ntx_media";
+const EXPORT_JSON = "media.json";      // the description of the slots an export writes
 
 // the slot layout: slots of each kind per row (SLOTS_PER_ROW in python) and the default row count
 const KINDS = {
@@ -565,15 +566,82 @@ function viewURL(item) {
 
 // upload one file through the core route, into the loader's input subfolder
 // ask the server to write the audio of a span of a video as a FLAC file in the loader's subfolder
-// ask the server to copy the loaded files and a description of the slots into a new folder
-async function exportMedia(mediaState) {
-    const resp = await api.fetchApi(`/${API_PREFIX}/media_loader/export`, {
+// ask the server what an export holds : the files to fetch from /view with the name each takes
+// in the export, the media.json naming them, and the slots whose file is missing
+async function exportPlan(mediaState) {
+    const resp = await api.fetchApi(`/${API_PREFIX}/media_loader/export_plan`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ media_state: mediaState }),
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.error || `export failed (${resp.status})`);
     return data;
+}
+
+// the folder of this machine to export into, through the browser's folder picker ; null when
+// cancelled, undefined when the browser has no picker or refuses it (the .zip fallback then).
+// It has to be called before anything is awaited, while the click still counts as a user gesture.
+async function pickExportFolder() {
+    if (typeof window.showDirectoryPicker !== "function") return undefined;
+    try {
+        return await window.showDirectoryPicker({ id: "ntx-media-export", mode: "readwrite" });
+    } catch (err) {
+        if (err?.name === "AbortError") return null;
+        console.warn("[MediaLoader] folder picker refused, falling back to a .zip download", err);
+        return undefined;
+    }
+}
+
+// how many entries a picked folder already holds
+async function folderEntryCount(dir) {
+    let count = 0;
+    for await (const _ of dir.values()) count++;
+    return count;
+}
+
+// write the files of an export plan and its media.json into a picked folder ; a file that fails
+// is reported with the missing ones instead of stopping the export
+async function writeExport(dir, plan) {
+    let written = 0;
+    const failed = [];
+    for (const f of plan.files) {
+        try {
+            const resp = await fetch(viewURL(f));
+            if (!resp.ok || !resp.body) throw new Error(`download failed (${resp.status})`);
+            const handle = await dir.getFileHandle(f.name, { create: true });
+            await resp.body.pipeTo(await handle.createWritable());
+            written++;
+        } catch (err) {
+            failed.push(`${f.name} (${err.message})`);
+        }
+    }
+    const json = await (await dir.getFileHandle(EXPORT_JSON, { create: true })).createWritable();
+    await json.write(JSON.stringify(plan.description, null, 4));
+    await json.close();
+    return { written, failed };
+}
+
+// the export as a .zip built by the server, handed to the browser as a download
+async function downloadExportZip(mediaState) {
+    const resp = await api.fetchApi(`/${API_PREFIX}/media_loader/export_zip`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ media_state: mediaState }),
+    });
+    if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.error || `export failed (${resp.status})`);
+    }
+    let missing = [];
+    try { missing = JSON.parse(resp.headers.get("X-NTX-Missing") || "[]"); } catch {}
+    const count = parseInt(resp.headers.get("X-NTX-Count"), 10) || 0;
+    const filename = /filename="([^"]+)"/.exec(resp.headers.get("Content-Disposition") || "")?.[1] || "media.zip";
+    const url = URL.createObjectURL(await resp.blob());
+    const a = el("a", { href: url, download: filename, style: { display: "none" } });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return { count, missing, filename };
 }
 
 async function extractAudio(item, start, end) {
@@ -1188,13 +1256,32 @@ function makeMediaWidget(node, inputName, initialValue) {
     let exporting = false;
     async function exportAll() {
         if (exporting) return;
+        // the picker first : it needs the click as a user gesture
+        const dir = await pickExportFolder();
+        if (dir === null) return;
         exporting = true;
         render();
         try {
-            const result = await exportMedia(JSON.stringify(state));
-            const detail = `${result.copied} file${result.copied === 1 ? "" : "s"} copied to output/ntx_media/${result.name}`
-                + (result.missing?.length ? ` \u2014 ${result.missing.length} missing : ${result.missing.join(", ")}` : "");
-            toast(result.missing?.length ? "warn" : "success", "Media exported", detail);
+            const mediaState = JSON.stringify(state);
+            let done, missing;
+            if (dir) {
+                const count = await folderEntryCount(dir);
+                if (count) {
+                    const ok = await confirmDialog("Export media",
+                        `The folder ${dir.name} already holds ${count} item${count > 1 ? "s" : ""}. Export into it anyway ? Files of the same name and its ${EXPORT_JSON} are replaced.`);
+                    if (!ok) return;
+                }
+                const plan = await exportPlan(mediaState);
+                const { written, failed } = await writeExport(dir, plan);
+                missing = [...plan.missing, ...failed];
+                done = `${written} file${written === 1 ? "" : "s"} written to the folder ${dir.name}`;
+            } else {
+                const result = await downloadExportZip(mediaState);
+                missing = result.missing;
+                done = `${result.count} file${result.count === 1 ? "" : "s"} downloaded as ${result.filename}`;
+            }
+            toast(missing.length ? "warn" : "success", "Media exported",
+                done + (missing.length ? ` — ${missing.length} missing : ${missing.join(", ")}` : ""));
         } catch (err) {
             toast("error", "Export failed", err.message);
         } finally {
@@ -1383,7 +1470,7 @@ function makeMediaWidget(node, inputName, initialValue) {
                 title: "Check that every loaded file is still on the server, and upload the missing ones from a folder of this machine",
                 onclick: (ev) => { ev.stopPropagation(); loadMissing(); } }, loadingMissing ? "checking\u2026" : "Load missing"),
             el("button", { class: "nml-btn", disabled: !count || exporting,
-                title: "Copy every loaded file, with a media.json describing the slots, into a new folder of output/ntx_media named after the current time",
+                title: "Save every loaded file, with a media.json describing the slots, into a folder of this machine (as a .zip download when the browser cannot pick a folder)",
                 onclick: (ev) => { ev.stopPropagation(); exportAll(); } }, exporting ? "exporting\u2026" : "Export"),
             el("button", { class: "nml-btn", disabled: importing,
                 title: "Load the content of an exported folder (its media.json and files) into this node, replacing what is loaded",
