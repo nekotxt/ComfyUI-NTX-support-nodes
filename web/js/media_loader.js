@@ -26,7 +26,12 @@
 // touched. Every filled slot also has an on / off toggle : a slot switched off
 // carries `enabled: false` (the key is dropped when it is switched back on) and
 // is greyed out ; the loader still outputs it, flagged, and the Media Splitter
-// treats it as an empty slot. Files are uploaded through the core /upload/image
+// treats it as an empty slot. A filled slot can also be given a tag from its T
+// button : a name of letters, digits, "_" and "-", unique across the slots of the
+// node (case-insensitively), stored on the item as `tag` and shown over the upper
+// left corner of the slot ; the loader passes it in its media output. The tag
+// stays with the slot when its file is replaced, and follows the file when it is
+// moved to another slot. Files are uploaded through the core /upload/image
 // route, in the input/ntx_media subfolder, and previewed straight from /view.
 
 import { app } from "../../../scripts/app.js";
@@ -70,6 +75,10 @@ const EXTENSIONS = {
     videos:   /\.(mp4|mov|mkv|webm|avi|m4v|mpe?g)$/i,
     audios:   /\.(wav|mp3|flac|ogg|m4a|aac|opus)$/i,
 };
+
+// what a tag may hold (TAG_PATTERN in python)
+const TAG_PATTERN = /^[A-Za-z0-9_-]+$/;
+const TAG_MAX_LENGTH = 64;
 
 const NODE_MIN_WIDTH = 520;
 // panel height: the top bar and headers, plus one picture row (the right column
@@ -153,7 +162,16 @@ const CSS = `
     font: inherit; font-size: 11px;
 }
 .nml-paste-catch:focus { outline: none; border-color: #7fb8d8; }
-.nml-report .nml-report-foot { display: flex; justify-content: flex-end; }
+.nml-report .nml-report-foot { display: flex; justify-content: flex-end; gap: 6px; }
+.nml-report .nml-report-foot .nml-btn.danger { margin-right: auto; }
+.nml-tag-input {
+    width: 100%; box-sizing: border-box; padding: 4px 6px;
+    background: #1b1f27; color: #e3e7ee; border: 1px solid #3a4150; border-radius: 4px;
+    font-family: ui-monospace, monospace; font-size: 12px;
+}
+.nml-tag-input:focus { outline: none; border-color: #7fb8d8; }
+.nml-tag-input.bad { border-color: #a04040; }
+.nml-tag-error { min-height: 14px; font-size: 10px; color: #e08a8a; }
 
 .nml-cols {
     flex: 1;
@@ -241,8 +259,8 @@ const CSS = `
     text-overflow: ellipsis;
     pointer-events: none;
 }
-.nml-slot.pic .nml-name { padding-right: 74px; }   /* four icons at the right of a picture caption */
-.nml-slot.vid .nml-name { padding-right: 56px; }   /* three icons at the right of a video caption */
+.nml-slot.pic .nml-name { padding-right: 92px; }   /* five icons at the right of a picture caption */
+.nml-slot.vid .nml-name { padding-right: 74px; }   /* four icons at the right of a video caption */
 .nml-slot .nml-remove {
     position: absolute;
     top: 2px; right: 2px;
@@ -314,6 +332,47 @@ const CSS = `
 .nml-slot.vid .nml-toggle { right: 38px; }
 .nml-slot:hover .nml-toggle, .nml-slot.off .nml-toggle { opacity: 1; }
 .nml-slot .nml-toggle:hover { background: #2a303b; }
+/* the tag button, left of the toggle */
+.nml-slot .nml-tagbtn {
+    position: absolute;
+    bottom: 2px; right: 74px;
+    width: 16px; height: 16px;
+    line-height: 16px;
+    text-align: center;
+    border-radius: 3px;
+    background: rgba(8, 10, 14, .72);
+    color: #c8cfda;
+    font-size: 10px;
+    font-weight: bold;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .12s;
+}
+.nml-slot.vid .nml-tagbtn { right: 56px; }
+.nml-slot:hover .nml-tagbtn { opacity: 1; }
+.nml-slot .nml-tagbtn:hover { background: #2a303b; color: #fff; }
+.nml-slot .nml-tagbtn.on { color: #7ec87e; }
+/* the tag of a slot, over its upper left corner ; a picture's size overlay moves below it */
+.nml-slot .nml-tag {
+    position: absolute;
+    top: 2px; left: 2px;
+    z-index: 1;
+    max-width: calc(100% - 24px);
+    box-sizing: border-box;
+    padding: 0 5px;
+    border-radius: 3px;
+    background: #2f6b4b;
+    color: #fff;
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    line-height: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+}
+.nml-slot.tagged .nml-size { top: 18px; }
+.nml-arow .nml-tag { position: static; flex-shrink: 1; min-width: 24px; max-width: 30%; }
 /* a slot switched off : its preview greyed out */
 .nml-slot.off img, .nml-slot.off video, .nml-slot.off canvas { filter: grayscale(1) brightness(.45); }
 .nml-slot.off .nml-glyph, .nml-slot.off .nml-aname, .nml-slot.off audio { filter: grayscale(1); opacity: .4; }
@@ -382,7 +441,7 @@ const CSS = `
     text-overflow: ellipsis;
 }
 /* in the audio row the grip sits inline, after the player */
-.nml-arow .nml-grip, .nml-arow .nml-edit, .nml-arow .nml-toggle { position: static; opacity: 1; flex-shrink: 0; }
+.nml-arow .nml-grip, .nml-arow .nml-edit, .nml-arow .nml-toggle, .nml-arow .nml-tagbtn { position: static; opacity: 1; flex-shrink: 0; }
 
 .nml-arow {
     display: flex;
@@ -772,6 +831,62 @@ function askForPaste() {
     });
 }
 
+// ask for the tag of a slot : resolves with the new tag, "" to remove the current one, or null
+// when cancelled. `check` returns why a (well formed) tag cannot be used, or "" when it can
+function askTag(title, current, check) {
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (value) => {
+            if (settled) return;
+            settled = true;
+            window.removeEventListener("keydown", onKey, true);
+            overlay.remove();
+            resolve(value);
+        };
+        const onKey = (ev) => { if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); finish(null); } };
+
+        const input = el("input", { class: "nml-tag-input", type: "text", value: current ?? "",
+            maxLength: TAG_MAX_LENGTH, spellcheck: false, autocomplete: "off", placeholder: "e.g. face_ref" });
+        const error = el("div", { class: "nml-tag-error" });
+        const save = el("button", { class: "nml-btn", onclick: () => submit() }, "Save");
+        const validate = () => {
+            const tag = input.value.trim();
+            const message = !tag ? ""
+                : !TAG_PATTERN.test(tag) ? "letters, digits, _ and - only : no spaces or other characters"
+                : check(tag);
+            error.textContent = message;
+            input.classList.toggle("bad", !!message);
+            save.disabled = !tag || !!message;
+            return !save.disabled;
+        };
+        const submit = () => { if (validate()) finish(input.value.trim()); };
+        input.addEventListener("input", validate);
+        // keep the keys away from the canvas shortcuts
+        input.addEventListener("keydown", (ev) => {
+            ev.stopPropagation();
+            if (ev.key === "Enter") { ev.preventDefault(); submit(); }
+        });
+
+        const overlay = el("div", {
+            class: "nml-report-overlay",
+            onclick: (ev) => { if (ev.target === overlay) finish(null); },
+        }, el("div", { class: "nml-report", style: { width: "min(360px, 94vw)" } },
+            el("h3", {}, title),
+            el("div", { class: "nml-paste-hint" }, "Letters, digits, _ and -, unique on this node."),
+            input, error,
+            el("div", { class: "nml-report-foot" },
+                current ? el("button", { class: "nml-btn danger", onclick: () => finish("") }, "Remove tag") : null,
+                el("button", { class: "nml-btn", onclick: () => finish(null) }, "Cancel"),
+                save)));
+
+        window.addEventListener("keydown", onKey, true);
+        document.body.append(overlay);
+        validate();
+        input.focus();
+        input.select();
+    });
+}
+
 // ── Widget ────────────────────────────────────────────────────────────────────
 
 function makeMediaWidget(node, inputName, initialValue) {
@@ -854,8 +969,12 @@ function makeMediaWidget(node, inputName, initialValue) {
         const key = `${kind}:${index}`;
         busy.add(key);
         render();
+        const replaced = state[kind][index];
         try {
-            state[kind][index] = await uploader(file);
+            const item = await uploader(file);
+            // the tag belongs to the slot : it survives a new file (unless the slot changed meanwhile)
+            if (replaced?.tag && state[kind][index] === replaced) item.tag = replaced.tag;
+            state[kind][index] = item;
         } catch (err) {
             toast("error", "Upload failed", `${file.name}: ${err.message}`);
         } finally {
@@ -894,6 +1013,34 @@ function makeMediaWidget(node, inputName, initialValue) {
         if (!live) return;
         if (live.enabled === false) delete live.enabled; else live.enabled = false;
         commit();
+    }
+
+    // the slot holding a tag (case-insensitively), other than the given one, as { kind, index, item }
+    function tagOwner(tag, kind, index) {
+        const wanted = tag.toLowerCase();
+        return filledSlots().find((s) => s.item.tag?.toLowerCase() === wanted && !(s.kind === kind && s.index === index)) ?? null;
+    }
+
+    // set, change or remove the tag of a filled slot, through the tag dialog
+    async function editTag(kind, index) {
+        const item = state[kind][index];
+        if (!item) return;
+        const result = await askTag(`Tag of ${KINDS[kind].label} slot ${index + 1} (${item.name})`, item.tag, (tag) => {
+            const owner = tagOwner(tag, kind, index);
+            return owner ? `already used by ${KINDS[owner.kind].label} slot ${owner.index + 1} (${owner.item.name})` : "";
+        });
+        if (result === null) return;
+        const live = state[kind][index];
+        if (live !== item) return;                       // the slot changed meanwhile
+        if (result && tagOwner(result, kind, index)) return;
+        if (result) live.tag = result; else delete live.tag;
+        commit();
+    }
+
+    function tagButtonFor(kind, index, item) {
+        return el("div", { class: "nml-tagbtn" + (item.tag ? " on" : ""),
+            title: item.tag ? `Tag : ${item.tag} \u2014 click to change or remove it` : "Tag this slot",
+            onclick: (ev) => { ev.stopPropagation(); void editTag(kind, index); } }, "T");
     }
 
     // move an item to another slot of the same kind, swapping with whatever is there
@@ -1234,6 +1381,7 @@ function makeMediaWidget(node, inputName, initialValue) {
                         const item = await uploadFile(file);
                         if (entry.edit && typeof entry.edit === "object") item.edit = entry.edit;
                         if (entry.enabled === false) item.enabled = false;
+                        if (typeof entry.tag === "string" && TAG_PATTERN.test(entry.tag) && !tagOwner(entry.tag, kind, entry.slot)) item.tag = entry.tag;
                         state[kind][entry.slot] = item;
                         loaded++;
                     } catch (err) {
@@ -1353,10 +1501,11 @@ function makeMediaWidget(node, inputName, initialValue) {
         const spec = KINDS[kind];
         const url = viewURL(item);
         const slot = el("div", {
-            class: `nml-slot filled ${spec.css}` + (item.enabled === false ? " off" : ""),
-            title: `${item.name} — click to replace, drop a file to replace`,
+            class: `nml-slot filled ${spec.css}` + (item.enabled === false ? " off" : "") + (item.tag ? " tagged" : ""),
+            title: (item.tag ? `[${item.tag}] ` : "") + `${item.name} — click to replace, drop a file to replace`,
             onclick: () => openPicker(kind, index),
         });
+        const tag = item.tag ? el("div", { class: "nml-tag", title: `tag : ${item.tag}` }, item.tag) : null;
         if (kind === "pictures") {
             const img = el("img", { src: url, alt: item.name, draggable: false });
             slot.append(img);
@@ -1376,6 +1525,7 @@ function makeMediaWidget(node, inputName, initialValue) {
             });
             slot.append(size);
             slot.append(el("div", { class: "nml-name" }, item.name));
+            slot.append(tagButtonFor(kind, index, item));
             slot.append(toggleFor(kind, index, item));
             slot.append(el("div", { class: "nml-zoom", title: "View at full size",
                 onclick: (ev) => { ev.stopPropagation(); lightbox(item); } }, "\ud83d\udd0d"));
@@ -1401,6 +1551,7 @@ function makeMediaWidget(node, inputName, initialValue) {
             slot.addEventListener("mouseenter", () => { video.play().catch(() => {}); });
             slot.addEventListener("mouseleave", () => { video.pause(); });
             slot.append(video, el("div", { class: "nml-name" }, item.name));
+            slot.append(tagButtonFor(kind, index, item));
             slot.append(toggleFor(kind, index, item));
             const edited = isVideoEdited(item.edit);
             slot.append(el("div", { class: "nml-edit" + (edited ? " on" : ""),
@@ -1433,11 +1584,14 @@ function makeMediaWidget(node, inputName, initialValue) {
                         commit();
                     });
                 } }, "✎");
+            // the audio row is too short for an overlay : its tag leads the row
             slot.append(el("div", { class: "nml-arow" },
+                tag,
                 el("span", { class: "nml-glyph" }, "♪"),
                 el("span", { class: "nml-aname", title: item.name }, item.name),
-                audio, toggleFor(kind, index, item), pencil, gripFor(kind, index, item)));
+                audio, tagButtonFor(kind, index, item), toggleFor(kind, index, item), pencil, gripFor(kind, index, item)));
         }
+        if (tag && kind !== "audios") slot.append(tag);
         slot.append(el("div", {
             class: "nml-remove",
             title: "Remove from this slot (the file stays in the input folder)",

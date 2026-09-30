@@ -2073,6 +2073,13 @@ maximum size, time span — see *Frontend*). The edits are **recorded, not appli
 disk is left untouched, and the settings travel with the media in the bundle for the consuming
 node to apply.
 
+A filled slot can also be given a **tag** — a short name such as `face_ref` or `voice-2` that
+lets the consuming node find a media by name rather than by slot position. A tag holds only
+**letters, digits, `_` and `-`** (no spaces or other characters) and is **unique on the node**,
+across pictures, videos and audios and regardless of case (`Face` and `face` are the same tag).
+The tag belongs to the slot: it stays when the slot's file is replaced, and moves with the file
+when the file is dragged to another slot.
+
 The node **re-runs only when something changes**: its cache fingerprint is made of the slot
 contents plus the size and modification time of every referenced file, so it executes when a
 slot or an edit changes, when a file is rewritten on disk, and after a server restart. A slot
@@ -2081,7 +2088,7 @@ whose file is **missing** from the server fails the prompt with
 restores such files from a local folder.
 
 **NTX_MEDIA_REFS** is a dictionary with three lists, `pictures`, `videos` and `audios`, holding
-one entry per **filled** slot, in slot order:
+one entry per **filled** slot, in slot order, plus a `tags` map:
 
 | Key | Description |
 |---|---|
@@ -2092,6 +2099,13 @@ one entry per **filled** slot, in slot order:
 | `path` | The absolute path of the file on the server, resolved at execution time. |
 | `edit` | The recorded edits, always present with every key (defaults when nothing was edited) — see below. |
 | `enabled` | The slot's on / off toggle (`true` / `false`). The loader itself ignores it — a slot switched off is still resolved, validated and output — it is only a flag for the consumer: the **MediaSplitter** outputs `None` for a slot that is off. |
+| `tag` | The slot's tag, or `None` when it has none. |
+
+The `tags` map indexes the tagged slots by tag: `{"face_ref": {"kind": "pictures", "slot": 0},
+"voice-2": {"kind": "audios", "slot": 1}}` (`slot` is 0-based, as above; the map is empty when no
+slot is tagged). Tags are checked again when the node runs, in case a workflow was edited by
+hand: an invalid tag is ignored, and a tag found on several slots is kept on the first one only
+(pictures, then videos, then audios, in slot order) with a warning in the console.
 
 The `edit` record depends on the kind of media, and its keys are meant to be applied **in this
 order**:
@@ -2113,7 +2127,7 @@ only them does not count as edited.
 
 | Input | Type | Description |
 |---|---|---|
-| `media_state` | STRING (hidden) | Managed by the frontend, not edited by hand: a JSON object with the number of rows and one list per kind (`pictures`, `videos`, `audios`), each slot being `null` or `{name, file, type, edit?, enabled?}` (`enabled` is only stored, as `false`, when the slot is switched off). |
+| `media_state` | STRING (hidden) | Managed by the frontend, not edited by hand: a JSON object with the number of rows and one list per kind (`pictures`, `videos`, `audios`), each slot being `null` or `{name, file, type, edit?, enabled?, tag?}` (`enabled` is only stored, as `false`, when the slot is switched off; `tag` only when the slot has one). |
 
 ### Outputs
 
@@ -2147,7 +2161,7 @@ The raw `media_state` widget is replaced by the slot panel. Its top bar holds:
   is **downloaded as `media_<yymmddHHMMSS>.zip`** instead, its files inside a `yymmddHHMMSS`
   folder, ready for Import once unpacked. The `media.json` holds the same `pictures` /
   `videos` / `audios` lists as the `media` output, each entry with its `slot`, `name`, full
-  `edit` record and `enabled` state but **without** the `file`, `type` and `path` fields, plus the node's `rows`.
+  `edit` record, `enabled` state and `tag` (when it has one) but **without** the `file`, `type` and `path` fields, plus the node's `rows`.
   Each copy takes its slot's name, made unique inside the folder when two slots share one (the
   JSON then names the copy). Slots whose file is missing on the server are skipped and listed in
   the result toast. Disabled while nothing is loaded.
@@ -2157,7 +2171,7 @@ The raw `media_state` widget is replaced by the slot panel. Its top bar holds:
   changes. When the node holds files, a confirmation asks to replace them. The node is then
   resized to the JSON's `rows` (more if an entry's slot needs it), emptied, and every named file
   of the folder is **uploaded like a dropped file** — so the slots reference the copies in
-  `input/ntx_media/`, not the picked folder — with its `edit` record and on / off state
+  `input/ntx_media/`, not the picked folder — with its `edit` record, on / off state and tag
   restored (an entry without `enabled`, from an older export, loads switched on). Files that are not
   in the folder, empty, of the wrong kind, or failing to upload are skipped and listed in the
   result toast.
@@ -2201,6 +2215,14 @@ The raw `media_state` widget is replaced by the slot panel. Its top bar holds:
   ratio** among the ones of the crop tool: the exact one when there is one (`1024×576 · 16:9`),
   the closest one marked `≈` when it is within 10 % (`1000×600 · ≈16:9`), nothing beyond that.
 - **×** (top-right, on hover) empties the slot.
+- **T** — sets, changes or removes the slot's **tag**; it sits left of the ●/○ toggle and turns
+  green when the slot is tagged. It opens a small dialog with the current tag: the name is
+  checked as it is typed, and an invalid character or a tag already used by another slot (the
+  message names that slot) keeps **Save** disabled. **Save** or **Enter** records the tag,
+  **Remove tag** (shown when the slot has one) deletes it, **Cancel**, **Escape** or a click
+  outside closes the dialog without changes.
+- A tagged slot shows its tag as a **green badge in its upper-left corner** (the size line of a
+  picture moves just below it); in the shorter audio row the badge leads the row, before the ♪.
 - **●** / **○** toggles the slot **on** (full circle) or **off** (empty circle); it sits left of
   the 🔍 on pictures and left of the ✎ on videos and audios. A slot that is off keeps its file
   and edits, its preview is **greyed out** and the toggle stays visible; the loader outputs it

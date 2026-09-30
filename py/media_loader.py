@@ -45,7 +45,8 @@ MIN_ROWS = 1
 # frontend editors (web/js/media_loader.editor.js, media_loader.video_editor.js,
 # media_loader.audio_editor.js), as an "edit" dict, see normalize_edit, normalize_video_edit and
 # normalize_audio_edit. A filled slot switched off by its toggle carries "enabled": false (the key
-# is left out when the slot is on, see is_enabled)
+# is left out when the slot is on, see is_enabled). A filled slot may also carry a "tag", a name
+# unique across the node's slots, see normalize_tag
 def parse_media_state(media_state: str) -> dict[str, list]:
     try:
         state = json.loads(media_state or "{}")
@@ -72,6 +73,30 @@ def parse_media_state(media_state: str) -> dict[str, list]:
 # whether a slot (or a bundle entry) is on : only an explicit false switches it off
 def is_enabled(slot: dict) -> bool:
     return slot.get("enabled", True) is not False
+
+# the tag of a slot : letters, digits, "_" and "-" only, unique across every slot of the node
+# (whatever the kind, case-insensitively). The frontend enforces both rules ; here an invalid tag
+# is dropped and a duplicate is left to the first slot holding it (pictures, then videos, then
+# audios, in slot order)
+TAG_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+
+def normalize_tag(tag) -> str | None:
+    return tag if isinstance(tag, str) and TAG_PATTERN.fullmatch(tag) else None
+
+# the tag of every filled slot, as {(kind, index): tag}, invalid and duplicate tags left out
+def slot_tags(state: dict[str, list]) -> dict[tuple[str, int], str]:
+    tags, seen = {}, set()
+    for kind, slots in state.items():
+        for index, slot in enumerate(slots):
+            tag = normalize_tag(slot.get("tag")) if slot else None
+            if tag is None:
+                continue
+            if tag.lower() in seen:
+                logger.warning(f"MediaLoader : tag [{tag}] of {kind[:-1]} slot {index + 1} is already used, ignored")
+                continue
+            seen.add(tag.lower())
+            tags[(kind, index)] = tag
+    return tags
 
 # the annotated file name ("subdir/file.png [input]") understood by folder_paths
 def annotated_name(slot: dict) -> str:
@@ -211,6 +236,10 @@ class MediaLoader(io.ComfyNode):
     (see normalize_edit, normalize_video_edit and normalize_audio_edit) for the consuming node to
     apply.
 
+    A filled slot can be given a tag (letters, digits, "_" and "-", unique on the node) : it is
+    shown on the slot and passed in the bundle, on the slot's entry ("tag", None when untagged)
+    and in the "tags" map {tag: {"kind", "slot"}} (see slot_tags).
+
     The slots live in the media_state widget, a JSON object the frontend replaces on the node by
     the slot panel that edits it (see parse_media_state for its layout). The node resolves each file
     and hands the whole set out as one media bundle.
@@ -239,6 +268,7 @@ class MediaLoader(io.ComfyNode):
         logger.node_name("MediaLoader")
 
         state = parse_media_state(media_state)
+        tags = slot_tags(state)
         media = {}
         for kind, slots in state.items():
             media[kind] = []
@@ -253,6 +283,7 @@ class MediaLoader(io.ComfyNode):
                     "type": slot.get("type", "input"),
                     "path": path,
                     "enabled": is_enabled(slot),
+                    "tag": tags.get((kind, index)),
                 }
                 if kind == "pictures":
                     entry["edit"] = normalize_edit(slot.get("edit"))
@@ -266,6 +297,11 @@ class MediaLoader(io.ComfyNode):
             off = sum(1 for entry in media[kind] if not entry["enabled"])
             logger.info(f"{kind} : {len(media[kind])} / {len(slots)} slots loaded"
                         + (f", {edited} edited" if edited else "") + (f", {off} off" if off else ""))
+
+        # the tagged slots by tag, for the consumers looking a media up by its tag
+        media["tags"] = {tag: {"kind": kind, "slot": index} for (kind, index), tag in tags.items()}
+        if tags:
+            logger.info(f"tags : {', '.join(media['tags'])}")
 
         return io.NodeOutput(media)
 
@@ -676,7 +712,7 @@ from server import PromptServer
 
 # the "Export" command of the Media Loader : the loaded files are written into a folder of the
 # client machine, along with a media.json describing the slots (the same information as the
-# "media" output - edits and on / off state included - without the file / type / path fields).
+# "media" output - edits, on / off state and tags included - without the file / type / path fields).
 # The server only plans the export : the frontend writes the files itself through the browser's
 # folder picker, or downloads them as a .zip built here when the browser has no such picker.
 EXPORT_JSON = "media.json"
@@ -685,6 +721,7 @@ def export_plan(media_state: str) -> dict:
     # the name each loaded file takes in the export, the media.json naming them, and the slots
     # whose file is missing on the server
     state = parse_media_state(media_state)
+    tags = slot_tags(state)
     description = {"rows": max(len(state["videos"]), 1)}
     files, missing = [], []
     used_names = set()
@@ -708,6 +745,8 @@ def export_plan(media_state: str) -> dict:
             used_names.add(name.lower())
             files.append({"name": name, "file": slot["file"], "type": slot.get("type", "input"), "source": source})
             entry = {"slot": index, "name": name, "enabled": is_enabled(slot)}
+            if (kind, index) in tags:
+                entry["tag"] = tags[(kind, index)]
             if kind == "pictures":
                 entry["edit"] = normalize_edit(slot.get("edit"))
             elif kind == "videos":
