@@ -803,6 +803,60 @@ class MediaSelectByTag(io.ComfyNode):
 
         return io.NodeOutput(final_media, final_prompt, report)
 
+class MediaToPipe(io.ComfyNode):
+    """Decode every slot of a media bundle into a pipe.
+
+    The same as the Media Splitter, with one pipe key per filled slot instead of one output per
+    slot : the slot numbered from 1 gives the key, picture slot 0 becoming picture_1, video slot 1
+    video_2 (the frames) and video_audio_2 (its audio, None when it has none), audio slot 0
+    audio_1. The edits are applied and the Media Splitter's cache is shared. The empty slots and
+    the slots switched off on the loader have no key.
+    """
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}MediaToPipe",
+            display_name=f"{ADDON_PREFIX} Media To Pipe",
+            description="Decode the media of a Media Loader (or Media Select By Tag) bundle, with their edits applied, into "
+                        "a pipe : picture_N, video_N + video_audio_N and audio_N, N being the slot number. Empty slots and "
+                        "slots switched off have no key.",
+            category=f"{ADDON_CATEGORY}/images",
+            inputs=[
+                MEDIA_REFS_TYPE.Input("media", tooltip="The media bundle of a Media Loader or Media Select By Tag node."),
+            ],
+            outputs=[
+                DICT_TYPE.Output("pipe"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, media) -> io.NodeOutput:
+        logger.node_name("MediaToPipe")
+        media = media if isinstance(media, dict) else {}
+        pipe = {}
+        off = 0
+        for kind in PARSER_KINDS:
+            entries = sorted((entry for entry in media.get(kind, []) if isinstance(entry, dict)), key=lambda entry: int(entry["slot"]))
+            for entry in entries:
+                if not is_enabled(entry):
+                    off += 1
+                    continue
+                number = int(entry["slot"]) + 1
+                key = f"{PARSER_KINDS[kind]['key']}_{number}"
+                if kind == "pictures":
+                    pipe[key] = decode_slot(key, "pictures", entry)
+                elif kind == "videos":
+                    pipe[key] = decode_slot(key, "video_frames", entry)
+                    pipe[f"video_audio_{number}"] = decode_slot(f"video_audio_{number}", "video_audio", entry)
+                else:
+                    pipe[key] = decode_slot(key, "audios", entry)
+        if off:
+            logger.info(f"{off} slot{'s' if off > 1 else ''} switched off, left out of the pipe")
+        log_media_cache_stats()
+
+        return io.NodeOutput(pipe)
+
 # ===== INITIALIZATION =========================================================================================================================
 
 def get_nodes_list() -> list[type[io.ComfyNode]]:
@@ -811,6 +865,7 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         MediaSplitter,
         MediaParser,
         MediaSelectByTag,
+        MediaToPipe,
     ]
 
 # ===== AUDIO EXTRACTION =======================================================================================================================

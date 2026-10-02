@@ -2377,6 +2377,9 @@ Right-click menu options on the node:
 - **Clean media cache** — empties the shared cache of decoded media and frees its memory; a
   toast reports how many items and megabytes were released.
 
+See **MediaToPipe** for a variant that delivers the decoded media in a pipe instead of separate
+outputs.
+
 ---
 
 ## TextGenerateMultiImage
@@ -2652,3 +2655,27 @@ omitted):
 ```
 
 `Bob` was picture slot 1 in the loader; the prompt calls it `<Picture 1>`, so it is now slot `0`.
+
+---
+
+## MediaToPipe
+
+![MediaToPipe node](images/MediaToPipe.png)
+
+Same as **MediaSplitter** — every slot of the bundle is decoded with its edits applied, through
+the same shared cache — but the media come out in a single **pipe** instead of one output per
+slot. Its `media` input takes the bundle of a **MediaLoader** or of a **MediaSelectByTag**.
+
+Differences from MediaSplitter:
+
+- one output, `pipe` (DICT), with one key per media named after its slot, numbered from 1:
+  picture slot 0 is `picture_1`, picture slot 2 is `picture_3`, video slot 1 is `video_2` (the
+  frames) with `video_audio_2` (its audio track, `None` when it has none), audio slot 0 is
+  `audio_1`;
+- **empty slots and slots switched off have no key** (rather than a `None` output), and the
+  console notes how many slots were switched off;
+- no `rows` setting and no row limit: every slot of the bundle is decoded, however many rows
+  the loader has.
+
+Fed by a MediaSelectByTag, the keys follow the labels of its prompt, since that node has already
+renumbered the slots: `<Picture 1>` is `picture_1`, `<Video 1>` is `video_1` + `video_audio_1`.
