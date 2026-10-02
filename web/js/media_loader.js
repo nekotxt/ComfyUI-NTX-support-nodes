@@ -508,9 +508,9 @@ function lightbox(item) {
     return overlay;
 }
 
-function toast(severity, summary, detail) {
+function toast(severity, summary, detail, life = 4000) {
     try {
-        app.extensionManager?.toast?.add({ severity, summary, detail, life: 4000 });
+        app.extensionManager?.toast?.add({ severity, summary, detail, life });
     } catch {
         console.log(`[MediaLoader] ${summary}: ${detail}`);
     }
@@ -711,6 +711,22 @@ async function extractAudio(item, start, end) {
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.error || `extraction failed (${resp.status})`);
     return { name: data.name, file: data.file, type: data.type || "input" };
+}
+
+// the decoded size of a video item's frames with its edits applied, estimated by the server, and
+// whether it is too large for the media cache of the Media Splitter (see estimate_video_frames)
+async function estimateVideo(item) {
+    const resp = await api.fetchApi(`/${API_PREFIX}/media_loader/estimate_video`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file: item.file, type: item.type || "input", edit: item.edit ?? null }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || `estimate failed (${resp.status})`);
+    return data;
+}
+
+function formatBytes(bytes) {
+    return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
 }
 
 async function uploadFile(file) {
@@ -975,12 +991,34 @@ function makeMediaWidget(node, inputName, initialValue) {
             // the tag belongs to the slot : it survives a new file (unless the slot changed meanwhile)
             if (replaced?.tag && state[kind][index] === replaced) item.tag = replaced.tag;
             state[kind][index] = item;
+            if (kind === "videos") void checkVideoSize(index);
         } catch (err) {
             toast("error", "Upload failed", `${file.name}: ${err.message}`);
         } finally {
             busy.delete(key);
             commit();
         }
+    }
+
+    // warn when the frames of a video slot, decoded with its edits, would take more than a share
+    // of the media cache : the Media Splitter could not keep them, and would decode the video
+    // again on every run. Runs after a video is loaded in a slot and after its edits change ;
+    // a failed estimate is only logged
+    async function checkVideoSize(index) {
+        const item = state.videos[index];
+        if (!item) return;
+        let info;
+        try {
+            info = await estimateVideo(item);
+        } catch (err) {
+            console.warn(`[MediaLoader] size estimate of ${item.name} failed: ${err.message}`);
+            return;
+        }
+        if (!info.warn || state.videos[index] !== item) return;
+        toast("warn", `Large video in slot ${index + 1}`,
+            `${item.name} : ${info.frames} frames of ${info.width}\u00d7${info.height} take about ${formatBytes(info.bytes)} once decoded, `
+            + `over ${Math.round(info.warn_ratio * 100)} % of the media cache (${formatBytes(info.cache_bytes)}) : it will be decoded again on every run. `
+            + "Lower its max size or shorten its span in the video editor.", 12000);
     }
 
     // The "Paste picture from clipboard" entry of the node's right click menu: the
@@ -1227,6 +1265,7 @@ function makeMediaWidget(node, inputName, initialValue) {
             const uploaded = await uploadFile(file);
             const live = state[kind][index];
             if (live) { live.file = uploaded.file; live.type = uploaded.type; }
+            if (live && kind === "videos") void checkVideoSize(index);
         } finally {
             busy.delete(key); commit();
         }
@@ -1383,6 +1422,7 @@ function makeMediaWidget(node, inputName, initialValue) {
                         if (entry.enabled === false) item.enabled = false;
                         if (typeof entry.tag === "string" && TAG_PATTERN.test(entry.tag) && !tagOwner(entry.tag, kind, entry.slot)) item.tag = entry.tag;
                         state[kind][entry.slot] = item;
+                        if (kind === "videos") void checkVideoSize(entry.slot);
                         loaded++;
                     } catch (err) {
                         missing.push(`${label} : upload failed, ${err.message}`);
@@ -1563,6 +1603,7 @@ function makeMediaWidget(node, inputName, initialValue) {
                         if (!live || live.file !== item.file) return;   // the slot changed meanwhile
                         if (edit) live.edit = edit; else delete live.edit;
                         commit();
+                        void checkVideoSize(index);
                     }, editorActions);
                 } }, "✎"));
             slot.append(gripFor(kind, index, item));

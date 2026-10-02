@@ -2189,6 +2189,16 @@ The raw `media_state` widget is replaced by the slot panel. Its top bar holds:
 - Dropping on, or clicking, a **filled** slot replaces its content.
 - Accepted extensions: pictures `png jpg jpeg webp bmp gif tif tiff`, videos
   `mp4 mov mkv webm avi m4v mpg mpeg`, audios `wav mp3 flac ogg m4a aac opus`.
+- **Large video warning** — whenever a video lands in a slot (dropped, picked, imported or
+  re-uploaded by **Load missing**) and whenever its edits are saved in the video editor, the node
+  estimates the memory its frames take once decoded by a **MediaSplitter** or a **MediaParser**:
+  kept span × frame rate × frame size after the crop and the max size, in 32-bit floats (the
+  estimate reads the video's metadata only, nothing is decoded). Above **65 % of the media cache**
+  (`max_gb_for_media_loader`, see MediaSplitter) a warning toast gives the frame count, the frame
+  size and the estimated memory: beyond the whole budget the video is never kept in the cache
+  and is decoded again on every run, and just below it, it pushes everything else out — lower
+  its **max size** or shorten its span in the video editor. No warning is
+  shown when the cache is switched off (`use_for_media_loader: false`).
 - **Paste picture from clipboard**, in the node's right-click menu, loads the picture held by the
   clipboard into the **first free picture slot**. A clipboard holding no picture is not an error
   and does nothing; when every picture slot is taken, a toast says so. The picture is stored in

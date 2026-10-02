@@ -906,6 +906,53 @@ def extract_audio(file: str, file_type: str, start: float, end: float | None) ->
     return {"name": out_path.name, "file": f"{MEDIA_SUBFOLDER}/{out_path.name}", "type": "input",
             "duration": samples.shape[1] / rate, "sample_rate": rate, "channels": int(samples.shape[0])}
 
+# ===== VIDEO SIZE ESTIMATE ====================================================================================================================
+
+# The Media Loader warns when the frames of a video slot, once decoded by the Media Splitter or
+# the Media Parser (float32 RGB, edits applied), would take more than this share of the media
+# cache : such a video is too large to be kept (or crowds everything else out), and is decoded
+# again on every run
+VIDEO_CACHE_WARN_RATIO = 0.65
+
+# the decoded size of the frames of a video with its edits applied, estimated from the stream's
+# metadata (frame rate, duration, frame size) without decoding anything
+def estimate_video_frames(file: str, file_type: str, edit) -> dict:
+    annotated = f"{file} [{file_type}]"
+    if not folder_paths.exists_annotated_filepath(annotated):
+        raise FileNotFoundError(f"missing video file : {file}")
+    edit = normalize_video_edit(edit)
+    with av.open(folder_paths.get_annotated_filepath(annotated)) as container:
+        stream = next((s for s in container.streams if s.type == "video"), None)
+        if stream is None:
+            raise ValueError("this file has no video track")
+        rate = float(stream.average_rate or stream.guessed_rate or 25)
+        width, height = stream.codec_context.width, stream.codec_context.height
+        stream_frames = stream.frames
+        if stream.duration is not None and stream.time_base:
+            duration = float(stream.duration * stream.time_base)
+        elif container.duration is not None:
+            duration = container.duration / av.time_base
+        else:
+            duration = (stream_frames or 0) / rate
+    # the frames of the kept span (load_video_frames keeps start <= time < end)
+    end = duration if edit["end"] is None else min(edit["end"], duration)
+    frames = max(0, round((end - edit["start"]) * rate))
+    if edit["start"] == 0 and edit["end"] is None and stream_frames:
+        frames = stream_frames
+    # the frame size after the crop and the maximum size (as apply_frame_edits)
+    crop = edit["crop"]
+    if crop:
+        x, y = min(crop["x"], width), min(crop["y"], height)
+        width, height = max(1, min(crop["width"], width - x)), max(1, min(crop["height"], height - y))
+    if edit["max_size"] and max(width, height) > edit["max_size"]:
+        scale = edit["max_size"] / max(width, height)
+        width, height = max(1, int(round(width * scale))), max(1, int(round(height * scale)))
+    size = frames * width * height * 3 * 4
+    return {"frames": frames, "width": width, "height": height, "bytes": size,
+            "cache_enabled": bool(USE_MEDIA_LOADER_CACHE), "cache_bytes": MEDIA_CACHE_MAX_BYTES,
+            "warn": bool(USE_MEDIA_LOADER_CACHE) and size > VIDEO_CACHE_WARN_RATIO * MEDIA_CACHE_MAX_BYTES,
+            "warn_ratio": VIDEO_CACHE_WARN_RATIO}
+
 from aiohttp import web
 from server import PromptServer
 
@@ -1057,4 +1104,24 @@ async def extract_audio_route(request):
     except Exception as e:
         logger.warning(f"MediaLoader : audio extraction failed : {e}")
         return web.json_response({"error": f"extraction failed : {e}"}, status=500)
+    return web.json_response(result)
+
+# the size check of the Media Loader on a video slot, after a load and after an edit
+@PromptServer.instance.routes.post(f"/{API_PREFIX}/media_loader/estimate_video")
+async def estimate_video_route(request):
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "expected a JSON body"}, status=400)
+    file = str(data.get("file") or "")
+    file_type = str(data.get("type") or "input")
+    if not file or "\\" in file or ".." in file.split("/"):
+        return web.json_response({"error": "invalid file"}, status=400)
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(None, estimate_video_frames, file, file_type, data.get("edit"))
+    except (FileNotFoundError, ValueError) as e:
+        return web.json_response({"error": str(e)}, status=400)
+    except Exception as e:
+        logger.warning(f"MediaLoader : video size estimate failed : {e}")
+        return web.json_response({"error": f"estimate failed : {e}"}, status=500)
     return web.json_response(result)
