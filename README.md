@@ -2515,3 +2515,130 @@ Differences from ParametricFileName:
 
 For example, `in the style of %artist%, generated %date:YYYY-MM-DD%` with `{"artist": "anime"}`
 gives `in the style of anime, generated 2026-09-29`.
+
+---
+
+## MediaParser
+
+![MediaParser node](images/MediaParser.png)
+
+Lets a prompt refer to the media of a **MediaLoader** by their **tags** (see MediaLoader). Every
+`@tag` written in the prompt is replaced by a numbered label — `<Picture N>`, `<Video N>` or
+`<Audio N>` — and the media behind it are added to a pipe under matching keys, so that the
+prompt and the media handed to a multi-reference model agree on the numbering.
+
+How the references are resolved:
+
+- A reference is `@` followed by the characters a tag may hold (letters, digits, `_`, `-`); it
+  runs as long as such characters follow, so `@bob.` and `@bob,` name `bob` while `@bob-` names
+  `bob-`. An `@` glued to a word before it (`me@site.com`) is not a reference and is left alone.
+- Tags are matched **ignoring case**: `@bob`, `@Bob` and `@BOB` all name the slot tagged `Bob`.
+- The numbering is **per kind, in order of first appearance in the prompt** — not in slot order:
+  the first picture referenced becomes `<Picture 1>` / `picture_1` whatever its slot. A tag
+  referenced again gets the **same label** as the first time.
+- A reference to a tag **no slot holds**, or to a slot **switched off** on the loader, **fails
+  the prompt**; the error lists every unresolved reference at once, with the tags the loader
+  does hold.
+
+The media are **decoded with their recorded edits applied**, exactly as the **MediaSplitter**
+does, and share its cache of decoded media (the **Clean media cache** entry of the splitter
+empties it for both nodes). A referenced video always brings its audio track along, as
+`video_audio_N` next to `video_N`.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `pipe` | DICT (optional) | A pipe the media are added to; a new, empty one when not connected. The input pipe is copied, not modified. |
+| `media` | NTX_MEDIA_REFS | The bundle of a MediaLoader node. |
+| `prompt` | STRING (multiline) | The prompt, referencing tagged slots as `@tag`. Dynamic prompts are off: `{a\|b}` is passed through as written. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `pipe` | DICT | The input pipe plus one key per referenced media: `picture_N` (IMAGE, batch of one), `video_N` (IMAGE, the frames of the kept span) with `video_audio_N` (AUDIO, `None` when the video has no audio track), `audio_N` (AUDIO). A key already present in the input pipe is overwritten. |
+| `final_prompt` | STRING | The prompt with every reference replaced by its label. |
+| `report` | STRING | One line per referenced tag, in order of appearance: `@tag => pipe keys => slot (file name)`, with `(no audio)` after a video or audio without sound; `no tag reference in the prompt` when there is none. The report is also written to the console. |
+
+### Example
+
+With a MediaLoader holding picture 1 tagged `Alice`, picture 2 tagged `Bob`, picture 4 tagged
+`Carmen`, video 2 tagged `video_ref_main` and video 3 tagged `video_ref_aux`, the prompt
+
+```text
+<Subject 1> is Char1, as defined by @bob
+<Subject 2> is Char2, as defined by @Alice
+Use @video_REF_AUX as the reference for the movement of @Bob
+```
+
+gives the `final_prompt`
+
+```text
+<Subject 1> is Char1, as defined by <Picture 1>
+<Subject 2> is Char2, as defined by <Picture 2>
+Use <Video 1> as the reference for the movement of <Picture 1>
+```
+
+and the `report` (the file names being those of the slots)
+
+```text
+@bob => picture_1 => image 2 (bob.png)
+@Alice => picture_2 => image 1 (alice.png)
+@video_REF_AUX => video_1 + video_audio_1 => video 3 (aux.mp4)
+```
+
+| Pipe key | Media |
+|---|---|
+| `picture_1` | picture slot 2 (`Bob`) |
+| `picture_2` | picture slot 1 (`Alice`) |
+| `video_1` | the frames of video slot 3 (`video_ref_aux`) |
+| `video_audio_1` | the audio of video slot 3 |
+
+`Carmen` and `video_ref_main` are not referenced, so they are not in the pipe.
+
+See **MediaSelectByTag** for a variant that keeps the media in a bundle instead of decoding them
+into a pipe.
+
+---
+
+## MediaSelectByTag
+
+![MediaSelectByTag node](images/MediaSelectByTag.png)
+
+Same as **MediaParser** — the `@tag` references are resolved, numbered and replaced in the
+prompt in exactly the same way, with the same errors — but instead of decoding the media into a
+pipe, it **filters the bundle**: the output is a new **NTX_MEDIA_REFS** holding only the
+referenced media, renumbered to match the labels of the prompt. Fed to a **MediaSplitter**,
+`<Picture N>` then comes out on `picture_N`, `<Video N>` on `video_N` and `video_audio_N`, and
+`<Audio N>` on `audio_N`.
+
+Differences from MediaParser:
+
+- no `pipe` input; the outputs are `final_media`, `final_prompt` and `report`;
+- `final_media` holds, in each of the `pictures` / `videos` / `audios` lists, **only the
+  referenced entries, in order of first appearance in the prompt**, each with its `slot` changed
+  to its label number minus one (`<Picture 1>` is slot `0`); every other field (`name`, `file`,
+  `path`, `edit`, `enabled`, `tag`) is kept as it is. The `tags` map is rebuilt for the kept
+  entries and their new slots. The input bundle is not modified;
+- **nothing is decoded**, so the node is instant and the report cannot tell whether a video has
+  an audio track (no `(no audio)` mark); the output names of the report (`picture_1`,
+  `video_1 + video_audio_1`, …) are the MediaSplitter outputs the media land on.
+
+With the loader and the prompt of the MediaParser example, `final_media` becomes (other fields
+omitted):
+
+```json
+{
+    "pictures": [ {"slot": 0, "tag": "Bob"}, {"slot": 1, "tag": "Alice"} ],
+    "videos":   [ {"slot": 0, "tag": "video_ref_aux"} ],
+    "audios":   [],
+    "tags": {
+        "Bob":           {"kind": "pictures", "slot": 0},
+        "Alice":         {"kind": "pictures", "slot": 1},
+        "video_ref_aux": {"kind": "videos",   "slot": 0}
+    }
+}
+```
+
+`Bob` was picture slot 1 in the loader; the prompt calls it `<Picture 1>`, so it is now slot `0`.

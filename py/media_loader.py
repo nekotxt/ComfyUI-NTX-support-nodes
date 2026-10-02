@@ -22,7 +22,7 @@ from pathlib import Path
 
 from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY, API_PREFIX, USE_MEDIA_LOADER_CACHE, MEDIA_CACHE_MAX_BYTES
 from .logging import logger
-from .utils import MEDIA_REFS_TYPE
+from .utils import MEDIA_REFS_TYPE, DICT_TYPE, clone_data
 
 # ===== Media loader utilities =================================================================================================================
 
@@ -519,6 +519,39 @@ def media_cache_stats() -> dict:
     with _media_cache_lock:
         return {"items": len(_media_cache), "bytes": _media_cache_bytes, "max_bytes": MEDIA_CACHE_MAX_BYTES}
 
+# decode the media of a bundle entry with its edits applied, through the media cache : `kind` is
+# "pictures" (IMAGE), "video_frames" (IMAGE), "video_audio" (AUDIO) or "audios" (AUDIO), `name`
+# the output it goes to, for the log. None for a video without frames or without audio
+def decode_slot(name: str, kind: str, entry: dict):
+    cached = lambda hit: " (cached)" if hit else ""
+    if kind == "pictures":
+        edit = normalize_edit(entry.get("edit"))
+        value, hit = cached_media("picture", entry, edit, lambda: load_picture(entry["path"], edit))
+        logger.info(f"{name} : [{entry['name']}] -> {value.shape[2]}x{value.shape[1]}{cached(hit)}")
+    elif kind == "video_frames":
+        edit = normalize_video_edit(entry.get("edit"))
+        value, hit = cached_media("video_frames", entry, edit, lambda: load_video_frames(entry["path"], edit))
+        logger.info(f"{name} : [{entry['name']}] -> "
+                    + (f"{value.shape[0]} frames {value.shape[2]}x{value.shape[1]}" if value is not None else "no frames") + cached(hit))
+    elif kind == "video_audio":
+        # the audio only depends on the span
+        edit = normalize_video_edit(entry.get("edit"))
+        span = {"start": edit["start"], "end": edit["end"]}
+        value, hit = cached_media("video_audio", entry, span, lambda: load_audio_span(entry["path"], span))
+        logger.info(f"{name} : [{entry['name']}] -> "
+                    + (f"{value['waveform'].shape[2] / value['sample_rate']:.2f}s at {value['sample_rate']}Hz" if value is not None else "no audio") + cached(hit))
+    else:
+        edit = normalize_audio_edit(entry.get("edit"))
+        value, hit = cached_media("audio", entry, edit, lambda: load_audio_span(entry["path"], edit))
+        logger.info(f"{name} : [{entry['name']}] -> "
+                    + (f"{value['waveform'].shape[2] / value['sample_rate']:.2f}s at {value['sample_rate']}Hz" if value is not None else "no audio") + cached(hit))
+    return value
+
+def log_media_cache_stats():
+    if USE_MEDIA_LOADER_CACHE:
+        stats = media_cache_stats()
+        logger.info(f"media cache : {stats['items']} items, {stats['bytes'] / 1024 ** 2:.0f} / {stats['max_bytes'] / 1024 ** 2:.0f} MB")
+
 class MediaSplitter(io.ComfyNode):
     """Split a media bundle into one output per slot.
 
@@ -564,7 +597,6 @@ class MediaSplitter(io.ComfyNode):
             logger.info(f"{off} slot{'s' if off > 1 else ''} switched off, output as None")
         entries = {"pictures": by_slot("pictures"), "videos": by_slot("videos"), "audios": by_slot("audios")}
         layout = split_layout(rows)
-        cached = lambda hit: " (cached)" if hit else ""
 
         # decode each slot once, the outputs of the layout then pick from these
         loaded = {}
@@ -572,37 +604,204 @@ class MediaSplitter(io.ComfyNode):
             entry = entries["videos" if kind.startswith("video") else kind].get(slot)
             if entry is None or (kind, slot) in loaded:
                 continue
-            if kind == "pictures":
-                edit = normalize_edit(entry.get("edit"))
-                value, hit = cached_media("picture", entry, edit, lambda: load_picture(entry["path"], edit))
-                logger.info(f"{name} : [{entry['name']}] -> {value.shape[2]}x{value.shape[1]}{cached(hit)}")
-            elif kind == "video_frames":
-                edit = normalize_video_edit(entry.get("edit"))
-                value, hit = cached_media("video_frames", entry, edit, lambda: load_video_frames(entry["path"], edit))
-                logger.info(f"{name} : [{entry['name']}] -> "
-                            + (f"{value.shape[0]} frames {value.shape[2]}x{value.shape[1]}" if value is not None else "no frames") + cached(hit))
-            elif kind == "video_audio":
-                # the audio only depends on the span
-                edit = normalize_video_edit(entry.get("edit"))
-                span = {"start": edit["start"], "end": edit["end"]}
-                value, hit = cached_media("video_audio", entry, span, lambda: load_audio_span(entry["path"], span))
-                logger.info(f"{name} : [{entry['name']}] -> "
-                            + (f"{value['waveform'].shape[2] / value['sample_rate']:.2f}s at {value['sample_rate']}Hz" if value is not None else "no audio") + cached(hit))
-            else:
-                edit = normalize_audio_edit(entry.get("edit"))
-                value, hit = cached_media("audio", entry, edit, lambda: load_audio_span(entry["path"], edit))
-                logger.info(f"{name} : [{entry['name']}] -> "
-                            + (f"{value['waveform'].shape[2] / value['sample_rate']:.2f}s at {value['sample_rate']}Hz" if value is not None else "no audio") + cached(hit))
-            loaded[(kind, slot)] = value
+            loaded[(kind, slot)] = decode_slot(name, kind, entry)
 
-        if USE_MEDIA_LOADER_CACHE:
-            stats = media_cache_stats()
-            logger.info(f"media cache : {stats['items']} items, {stats['bytes'] / 1024 ** 2:.0f} / {stats['max_bytes'] / 1024 ** 2:.0f} MB")
+        log_media_cache_stats()
 
         # the outputs of the layout, then None on the unused ones
         outputs = [loaded.get((kind, slot)) for _, kind, slot in layout]
         outputs += [None] * (SPLIT_OUTPUTS - len(outputs))
         return io.NodeOutput(*outputs)
+
+# ===== MEDIA PARSER ===========================================================================================================================
+
+# A tag reference in a prompt : "@" and a tag (TAG_PATTERN), the "@" not glued to a word before it
+# (so that "me@site.com" is left alone). The tag runs as long as tag characters follow : "@bob."
+# is the tag "bob", "@bob-" the tag "bob-"
+TAG_REFERENCE = re.compile(r"(?<![A-Za-z0-9_])@([A-Za-z0-9_-]+)")
+
+# per kind of slot : the label written in the prompt, the pipe key prefix, the report name
+PARSER_KINDS = {
+    "pictures": {"label": "Picture", "key": "picture", "slot": "image"},
+    "videos":   {"label": "Video",   "key": "video",   "slot": "video"},
+    "audios":   {"label": "Audio",   "key": "audio",   "slot": "audio"},
+}
+
+# resolve the @tag references of a prompt against a media bundle : the references in order of
+# first appearance, as [{"kind", "entry", "number", "written"}] where "number" counts within the
+# kind from 1 and "written" is the tag as first written in the prompt, and the prompt with every
+# reference replaced by its <Picture N> / <Video N> / <Audio N> label. A reference to a tag no
+# slot holds, or to a slot switched off, raises a ValueError listing every unresolved reference
+def resolve_tag_references(node: str, media: dict, prompt: str) -> tuple[list[dict], str]:
+    # the tagged slots, by lowercased tag
+    tagged = {}
+    for kind in PARSER_KINDS:
+        for entry in media.get(kind, []):
+            tag = normalize_tag(entry.get("tag")) if isinstance(entry, dict) else None
+            if tag is not None:
+                tagged.setdefault(tag.lower(), (kind, entry))
+
+    # each tag numbered within its kind ; every unresolved reference is collected so that the
+    # error lists them all
+    resolved = {}           # lowercased tag -> reference
+    counters = {kind: 0 for kind in PARSER_KINDS}
+    errors = []
+    for match in TAG_REFERENCE.finditer(prompt or ""):
+        written = match.group(1)
+        key = written.lower()
+        if key in resolved:
+            continue
+        found = tagged.get(key)
+        if found is None:
+            message = f"@{written} : no slot of the Media Loader has this tag"
+        elif not is_enabled(found[1]):
+            spec = PARSER_KINDS[found[0]]
+            message = f"@{written} : {spec['slot']} {int(found[1]['slot']) + 1} ({found[1]['name']}) is switched off"
+        else:
+            kind, entry = found
+            counters[kind] += 1
+            resolved[key] = {"kind": kind, "entry": entry, "number": counters[kind], "written": written}
+            continue
+        if message not in errors:
+            errors.append(message)
+    if errors:
+        known = ", ".join(f"@{kind_entry[1]['tag']}" for kind_entry in tagged.values()) or "none"
+        raise ValueError(f"{node} : unresolved tag references\n" + "\n".join(errors) + f"\n(tags of the Media Loader : {known})")
+
+    def label(match):
+        ref = resolved[match.group(1).lower()]
+        return f"<{PARSER_KINDS[ref['kind']]['label']} {ref['number']}>"
+    return list(resolved.values()), TAG_REFERENCE.sub(label, prompt or "")
+
+# the report line of a reference : the tag as written, the outputs it lands on, the slot it comes from
+def reference_report(ref: dict, outputs: str) -> str:
+    spec = PARSER_KINDS[ref["kind"]]
+    entry = ref["entry"]
+    return f"@{ref['written']} => {outputs} => {spec['slot']} {int(entry['slot']) + 1} ({entry['name']})"
+
+def log_report(lines: list[str]) -> str:
+    report = "\n".join(lines) if lines else "no tag reference in the prompt"
+    logger.info("report :\n" + report)
+    return report
+
+class MediaParser(io.ComfyNode):
+    """Resolve the @tag references of a prompt against a media bundle.
+
+    Every "@tag" of the prompt naming a tagged slot of the Media Loader (case-insensitively) is
+    replaced by a label numbered per kind in order of first appearance in the prompt, <Picture N>,
+    <Video N> or <Audio N>, the same tag always getting the same label. The media behind the
+    labels are decoded with their edits applied, like the Media Splitter does (sharing its cache),
+    and added to the pipe as picture_N, video_N (the frames) with video_audio_N (the video's
+    audio, None when it has none), and audio_N. A reference to a tag no slot holds, or to a slot
+    switched off, fails the prompt.
+    """
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}MediaParser",
+            display_name=f"{ADDON_PREFIX} Media Parser",
+            description="Replace the @tag references of a prompt with <Picture N>, <Video N> and <Audio N> labels, numbered "
+                        "in order of appearance, and put the tagged media of a Media Loader bundle, decoded with their edits "
+                        "applied, into the pipe as picture_N, video_N + video_audio_N and audio_N.",
+            category=f"{ADDON_CATEGORY}/images",
+            inputs=[
+                DICT_TYPE.Input("pipe", optional=True, tooltip="A pipe the media are added to (a new one when not connected)."),
+                MEDIA_REFS_TYPE.Input("media", tooltip="The media bundle of a Media Loader node."),
+                io.String.Input("prompt", multiline=True, dynamic_prompts=False, default="",
+                                tooltip="The prompt, referencing the tagged slots of the loader as @tag (case-insensitive)."),
+            ],
+            outputs=[
+                DICT_TYPE.Output("pipe"),
+                io.String.Output("final_prompt"),
+                io.String.Output("report"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, media, prompt, pipe=None) -> io.NodeOutput:
+        logger.node_name("MediaParser")
+        media = media if isinstance(media, dict) else {}
+        pipe = {} if pipe is None else clone_data(pipe)
+        references, final_prompt = resolve_tag_references("MediaParser", media, prompt)
+
+        # decode the media into the pipe, and describe them in the report
+        lines = []
+        for ref in references:
+            kind, entry, number = ref["kind"], ref["entry"], ref["number"]
+            key = f"{PARSER_KINDS[kind]['key']}_{number}"
+            if kind == "pictures":
+                pipe[key] = decode_slot(key, "pictures", entry)
+                outputs = key
+            elif kind == "videos":
+                audio_key = f"video_audio_{number}"
+                pipe[key] = decode_slot(key, "video_frames", entry)
+                pipe[audio_key] = decode_slot(audio_key, "video_audio", entry)
+                outputs = f"{key} + {audio_key}" + ("" if pipe[audio_key] is not None else " (no audio)")
+                if pipe[key] is None:
+                    outputs += " (no frames)"
+            else:
+                pipe[key] = decode_slot(key, "audios", entry)
+                outputs = key + ("" if pipe[key] is not None else " (no audio)")
+            lines.append(reference_report(ref, outputs))
+        report = log_report(lines)
+        log_media_cache_stats()
+
+        return io.NodeOutput(pipe, final_prompt, report)
+
+class MediaSelectByTag(io.ComfyNode):
+    """Keep the media of a bundle referenced by the @tag references of a prompt, renumbered.
+
+    The prompt is resolved exactly as by the Media Parser (same labels, same numbering, same
+    errors), but nothing is decoded : the output is a media bundle holding only the referenced
+    entries, each one's "slot" changed to its number in the prompt minus one (<Picture 1> is
+    picture slot 0), the lists in that order, and the "tags" map rebuilt to match. Fed to a
+    Media Splitter, <Picture N> then comes out on picture_N, <Video N> on video_N and
+    video_audio_N, <Audio N> on audio_N.
+    """
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}MediaSelectByTag",
+            display_name=f"{ADDON_PREFIX} Media Select By Tag",
+            description="Replace the @tag references of a prompt with <Picture N>, <Video N> and <Audio N> labels, numbered "
+                        "in order of appearance, and keep only the referenced media of a Media Loader bundle, renumbered so "
+                        "that <Picture N> is in picture slot N (and so on for videos and audios).",
+            category=f"{ADDON_CATEGORY}/images",
+            inputs=[
+                MEDIA_REFS_TYPE.Input("media", tooltip="The media bundle of a Media Loader node."),
+                io.String.Input("prompt", multiline=True, dynamic_prompts=False, default="",
+                                tooltip="The prompt, referencing the tagged slots of the loader as @tag (case-insensitive)."),
+            ],
+            outputs=[
+                MEDIA_REFS_TYPE.Output("final_media"),
+                io.String.Output("final_prompt"),
+                io.String.Output("report"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, media, prompt) -> io.NodeOutput:
+        logger.node_name("MediaSelectByTag")
+        media = media if isinstance(media, dict) else {}
+        references, final_prompt = resolve_tag_references("MediaSelectByTag", media, prompt)
+
+        # the referenced entries, copied, in prompt order with their new slot
+        final_media = {kind: [] for kind in PARSER_KINDS}
+        final_media["tags"] = {}
+        lines = []
+        for ref in references:
+            kind, number = ref["kind"], ref["number"]
+            entry = clone_data(ref["entry"])
+            entry["slot"] = number - 1
+            final_media[kind].append(entry)
+            final_media["tags"][entry["tag"]] = {"kind": kind, "slot": entry["slot"]}
+            key = f"{PARSER_KINDS[kind]['key']}_{number}"
+            lines.append(reference_report(ref, f"{key} + video_audio_{number}" if kind == "videos" else key))
+        report = log_report(lines)
+
+        return io.NodeOutput(final_media, final_prompt, report)
 
 # ===== INITIALIZATION =========================================================================================================================
 
@@ -610,6 +809,8 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         MediaLoader,
         MediaSplitter,
+        MediaParser,
+        MediaSelectByTag,
     ]
 
 # ===== AUDIO EXTRACTION =======================================================================================================================
