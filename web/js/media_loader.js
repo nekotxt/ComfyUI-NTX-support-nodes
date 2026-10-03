@@ -44,7 +44,7 @@ import { openEditor, isEdited, describeEdit, paintEdited, outputSize, ASPECTS } 
 import { openVideoEditor, isVideoEdited, describeVideoEdit, normalizeVideoEdit } from "./media_loader.video_editor.js";
 import { openAudioEditor, isAudioEdited, describeAudioEdit, normalizeAudioEdit } from "./media_loader.audio_editor.js";
 
-const NODE_ID = ADDON_PREFIX + "MediaLoader";
+export const NODE_ID = ADDON_PREFIX + "MediaLoader";
 const WIDGET_NAME = "media_state";
 const WIDGET_TYPE = "NTX_MEDIA_SLOTS";
 
@@ -79,7 +79,7 @@ const EXTENSIONS = {
 };
 
 // what a tag may hold (TAG_PATTERN in python)
-const TAG_PATTERN = /^[A-Za-z0-9_-]+$/;
+export const TAG_PATTERN = /^[A-Za-z0-9_-]+$/;
 const TAG_MAX_LENGTH = 64;
 
 const NODE_MIN_WIDTH = 520;
@@ -477,7 +477,7 @@ function injectCSS() {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function el(tag, props = {}, ...children) {
+export function el(tag, props = {}, ...children) {
     const e = document.createElement(tag);
     for (const [k, v] of Object.entries(props)) {
         if (k === "class") e.className = v;
@@ -510,7 +510,7 @@ function lightbox(item) {
     return overlay;
 }
 
-function toast(severity, summary, detail, life = 4000) {
+export function toast(severity, summary, detail, life = 4000) {
     try {
         app.extensionManager?.toast?.add({ severity, summary, detail, life });
     } catch {
@@ -589,7 +589,7 @@ function emptyState(rows = DEFAULT_ROWS) {
 }
 
 // parse the widget value, keeping the slot positions and normalising the lists to the slot counts
-function parseState(value) {
+export function parseState(value) {
     let raw = {};
     try {
         raw = typeof value === "string" ? JSON.parse(value || "{}") : (value ?? {});
@@ -616,7 +616,7 @@ function kindOf(file) {
 }
 
 // preview URL of a slot item, served by the core /view route
-function viewURL(item) {
+export function viewURL(item) {
     const slash = item.file.lastIndexOf("/");
     const subfolder = slash >= 0 ? item.file.slice(0, slash) : "";
     const filename = slash >= 0 ? item.file.slice(slash + 1) : item.file;

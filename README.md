@@ -2614,6 +2614,25 @@ and the `report` (the file names being those of the slots)
 
 `Carmen` and `video_ref_main` are not referenced, so they are not in the pipe.
 
+### Frontend
+
+Three buttons on one row above the prompt, **Picture**, **Video** and **Audio**, each list the
+tags of the slots of their kind on the **MediaLoader** connected to `media` — the one linked directly, or
+through Reroute nodes (the core one and this addon's), not through any other node. Only the
+**tagged** slots that are **switched on** are listed, each with its slot number; the list is read
+from the loader when the button is pressed, so it follows the loader's current slots without
+running the workflow.
+
+- **Hover** a picture tag to see its picture in a floating thumbnail, with the slot's rotate /
+  mirror / crop edits applied (video and audio tags have no preview).
+- **Click** a tag to insert `@tag` in the prompt at the cursor, replacing the selection if there
+  is one. A space is added before or after the reference when it would otherwise be glued to a
+  word (and so not be read as a reference, or run into the next word).
+- **Escape** or a click outside closes the list.
+
+A toast tells when `media` is not connected to a MediaLoader, or when the loader has no tagged
+slot of the button's kind switched on.
+
 See **MediaSelectByTag** for a variant that keeps the media in a bundle instead of decoding them
 into a pipe.
 
@@ -2659,6 +2678,10 @@ omitted):
 ```
 
 `Bob` was picture slot 1 in the loader; the prompt calls it `<Picture 1>`, so it is now slot `0`.
+
+### Frontend
+
+The same **Picture**, **Video** and **Audio** buttons as on the **MediaParser** (see its *Frontend* section).
 
 ---
 
