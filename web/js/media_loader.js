@@ -31,7 +31,9 @@
 // node (case-insensitively), stored on the item as `tag` and shown over the upper
 // left corner of the slot ; the loader passes it in its media output. The tag
 // stays with the slot when its file is replaced, and follows the file when it is
-// moved to another slot. Files are uploaded through the core /upload/image
+// moved to another slot. The "Auto tags" button tags every untagged filled slot
+// with its kind and position ("Picture_1", "Video_2"...), appending a letter
+// ("Picture_1b") when the name is already taken. Files are uploaded through the core /upload/image
 // route, in the input/ntx_media subfolder, and previewed straight from /view.
 
 import { app } from "../../../scripts/app.js";
@@ -1075,6 +1077,28 @@ function makeMediaWidget(node, inputName, initialValue) {
         commit();
     }
 
+    // tag every filled slot that has no tag yet with its kind and position : "Picture_1",
+    // "Video_2"... ; a name already used by another slot gets a letter appended ("Picture_1b",
+    // "Picture_1c"...), the tags set by this pass included
+    function autoTags() {
+        const letters = (n) => {                   // 1 -> "b", 24 -> "y", 25 -> "z", 26 -> "zb"...
+            let s = "";
+            for (; n > 24; n -= 24) s += "z";
+            return s + String.fromCharCode(97 + n);
+        };
+        let changed = 0;
+        for (const { kind, index, item } of filledSlots()) {
+            if (item.tag) continue;
+            const label = KINDS[kind].label;
+            const base = `${label[0].toUpperCase()}${label.slice(1)}_${index + 1}`;
+            let tag = base;
+            for (let n = 1; tagOwner(tag, kind, index); n++) tag = base + letters(n);
+            item.tag = tag;
+            changed++;
+        }
+        if (changed) commit();
+    }
+
     function tagButtonFor(kind, index, item) {
         return el("div", { class: "nml-tagbtn" + (item.tag ? " on" : ""),
             title: item.tag ? `Tag : ${item.tag} \u2014 click to change or remove it` : "Tag this slot",
@@ -1661,6 +1685,9 @@ function makeMediaWidget(node, inputName, initialValue) {
             el("button", { class: "nml-btn", disabled: state.rows <= MIN_ROWS,
                 title: "Remove the last row of slots : 3 pictures, 1 video, 1 audio",
                 onclick: (ev) => { ev.stopPropagation(); removeRow(); } }, "Remove slots"),
+            el("button", { class: "nml-btn", disabled: !filledSlots().some((s) => !s.item.tag),
+                title: "Tag every filled slot that has no tag yet : Picture_1, Picture_2, Video_1... (a letter is appended when the name is already taken)",
+                onclick: (ev) => { ev.stopPropagation(); autoTags(); } }, "Auto tags"),
             el("button", { class: "nml-btn", disabled: !count || loadingMissing,
                 title: "Check that every loaded file is still on the server, and upload the missing ones from a folder of this machine",
                 onclick: (ev) => { ev.stopPropagation(); loadMissing(); } }, loadingMissing ? "checking\u2026" : "Load missing"),

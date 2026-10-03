@@ -2143,6 +2143,10 @@ The raw `media_state` widget is replaced by the slot panel. Its top bar holds:
 - **Remove slots** — removes the last row (disabled at one row). When a slot of that row is
   filled, a confirmation lists the files about to be forgotten; the files themselves stay in
   `input/ntx_media/`.
+- **Auto tags** — gives a tag to every filled slot that has none yet, from its kind and
+  position: `Picture_1`, `Picture_2`, `Video_1`, `Audio_1`… When the name is already used by
+  another slot, a letter is appended (`Picture_1b`, `Picture_1c`…). Existing tags are left
+  untouched. Disabled when every filled slot is already tagged.
 - **Load missing** — checks every loaded file on the server and, when some are missing (a
   workflow opened on another machine, a cleaned input folder), opens a **folder picker**: the
   missing files are looked up **by name** in the chosen folder and its subfolders
