@@ -5,6 +5,7 @@ import json
 from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY
 from .logging import logger
 from .media_loader import parse_prompt_media
+from .seed import SEED_MAX
 from .utils import MEDIA_REFS_TYPE, DICT_TYPE, clone_data
 
 # ===== Script utilities =======================================================================================================================
@@ -17,7 +18,7 @@ MIN_DURATION = 1
 MAX_DURATION = 600
 
 # a version of a clip as the frontend creates it (web/js/media_h3_script.js)
-DEFAULT_VERSION = {"wf_type": WF_TYPES[0], "duration": DEFAULT_DURATION, "lora_stack": "", "prompt_base": "", "prompt_final": ""}
+DEFAULT_VERSION = {"wf_type": WF_TYPES[0], "duration": DEFAULT_DURATION, "lora_stack": "", "noise_seed": 0, "prompt_base": "", "prompt_final": ""}
 
 def clamp_index(value, length: int) -> int:
     try:
@@ -32,10 +33,15 @@ def parse_version(version: dict) -> dict:
         duration = int(version.get("duration", DEFAULT_DURATION))
     except (TypeError, ValueError):
         duration = DEFAULT_DURATION
+    try:
+        noise_seed = int(version.get("noise_seed", 0))
+    except (TypeError, ValueError):
+        noise_seed = 0
     return {
         "wf_type": wf_type if wf_type in WF_TYPES else DEFAULT_VERSION["wf_type"],
         "duration": min(MAX_DURATION, max(MIN_DURATION, duration)),
         "lora_stack": str(version.get("lora_stack") or ""),
+        "noise_seed": min(SEED_MAX, max(0, noise_seed)),
         "prompt_base": str(version.get("prompt_base") or ""),
         "prompt_final": str(version.get("prompt_final") or ""),
     }
@@ -53,7 +59,7 @@ def parse_clip(clip: dict) -> dict:
 # (from 0) of the active one, the tab selected on the node ; each clip holds its versions, in order,
 # and the index (from 0, the version number) of its active one :
 #   {"active": 1, "clips": [{"active": 0, "versions": [
-#       {"wf_type": "T2VA", "duration": 5, "lora_stack": "", "prompt_base": "...", "prompt_final": "..."}, ...]}, ...]}
+#       {"wf_type": "T2VA", "duration": 5, "lora_stack": "", "noise_seed": 0, "prompt_base": "...", "prompt_final": "..."}, ...]}, ...]}
 # where lora_stack names an entry of the lora_stacks input (empty : none)
 # A missing or broken field gets its default, an empty list one default clip or version, and the
 # active indexes are clamped to their lists
@@ -80,13 +86,13 @@ class MediaH3Script(io.ComfyNode):
     node by a tabbed panel (web/js/media_h3_script.js) with one tab per clip, numbered from 1, and
     Add / Remove buttons. Each clip has versions, numbered from 0, in a second row of tabs (a new
     version is a copy of the active one) ; each version has a workflow type, a duration, a
-    lora_stack, a short prompt_base and an optional longer prompt_final ; the Picture / Video /
+    lora_stack, a noise_seed, a short prompt_base and an optional longer prompt_final ; the Picture / Video /
     Audio buttons above the prompts insert the @tag of a slot of the Media Loader in prompt_base
     (prompt_final is not parsed).
 
     A run works on the active version of the active clip, the tabs selected on the node : the
     general settings and the version's fields go into the pipe (project, width, height, clip_index,
-    version_index, wf_type, duration, prompt_base, prompt_final), prompt_base being parsed exactly
+    version_index, wf_type, duration, noise_seed, prompt_base, prompt_final), prompt_base being parsed exactly
     as by the Media Parser first :
     its @tag references become <Picture N> / <Video N> / <Audio N> labels and the referenced media
     are decoded into the pipe as picture_N, video_N + video_audio_N and audio_N. An empty (or blank
@@ -140,6 +146,7 @@ class MediaH3Script(io.ComfyNode):
         pipe["version_index"] = version_index
         pipe["wf_type"] = clip["wf_type"]
         pipe["duration"] = clip["duration"]
+        pipe["noise_seed"] = clip["noise_seed"]
 
         # the media referenced by prompt_base decoded into the pipe, then the parsed prompt
         prompt_base, report = parse_prompt_media("MediaH3Script", media, clip["prompt_base"], pipe)

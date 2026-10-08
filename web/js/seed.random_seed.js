@@ -10,9 +10,9 @@ const SEED_WIDGET = "seed";
 // must match SEED_MAX in py/seed.py (0xFFFFFFFFFFFFFFFF). JS numbers can't hold
 // the full 64-bit range exactly, so we draw from the safe-integer space, which is
 // plenty random for a seed and round-trips cleanly through the INT widget.
-const SEED_MAX = Number.MAX_SAFE_INTEGER;
+export const SEED_MAX = Number.MAX_SAFE_INTEGER;
 
-function randomSeed() {
+export function randomSeed() {
     return Math.floor(Math.random() * SEED_MAX);
 }
 

@@ -7,7 +7,7 @@
 // clips of the script and the index of the active one, each clip holding its
 // versions and the index of its active version :
 //   {"active": 0, "clips": [{"active": 0, "versions": [
-//       {"wf_type", "duration", "lora_stack", "prompt_base", "prompt_final"}, ...]}, ...]}
+//       {"wf_type", "duration", "lora_stack", "noise_seed", "prompt_base", "prompt_final"}, ...]}, ...]}
 // (a clip of the older format, the fields without versions, is read as its
 // version 0). It is replaced on the node by a panel (a DOM widget keeping the
 // JSON as its value) : a row of tabs, one per clip numbered from 1, with "+"
@@ -16,7 +16,8 @@
 // tabs for the versions of the active clip numbered from 0, with "+" (add a
 // version after the last one, a copy of the active version) and "−" (remove
 // the active version), then the fields of the active version of the active clip :
-// wf_type, duration, lora_stack, the Picture / Video / Audio tag buttons,
+// wf_type, duration, lora_stack, noise_seed (with a Random button, the same
+// draw as the Random Seed node), the Picture / Video / Audio tag buttons,
 // prompt_base and prompt_final. lora_stack names an entry of the lora_stacks
 // pipe : typed, or picked by its button among the LORA_STACK inputs of the
 // Pipe Custom directly linked to lora_stacks (the button does nothing while
@@ -36,12 +37,13 @@ import { el, toast, confirmDialog, NODE_ID as LOADER_NODE_ID } from "./media_loa
 import { BUTTONS, openTagMenu, spliceTag } from "./media_parser.tag_picker.js";
 import { setPipeInputs } from "./context.pipe_custom.js";
 import { registerNodeMenu } from "./menu.js";
+import { SEED_MAX, randomSeed } from "./seed.random_seed.js";
 
 const NODE_ID = ADDON_PREFIX + "MediaH3Script";
 const WIDGET_NAME = "clips_state";
 const WIDGET_TYPE = "NTX_H3_CLIPS";
 const NODE_MIN_WIDTH = 360;
-const PANEL_MIN_HEIGHT = 400;
+const PANEL_MIN_HEIGHT = 430;
 
 // python twins : WF_TYPES, DEFAULT_CLIP, MIN_DURATION, MAX_DURATION
 const WF_TYPES = ["T2VA", "I2VA", "L2VA", "FL2VA", "Ref2VA"];
@@ -94,7 +96,7 @@ const CSS = `
 }
 .nhs-row select { flex: 1; min-width: 0; }
 .nhs-row input { width: 64px; }
-.nhs-row input.nhs-stack { flex: 1; width: auto; min-width: 0; padding: 0 6px; }
+.nhs-row input.nhs-stack, .nhs-row input.nhs-seed { flex: 1; width: auto; min-width: 0; padding: 0 6px; }
 .nhs-row button {
     height: 22px;
     padding: 0 8px;
@@ -136,6 +138,12 @@ function injectCSS() {
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
+// a seed as the JS numbers hold it exactly, 0 when not a number
+function clampSeed(value) {
+    const n = Math.round(Number(value));
+    return Number.isFinite(n) ? Math.min(SEED_MAX, Math.max(0, n)) : 0;
+}
+
 function clampDuration(value) {
     const n = Math.round(Number(value));
     return Number.isFinite(n) ? Math.min(MAX_DURATION, Math.max(MIN_DURATION, n)) : DEFAULT_DURATION;
@@ -143,7 +151,7 @@ function clampDuration(value) {
 
 // a new version, the workflow type and duration taken from another one
 function newVersion(from) {
-    return { wf_type: from?.wf_type ?? WF_TYPES[0], duration: from?.duration ?? DEFAULT_DURATION, lora_stack: "", prompt_base: "", prompt_final: "" };
+    return { wf_type: from?.wf_type ?? WF_TYPES[0], duration: from?.duration ?? DEFAULT_DURATION, lora_stack: "", noise_seed: 0, prompt_base: "", prompt_final: "" };
 }
 
 function newClip(from) {
@@ -155,6 +163,7 @@ function parseVersion(v) {
         wf_type: WF_TYPES.includes(v.wf_type) ? v.wf_type : WF_TYPES[0],
         duration: clampDuration(v.duration ?? DEFAULT_DURATION),
         lora_stack: String(v.lora_stack ?? ""),
+        noise_seed: clampSeed(v.noise_seed ?? 0),
         prompt_base: String(v.prompt_base ?? ""),
         prompt_final: String(v.prompt_final ?? ""),
     };
@@ -353,6 +362,13 @@ function makeScriptWidget(node, inputName, value) {
             } }, "▾");
         const stackRow = el("div", { class: "nhs-row" }, el("label", {}, "lora_stack"), stack, pick);
 
+        const seed = el("input", { type: "number", class: "nhs-seed", min: 0, max: SEED_MAX, step: 1, value: c.noise_seed,
+            title: "The noise seed of the clip",
+            onchange: () => { c.noise_seed = clampSeed(seed.value); seed.value = c.noise_seed; changed(); } });
+        const random = el("button", { type: "button", title: "Draw a new random seed",
+            onclick: (ev) => { ev.stopPropagation(); c.noise_seed = randomSeed(); seed.value = c.noise_seed; changed(); } }, "Random");
+        const seedRow = el("div", { class: "nhs-row" }, el("label", {}, "noise_seed"), seed, random);
+
         const buttons = el("div", { class: "nhs-tagbtns" },
             BUTTONS.map((spec) => el("button", { type: "button",
                 title: `Insert the @tag of a ${spec.slot} slot of the Media Loader in prompt_base`,
@@ -370,7 +386,7 @@ function makeScriptWidget(node, inputName, value) {
             textareas[name] = textarea;
             return [label, textarea];
         });
-        return [row, stackRow, buttons, ...prompts];
+        return [row, stackRow, seedRow, buttons, ...prompts];
     }
 
     // the tab titles follow the fields of their clip and version
