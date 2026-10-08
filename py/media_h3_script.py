@@ -171,8 +171,32 @@ class MediaH3Script(io.ComfyNode):
 
         return io.NodeOutput(pipe, clip_index, prompt_base, report)
 
-# the load node of the H3-Motion-Context extension, called by LoadH3MotionContextLatent
-H3_LOAD_LATENT_NODE = "MiniMaxH3MotionContextLoadLatent"
+# the nodes of the H3-Motion-Context extension called by LoadH3MotionContextLatent and
+# SaveH3MotionContextLatent, by class name and display name
+H3_LOAD_LATENT_NODE = ("MiniMaxH3MotionContextLoadLatent", "H3 Motion Context Load Latent")
+H3_SAVE_LATENT_NODE = ("MiniMaxH3MotionContextSaveLatent", "H3 Motion Context Save Latent")
+
+# run a node of the H3-Motion-Context extension (a V1 node, run through its FUNCTION) and return
+# its outputs ; the extension not being installed fails the prompt
+def run_h3_node(caller: str, node: tuple[str, str], **kwargs) -> tuple:
+    node_class = nodes.NODE_CLASS_MAPPINGS.get(node[0])
+    if node_class is None:
+        raise RuntimeError(f"{caller} : the {node[1]} node is not available, "
+                           "install the H3-Motion-Context extension (ComfyUI-H3-Motion-Context)")
+    return getattr(node_class(), node_class.FUNCTION)(**kwargs)
+
+# the clip_index of a pipe, 0 when it has none
+def pipe_clip_index(pipe: dict) -> int:
+    try:
+        return int(pipe.get("clip_index", 0))
+    except (TypeError, ValueError):
+        return 0
+
+# the folder of the latents, relative to the output folder : <latent_dir>/<project>/<subdir>,
+# project coming from the pipe, the empty parts skipped
+def h3_latent_dir(latent_dir: str, pipe: dict, subdir: str) -> str:
+    parts = [str(part).strip() for part in (latent_dir, pipe.get("project"), subdir) if part is not None]
+    return os.path.join(*[part for part in parts if part] or [""])
 
 # the file the H3 Motion Context Save Latent node writes for a clip, with the filename_prefix
 # "<latent_dir>/clip" and that clip's index
@@ -221,31 +245,67 @@ class LoadH3MotionContextLatent(io.ComfyNode):
     def execute(cls, pipe, latent_dir, subdir="", counter=0) -> io.NodeOutput:
         logger.node_name("LoadH3MotionContextLatent")
         pipe = pipe if isinstance(pipe, dict) else {}
-        try:
-            clip_index = int(pipe.get("clip_index", 0))
-        except (TypeError, ValueError):
-            clip_index = 0
+        clip_index = pipe_clip_index(pipe)
         if clip_index <= 1:
             logger.info(f"clip {clip_index} : no previous clip, no latent")
             return io.NodeOutput(None)
 
         previous = clip_index - 1
-        # <latent_dir>/<project>/<subdir>, the empty parts skipped
-        parts = [str(part).strip() for part in (latent_dir, pipe.get("project"), subdir) if part is not None]
-        latent_dir = os.path.join(*[part for part in parts if part] or [""])
+        latent_dir = h3_latent_dir(latent_dir, pipe, subdir)
         path = h3_latent_path(latent_dir, previous)
         if not os.path.isfile(path):
             logger.warning(f"clip {clip_index} : no latent of clip {previous} ({path}), no latent")
             return io.NodeOutput(None)
 
-        node_class = nodes.NODE_CLASS_MAPPINGS.get(H3_LOAD_LATENT_NODE)
-        if node_class is None:
-            raise RuntimeError("LoadH3MotionContextLatent : the H3 Motion Context Load Latent node is not available, "
-                               "install the H3-Motion-Context extension (ComfyUI-H3-Motion-Context)")
-        loader = node_class()
-        latent = getattr(loader, node_class.FUNCTION)(latent_path=latent_dir, clip_index=previous)[0]
+        latent = run_h3_node("LoadH3MotionContextLatent", H3_LOAD_LATENT_NODE, latent_path=latent_dir, clip_index=previous)[0]
         logger.info(f"clip {clip_index} : latent of clip {previous} loaded ({path})")
         return io.NodeOutput(latent)
+
+class SaveH3MotionContextLatent(io.ComfyNode):
+    """Save the latent of the pipe's clip, for the next clip's LoadH3MotionContextLatent.
+
+    The latent is saved by the H3 Motion Context Save Latent node of the H3-Motion-Context
+    extension, with the filename_prefix <latent_dir>/<project>/<subdir>/clip (project coming from
+    the pipe, an empty part being skipped) and the clip_index of the pipe : the file is
+    <output>/<folder>/clip_<index, 5 digits>.safetensors, the one LoadH3MotionContextLatent reads
+    for the next clip. A clip_index of 0 (or none in the pipe) is the extension's auto mode, a new
+    run-numbered file each run.
+    """
+
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id=f"{ADDON_PREFIX}SaveH3MotionContextLatent",
+            display_name=f"{ADDON_PREFIX} Save H3 Motion Context Latent",
+            description="Save the AV latent of the pipe's clip_index in <output>/<latent_dir>/<project>/<subdir>/"
+                        "clip_NNNNN.safetensors through the H3 Motion Context Save Latent node, for the next clip's "
+                        "Load H3 Motion Context Latent.",
+            category=f"{ADDON_CATEGORY}/images",
+            is_output_node=True,
+            inputs=[
+                DICT_TYPE.Input("pipe", tooltip="A pipe holding clip_index and project (from a Media H3 Script)."),
+                io.Latent.Input("latent", tooltip="The sampler's output latent of the clip."),
+                io.String.Input("latent_dir", default="h3_context",
+                                tooltip="The folder of the saved latents, relative to the ComfyUI output folder ; the "
+                                        "project of the pipe and subdir are appended to it."),
+                io.String.Input("subdir", default="",
+                                tooltip="A subfolder of <latent_dir>/<project> (skipped when empty)."),
+            ],
+            outputs=[
+                io.String.Output("latent_path", tooltip="The path of the saved file."),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, pipe, latent, latent_dir, subdir="") -> io.NodeOutput:
+        logger.node_name("SaveH3MotionContextLatent")
+        pipe = pipe if isinstance(pipe, dict) else {}
+        clip_index = pipe_clip_index(pipe)
+        filename_prefix = os.path.join(h3_latent_dir(latent_dir, pipe, subdir), "clip")
+        latent_path = run_h3_node("SaveH3MotionContextLatent", H3_SAVE_LATENT_NODE,
+                                  latent=latent, filename_prefix=filename_prefix, clip_index=clip_index)[0]
+        logger.info(f"clip {clip_index} : latent saved ({latent_path})")
+        return io.NodeOutput(latent_path)
 
 # ===== INITIALIZATION =========================================================================================================================
 
@@ -253,4 +313,5 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
     return [
         MediaH3Script,
         LoadH3MotionContextLatent,
+        SaveH3MotionContextLatent,
     ]
