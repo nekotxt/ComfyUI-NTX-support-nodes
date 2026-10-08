@@ -16,15 +16,47 @@ DEFAULT_DURATION = 5
 MIN_DURATION = 1
 MAX_DURATION = 600
 
-# a clip as the frontend creates it (web/js/media_h3_script.js)
-DEFAULT_CLIP = {"wf_type": WF_TYPES[0], "duration": DEFAULT_DURATION, "lora_stack": "", "prompt_base": "", "prompt_final": ""}
+# a version of a clip as the frontend creates it (web/js/media_h3_script.js)
+DEFAULT_VERSION = {"wf_type": WF_TYPES[0], "duration": DEFAULT_DURATION, "lora_stack": "", "prompt_base": "", "prompt_final": ""}
+
+def clamp_index(value, length: int) -> int:
+    try:
+        index = int(value)
+    except (TypeError, ValueError):
+        index = 0
+    return min(length - 1, max(0, index))
+
+def parse_version(version: dict) -> dict:
+    wf_type = version.get("wf_type")
+    try:
+        duration = int(version.get("duration", DEFAULT_DURATION))
+    except (TypeError, ValueError):
+        duration = DEFAULT_DURATION
+    return {
+        "wf_type": wf_type if wf_type in WF_TYPES else DEFAULT_VERSION["wf_type"],
+        "duration": min(MAX_DURATION, max(MIN_DURATION, duration)),
+        "lora_stack": str(version.get("lora_stack") or ""),
+        "prompt_base": str(version.get("prompt_base") or ""),
+        "prompt_final": str(version.get("prompt_final") or ""),
+    }
+
+# a clip of the older format, the fields without versions, is read as its version 0
+def parse_clip(clip: dict) -> dict:
+    if not isinstance(clip.get("versions"), list):
+        return {"active": 0, "versions": [parse_version(clip)]}
+    versions = [parse_version(version) for version in clip["versions"] if isinstance(version, dict)]
+    if not versions:
+        versions.append(dict(DEFAULT_VERSION))
+    return {"active": clamp_index(clip.get("active", 0), len(versions)), "versions": versions}
 
 # the clips_state widget holds a JSON object with the clips of the script, in order, and the index
-# (from 0) of the active one, the tab selected on the node :
-#   {"active": 1, "clips": [{"wf_type": "T2VA", "duration": 5, "lora_stack": "", "prompt_base": "...", "prompt_final": "..."}, ...]}
+# (from 0) of the active one, the tab selected on the node ; each clip holds its versions, in order,
+# and the index (from 0, the version number) of its active one :
+#   {"active": 1, "clips": [{"active": 0, "versions": [
+#       {"wf_type": "T2VA", "duration": 5, "lora_stack": "", "prompt_base": "...", "prompt_final": "..."}, ...]}, ...]}
 # where lora_stack names an entry of the lora_stacks input (empty : none)
-# A missing or broken field gets its default, an empty list one default clip, and the active index
-# is clamped to the list
+# A missing or broken field gets its default, an empty list one default clip or version, and the
+# active indexes are clamped to their lists
 def parse_clips_state(clips_state: str) -> dict:
     try:
         state = json.loads(clips_state or "{}")
@@ -33,30 +65,10 @@ def parse_clips_state(clips_state: str) -> dict:
     if not isinstance(state, dict):
         state = {}
 
-    clips = []
-    for clip in state.get("clips") or []:
-        if not isinstance(clip, dict):
-            continue
-        wf_type = clip.get("wf_type")
-        try:
-            duration = int(clip.get("duration", DEFAULT_DURATION))
-        except (TypeError, ValueError):
-            duration = DEFAULT_DURATION
-        clips.append({
-            "wf_type": wf_type if wf_type in WF_TYPES else DEFAULT_CLIP["wf_type"],
-            "duration": min(MAX_DURATION, max(MIN_DURATION, duration)),
-            "lora_stack": str(clip.get("lora_stack") or ""),
-            "prompt_base": str(clip.get("prompt_base") or ""),
-            "prompt_final": str(clip.get("prompt_final") or ""),
-        })
+    clips = [parse_clip(clip) for clip in state.get("clips") or [] if isinstance(clip, dict)]
     if not clips:
-        clips.append(dict(DEFAULT_CLIP))
-
-    try:
-        active = int(state.get("active", 0))
-    except (TypeError, ValueError):
-        active = 0
-    return {"active": min(len(clips) - 1, max(0, active)), "clips": clips}
+        clips.append({"active": 0, "versions": [dict(DEFAULT_VERSION)]})
+    return {"active": clamp_index(state.get("active", 0), len(clips)), "clips": clips}
 
 # ===== NODES ==================================================================================================================================
 
@@ -66,13 +78,16 @@ class MediaH3Script(io.ComfyNode):
     The general settings of the video (project, width, height) are plain widgets ; the clips live
     in the clips_state widget (see parse_clips_state), a JSON string the frontend replaces on the
     node by a tabbed panel (web/js/media_h3_script.js) with one tab per clip, numbered from 1, and
-    Add / Remove buttons. Each clip has a workflow type, a duration, a short prompt_base and an
-    optional longer prompt_final ; the Picture / Video / Audio buttons above the prompts insert the
-    @tag of a slot of the Media Loader in prompt_base (prompt_final is not parsed).
+    Add / Remove buttons. Each clip has versions, numbered from 0, in a second row of tabs (a new
+    version is a copy of the active one) ; each version has a workflow type, a duration, a
+    lora_stack, a short prompt_base and an optional longer prompt_final ; the Picture / Video /
+    Audio buttons above the prompts insert the @tag of a slot of the Media Loader in prompt_base
+    (prompt_final is not parsed).
 
-    A run works on the active clip, the tab selected on the node : the general settings and the
-    clip's fields go into the pipe (project, width, height, clip_index, wf_type, duration,
-    prompt_base, prompt_final), prompt_base being parsed exactly as by the Media Parser first :
+    A run works on the active version of the active clip, the tabs selected on the node : the
+    general settings and the version's fields go into the pipe (project, width, height, clip_index,
+    version_index, wf_type, duration, prompt_base, prompt_final), prompt_base being parsed exactly
+    as by the Media Parser first :
     its @tag references become <Picture N> / <Video N> / <Audio N> labels and the referenced media
     are decoded into the pipe as picture_N, video_N + video_audio_N and audio_N. An empty (or blank
     only) prompt_final gets the parsed prompt_base. A clip naming a lora_stack puts the entry of
@@ -113,14 +128,16 @@ class MediaH3Script(io.ComfyNode):
         pipe = {} if pipe is None else clone_data(pipe)
         state = parse_clips_state(clips_state)
         clip_index = state["active"] + 1
-        clip = state["clips"][state["active"]]
-        logger.info(f"clip {clip_index} of {len(state['clips'])} : {clip['wf_type']}, {clip['duration']} s")
+        version_index = state["clips"][state["active"]]["active"]
+        clip = state["clips"][state["active"]]["versions"][version_index]
+        logger.info(f"clip {clip_index} of {len(state['clips'])}, version {version_index} : {clip['wf_type']}, {clip['duration']} s")
 
-        # the general settings, then the active clip
+        # the general settings, then the active version of the active clip
         pipe["project"] = project
         pipe["width"] = width
         pipe["height"] = height
         pipe["clip_index"] = clip_index
+        pipe["version_index"] = version_index
         pipe["wf_type"] = clip["wf_type"]
         pipe["duration"] = clip["duration"]
 

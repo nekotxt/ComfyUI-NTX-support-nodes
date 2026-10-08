@@ -4,20 +4,26 @@
 // MediaH3Script).
 //
 // The python node holds a string widget, clips_state, a JSON object with the
-// clips of the script and the index of the active one :
-//   {"active": 0, "clips": [{"wf_type", "duration", "lora_stack", "prompt_base", "prompt_final"}, ...]}
-// It is replaced on the node by a panel (a DOM widget keeping the JSON as its
-// value) : a row of tabs, one per clip numbered from 1, with "+" (add a clip
-// after the last one, taking the workflow type and duration of the active clip)
-// and "−" (remove the active clip), then the fields of the active clip :
+// clips of the script and the index of the active one, each clip holding its
+// versions and the index of its active version :
+//   {"active": 0, "clips": [{"active": 0, "versions": [
+//       {"wf_type", "duration", "lora_stack", "prompt_base", "prompt_final"}, ...]}, ...]}
+// (a clip of the older format, the fields without versions, is read as its
+// version 0). It is replaced on the node by a panel (a DOM widget keeping the
+// JSON as its value) : a row of tabs, one per clip numbered from 1, with "+"
+// (add a clip after the last one, with a version 0 taking the workflow type and
+// duration of the active version) and "−" (remove the active clip), a row of
+// tabs for the versions of the active clip numbered from 0, with "+" (add a
+// version after the last one, a copy of the active version) and "−" (remove
+// the active version), then the fields of the active version of the active clip :
 // wf_type, duration, lora_stack, the Picture / Video / Audio tag buttons,
 // prompt_base and prompt_final. lora_stack names an entry of the lora_stacks
 // pipe : typed, or picked by its button among the LORA_STACK inputs of the
 // Pipe Custom directly linked to lora_stacks (the button does nothing while
 // lora_stacks is not linked). The tag buttons are the Media Parser's (media_parser.tag_picker.js) :
 // the chosen "@tag" always goes into prompt_base, at its cursor, prompt_final
-// not being parsed by the node. The active tab is the
-// clip a run works on.
+// not being parsed by the node. The active tabs are the clip and version a run
+// works on.
 //
 // The node's RMB menu has "Create upstream nodes" : a Media Loader on the media
 // input, an Image Resolution on width and height, a Pipe Custom (inputs stack1,
@@ -35,7 +41,7 @@ const NODE_ID = ADDON_PREFIX + "MediaH3Script";
 const WIDGET_NAME = "clips_state";
 const WIDGET_TYPE = "NTX_H3_CLIPS";
 const NODE_MIN_WIDTH = 360;
-const PANEL_MIN_HEIGHT = 370;
+const PANEL_MIN_HEIGHT = 400;
 
 // python twins : WF_TYPES, DEFAULT_CLIP, MIN_DURATION, MAX_DURATION
 const WF_TYPES = ["T2VA", "I2VA", "L2VA", "FL2VA", "Ref2VA"];
@@ -74,6 +80,7 @@ const CSS = `
 .nhs-tabs button.active { background: #3d6fb6; border-color: #5a8ad0; color: #fff; }
 .nhs-tabs button:disabled { opacity: .4; cursor: default; filter: none; }
 .nhs-tabs .nhs-sep { flex: 1; }
+.nhs-tabs.versions button.active { background: #3b7d5a; border-color: #4f9a72; }
 .nhs-row { display: flex; gap: 8px; align-items: center; }
 .nhs-row label { color: #8b94a4; font-size: 11px; }
 .nhs-row select, .nhs-row input {
@@ -134,8 +141,39 @@ function clampDuration(value) {
     return Number.isFinite(n) ? Math.min(MAX_DURATION, Math.max(MIN_DURATION, n)) : DEFAULT_DURATION;
 }
 
-function newClip(from) {
+// a new version, the workflow type and duration taken from another one
+function newVersion(from) {
     return { wf_type: from?.wf_type ?? WF_TYPES[0], duration: from?.duration ?? DEFAULT_DURATION, lora_stack: "", prompt_base: "", prompt_final: "" };
+}
+
+function newClip(from) {
+    return { active: 0, versions: [newVersion(from)] };
+}
+
+function parseVersion(v) {
+    return {
+        wf_type: WF_TYPES.includes(v.wf_type) ? v.wf_type : WF_TYPES[0],
+        duration: clampDuration(v.duration ?? DEFAULT_DURATION),
+        lora_stack: String(v.lora_stack ?? ""),
+        prompt_base: String(v.prompt_base ?? ""),
+        prompt_final: String(v.prompt_final ?? ""),
+    };
+}
+
+// a clip of the older format, the fields without versions, becomes its version 0
+function parseClip(c) {
+    if (!Array.isArray(c.versions)) return { active: 0, versions: [parseVersion(c)] };
+    const versions = c.versions.filter((v) => v && typeof v === "object").map(parseVersion);
+    if (!versions.length) versions.push(newVersion());
+    return { active: clampIndex(c.active, versions.length), versions };
+}
+
+function clampIndex(value, length) {
+    return Math.min(length - 1, Math.max(0, Math.round(Number(value)) || 0));
+}
+
+function hasPrompts(version) {
+    return !!(version.prompt_base.trim() || version.prompt_final.trim());
 }
 
 // the state of a clips_state value, repaired like parse_clips_state does in python
@@ -143,18 +181,9 @@ function parseState(value) {
     let raw;
     try { raw = typeof value === "string" ? JSON.parse(value || "{}") : value; } catch { raw = {}; }
     if (!raw || typeof raw !== "object") raw = {};
-    const clips = (Array.isArray(raw.clips) ? raw.clips : [])
-        .filter((c) => c && typeof c === "object")
-        .map((c) => ({
-            wf_type: WF_TYPES.includes(c.wf_type) ? c.wf_type : WF_TYPES[0],
-            duration: clampDuration(c.duration ?? DEFAULT_DURATION),
-            lora_stack: String(c.lora_stack ?? ""),
-            prompt_base: String(c.prompt_base ?? ""),
-            prompt_final: String(c.prompt_final ?? ""),
-        }));
+    const clips = (Array.isArray(raw.clips) ? raw.clips : []).filter((c) => c && typeof c === "object").map(parseClip);
     if (!clips.length) clips.push(newClip());
-    const active = Math.min(clips.length - 1, Math.max(0, Math.round(Number(raw.active)) || 0));
-    return { active, clips };
+    return { active: clampIndex(raw.active, clips.length), clips };
 }
 
 // ── LoRA stack picker ─────────────────────────────────────────────────────────
@@ -204,6 +233,7 @@ function makeScriptWidget(node, inputName, value) {
         app.graph?.change?.();
     };
     const clip = () => state.clips[state.active];
+    const version = () => clip().versions[clip().active];
 
     // the tags go into prompt_base only, the one prompt the node parses
     function insertTag(tag) {
@@ -211,7 +241,7 @@ function makeScriptWidget(node, inputName, value) {
         if (!textarea) return;
         const { value, caret } = spliceTag(textarea.value, textarea.selectionStart, textarea.selectionEnd, tag);
         textarea.value = value;
-        clip().prompt_base = value;
+        version().prompt_base = value;
         textarea.focus();
         textarea.setSelectionRange(caret, caret);
         changed();
@@ -223,9 +253,21 @@ function makeScriptWidget(node, inputName, value) {
         changed();
     }
 
+    function selectVersion(index) {
+        clip().active = index;
+        render();
+        changed();
+    }
+
     function addClip() {
-        state.clips.push(newClip(clip()));
+        state.clips.push(newClip(version()));
         select(state.clips.length - 1);
+    }
+
+    function addVersion() {
+        const c = clip();
+        c.versions.push({ ...version() });
+        selectVersion(c.versions.length - 1);
     }
 
     // through the frontend's dialog : the native confirm() is silently refused in some browsers
@@ -233,28 +275,63 @@ function makeScriptWidget(node, inputName, value) {
         if (state.clips.length < 2) return;
         const index = state.active;
         const c = state.clips[index];
-        if (c.prompt_base.trim() || c.prompt_final.trim()) {
-            if (!(await confirmDialog("Remove clip", `Remove clip ${index + 1} and its prompts?`))) return;
+        if (c.versions.some(hasPrompts)) {
+            if (!(await confirmDialog("Remove clip", `Remove clip ${index + 1}, its versions and their prompts?`))) return;
             if (state.clips[index] !== c) return;       // the clips changed meanwhile
         }
         state.clips.splice(index, 1);
         select(Math.min(index, state.clips.length - 1));
     }
 
-    function tabs() {
-        return el("div", { class: "nhs-tabs" },
-            state.clips.map((c, i) => el("button", { type: "button", class: i === state.active ? "active" : "",
-                title: `Clip ${i + 1} : ${c.wf_type}, ${c.duration} s`,
-                onclick: (ev) => { ev.stopPropagation(); if (i !== state.active) select(i); } }, String(i + 1))),
+    async function removeVersion() {
+        const c = clip();
+        if (c.versions.length < 2) return;
+        const index = c.active;
+        const v = c.versions[index];
+        if (hasPrompts(v)) {
+            if (!(await confirmDialog("Remove version", `Remove version ${index} of clip ${state.active + 1} and its prompts?`))) return;
+            if (clip() !== c || c.versions[index] !== v) return;       // the clips changed meanwhile
+        }
+        c.versions.splice(index, 1);
+        selectVersion(Math.min(index, c.versions.length - 1));
+    }
+
+    // a row of tabs : one per item, then the add and remove buttons
+    function tabRow({ items, active, cls, label, title, onSelect, onAdd, onRemove, addTitle, removeTitle }) {
+        return el("div", { class: "nhs-tabs" + (cls ? " " + cls : "") },
+            items.map((item, i) => el("button", { type: "button", class: i === active ? "active" : "", title: title(item, i),
+                onclick: (ev) => { ev.stopPropagation(); if (i !== active) onSelect(i); } }, label(i))),
             el("span", { class: "nhs-sep" }),
-            el("button", { type: "button", title: "Add a clip at the end (same workflow type and duration as the active one)",
-                onclick: (ev) => { ev.stopPropagation(); addClip(); } }, "+"),
-            el("button", { type: "button", title: "Remove the active clip", disabled: state.clips.length < 2,
-                onclick: (ev) => { ev.stopPropagation(); void removeClip(); } }, "−"));
+            el("button", { type: "button", title: addTitle, onclick: (ev) => { ev.stopPropagation(); onAdd(); } }, "+"),
+            el("button", { type: "button", title: removeTitle, disabled: items.length < 2,
+                onclick: (ev) => { ev.stopPropagation(); void onRemove(); } }, "−"));
+    }
+
+    function tabs() {
+        return tabRow({
+            items: state.clips, active: state.active,
+            label: (i) => String(i + 1),
+            title: (c, i) => { const v = c.versions[c.active]; return `Clip ${i + 1}, version ${c.active} : ${v.wf_type}, ${v.duration} s`; },
+            onSelect: select, onAdd: addClip, onRemove: removeClip,
+            addTitle: "Add a clip at the end (same workflow type and duration as the active version)",
+            removeTitle: "Remove the active clip",
+        });
+    }
+
+    function versionTabs() {
+        const c = clip();
+        return tabRow({
+            items: c.versions, active: c.active, cls: "versions",
+            label: (i) => String(i),
+            title: (v, i) => `Version ${i} : ${v.wf_type}, ${v.duration} s`,
+            onSelect: selectVersion, onAdd: addVersion, onRemove: removeVersion,
+            addTitle: "Add a version at the end, a copy of the active one",
+            removeTitle: "Remove the active version",
+        });
     }
 
     function fields() {
-        const c = clip();
+        const c = version();
         const wfType = el("select", { title: "The type of workflow of the clip",
             onchange: () => { c.wf_type = wfType.value; refreshTabs(); changed(); } },
             WF_TYPES.map((t) => el("option", { value: t, selected: t === c.wf_type }, t)));
@@ -262,7 +339,7 @@ function makeScriptWidget(node, inputName, value) {
             title: "The duration of the clip, in seconds",
             onchange: () => { c.duration = clampDuration(duration.value); duration.value = c.duration; refreshTabs(); changed(); } });
         const row = el("div", { class: "nhs-row" },
-            el("label", {}, `clip ${state.active + 1}  wf_type`), wfType,
+            el("label", {}, `clip ${state.active + 1} v${clip().active}  wf_type`), wfType,
             el("label", {}, "duration (s)"), duration);
 
         const stack = el("input", { type: "text", class: "nhs-stack", value: c.lora_stack, placeholder: "none",
@@ -296,13 +373,14 @@ function makeScriptWidget(node, inputName, value) {
         return [row, stackRow, buttons, ...prompts];
     }
 
-    // the tab titles follow the fields of their clip
+    // the tab titles follow the fields of their clip and version
     function refreshTabs() {
-        panel.firstChild?.replaceWith(tabs());
+        panel.children[0]?.replaceWith(tabs());
+        panel.children[1]?.replaceWith(versionTabs());
     }
 
     function render() {
-        panel.replaceChildren(tabs(), ...fields());
+        panel.replaceChildren(tabs(), versionTabs(), ...fields());
     }
 
     const widget = node.addDOMWidget(inputName, WIDGET_TYPE, panel, {
