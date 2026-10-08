@@ -2736,6 +2736,15 @@ is not connected), there is no `lora_stack` key and the console shows a warning 
 found. The name is matched exactly, spaces around it ignored. Note that a PipeCustom only holds
 the inputs that are connected, so an unconnected `stack2` is "not found".
 
+`start_video` is a setting of the whole script, not of a clip: the tag of a **video** slot of the
+MediaLoader that the first clip continues. On a run of the **first clip** (`clip_index` `1`), that
+video's frames and audio track — with the slot's edits applied, decoded as by the MediaParser —
+go into the pipe as `chain_video` and `chain_audio`, for **LoadH3MotionContextLatent** to pass on.
+The tag is matched ignoring case, like the `@tag` references. A tag no slot holds, a tag held by a
+picture or audio slot, or a video slot switched off **fails the prompt** (the error lists the
+video tags the loader holds). When `start_video` is empty, or on any later clip, it is ignored —
+not even checked.
+
 Switching tabs changes the node's inputs, so the next run picks up the newly selected clip or
 version.
 
@@ -2749,7 +2758,13 @@ version.
 | `project` | STRING | The identifier name of the video project. Default empty. |
 | `width` | INT | The width of the video: `64`–`8192`, step `16`, default `1280`. |
 | `height` | INT | The height of the video: `64`–`8192`, step `16`, default `720`. |
-| `clips_state` | STRING (hidden) | Managed by the frontend, not edited by hand: a JSON object with the clips, the index of the active clip, and in each clip its versions and the index of its active version. |
+| `clips_state` | STRING (hidden) | Managed by the frontend, not edited by hand: a JSON object with `start_video`, the clips, the index of the active clip, and in each clip its versions and the index of its active version. |
+
+Setting of the script (on the clip panel):
+
+| Field | Type | Description |
+|---|---|---|
+| `start_video` | STRING | The tag of the MediaLoader video the first clip continues; empty for none. Default empty. |
 
 Fields of a version (on the clip panel):
 
@@ -2766,10 +2781,10 @@ Fields of a version (on the clip panel):
 
 | Output | Type | Description |
 |---|---|---|
-| `pipe` | DICT | The input pipe plus: `project`, `width`, `height`, `clip_index` (from 1), `version_index` (from 0), `wf_type`, `duration`, `noise_seed`, `prompt_base` (parsed), `prompt_final` (as written, or the parsed `prompt_base` when empty), `lora_stack` (only when found), and the media referenced by `prompt_base` under the MediaParser keys (`picture_N`, `video_N` + `video_audio_N`, `audio_N`). Keys already present in the input pipe are overwritten. |
+| `pipe` | DICT | The input pipe plus: `project`, `width`, `height`, `clip_index` (from 1), `version_index` (from 0), `wf_type`, `duration`, `noise_seed`, `prompt_base` (parsed), `prompt_final` (as written, or the parsed `prompt_base` when empty), `lora_stack` (only when found), the media referenced by `prompt_base` under the MediaParser keys (`picture_N`, `video_N` + `video_audio_N`, `audio_N`), and for the first clip with a `start_video`, `chain_video` (IMAGE, the frames) and `chain_audio` (AUDIO, `None` when the video has no audio track). Keys already present in the input pipe are overwritten. |
 | `clip_index` | INT | The number of the active clip, from 1. |
 | `prompt_base` | STRING | The parsed `prompt_base`, references replaced by their labels. |
-| `report` | STRING | The MediaParser report of the references of `prompt_base` (one line per referenced tag; `no tag reference in the prompt` when there is none). |
+| `report` | STRING | The MediaParser report of the references of `prompt_base` (one line per referenced tag; `no tag reference in the prompt` when there is none), followed for the first clip with a `start_video` by a line `start_video <tag> => chain_video + chain_audio => video N (file name)`. |
 
 ### Example
 
@@ -2794,6 +2809,10 @@ and `prompt_final` left empty, the pipe gets
 
 The clip panel replaces the `clips_state` widget. From top to bottom:
 
+- **`start_video`** — a text field, with a **Video** button that lists the tagged video slots of
+  the MediaLoader connected to `media`: the same list as the **Video** tag button above the
+  prompt (see the MediaParser *Frontend* section), but clicking a tag copies it into the field.
+  The tag can always be typed, changed or erased by hand.
 - **Clip tabs** — one button per clip, numbered from 1; the active one is blue. **+** adds a clip
   at the end, with a single version 0 taking the workflow type and duration of the active
   version (the other fields start empty / at `0`), and selects it. **−** removes the active clip;

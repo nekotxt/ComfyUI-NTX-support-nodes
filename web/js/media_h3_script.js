@@ -6,11 +6,13 @@
 // The python node holds a string widget, clips_state, a JSON object with the
 // clips of the script and the index of the active one, each clip holding its
 // versions and the index of its active version :
-//   {"active": 0, "clips": [{"active": 0, "versions": [
+//   {"start_video": "", "active": 0, "clips": [{"active": 0, "versions": [
 //       {"wf_type", "duration", "lora_stack", "noise_seed", "prompt_base", "prompt_final"}, ...]}, ...]}
 // (a clip of the older format, the fields without versions, is read as its
 // version 0). It is replaced on the node by a panel (a DOM widget keeping the
-// JSON as its value) : a row of tabs, one per clip numbered from 1, with "+"
+// JSON as its value) : start_video, a setting of the whole script (the tag of a
+// video slot of the Media Loader, typed or picked with its Video button, the
+// same list as the Video tag button), a row of tabs, one per clip numbered from 1, with "+"
 // (add a clip after the last one, with a version 0 taking the workflow type and
 // duration of the active version) and "−" (remove the active clip), a row of
 // tabs for the versions of the active clip numbered from 0, with "+" (add a
@@ -43,7 +45,7 @@ const NODE_ID = ADDON_PREFIX + "MediaH3Script";
 const WIDGET_NAME = "clips_state";
 const WIDGET_TYPE = "NTX_H3_CLIPS";
 const NODE_MIN_WIDTH = 360;
-const PANEL_MIN_HEIGHT = 430;
+const PANEL_MIN_HEIGHT = 460;
 
 // python twins : WF_TYPES, DEFAULT_CLIP, MIN_DURATION, MAX_DURATION
 const WF_TYPES = ["T2VA", "I2VA", "L2VA", "FL2VA", "Ref2VA"];
@@ -192,7 +194,7 @@ function parseState(value) {
     if (!raw || typeof raw !== "object") raw = {};
     const clips = (Array.isArray(raw.clips) ? raw.clips : []).filter((c) => c && typeof c === "object").map(parseClip);
     if (!clips.length) clips.push(newClip());
-    return { active: clampIndex(raw.active, clips.length), clips };
+    return { start_video: String(raw.start_video ?? ""), active: clampIndex(raw.active, clips.length), clips };
 }
 
 // ── LoRA stack picker ─────────────────────────────────────────────────────────
@@ -389,14 +391,36 @@ function makeScriptWidget(node, inputName, value) {
         return [row, stackRow, seedRow, buttons, ...prompts];
     }
 
+    // start_video : typed, or picked among the video tags of the loader
+    function startRow() {
+        const input = el("input", { type: "text", class: "nhs-stack", value: state.start_video, placeholder: "none",
+            spellcheck: false, title: "The tag of the video the first clip continues (empty : none)",
+            oninput: () => { state.start_video = input.value; },
+            onchange: changed });
+        const video = BUTTONS.find((spec) => spec.kind === "videos");
+        const pick = el("button", { type: "button", title: "Pick the tag of a video slot of the Media Loader",
+            onclick: (ev) => {
+                ev.stopPropagation();
+                openTagMenu(node, video, (tag) => { input.value = tag; state.start_video = tag; changed(); });
+            } }, video.label);
+        return el("div", { class: "nhs-row" }, el("label", {}, "start_video"), input, pick);
+    }
+
+    // the tab rows, kept to be replaced when their titles change
+    let clipRow = null, versionRow = null;
+
     // the tab titles follow the fields of their clip and version
     function refreshTabs() {
-        panel.children[0]?.replaceWith(tabs());
-        panel.children[1]?.replaceWith(versionTabs());
+        const rows = [tabs(), versionTabs()];
+        clipRow?.replaceWith(rows[0]);
+        versionRow?.replaceWith(rows[1]);
+        [clipRow, versionRow] = rows;
     }
 
     function render() {
-        panel.replaceChildren(tabs(), versionTabs(), ...fields());
+        clipRow = tabs();
+        versionRow = versionTabs();
+        panel.replaceChildren(startRow(), clipRow, versionRow, ...fields());
     }
 
     const widget = node.addDOMWidget(inputName, WIDGET_TYPE, panel, {

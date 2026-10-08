@@ -8,7 +8,7 @@ import os
 
 from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY
 from .logging import logger
-from .media_loader import parse_prompt_media
+from .media_loader import parse_prompt_media, decode_slot, normalize_tag, is_enabled, PARSER_KINDS
 from .seed import SEED_MAX
 from .utils import MEDIA_REFS_TYPE, DICT_TYPE, clone_data
 
@@ -62,9 +62,10 @@ def parse_clip(clip: dict) -> dict:
 # the clips_state widget holds a JSON object with the clips of the script, in order, and the index
 # (from 0) of the active one, the tab selected on the node ; each clip holds its versions, in order,
 # and the index (from 0, the version number) of its active one :
-#   {"active": 1, "clips": [{"active": 0, "versions": [
+#   {"start_video": "", "active": 1, "clips": [{"active": 0, "versions": [
 #       {"wf_type": "T2VA", "duration": 5, "lora_stack": "", "noise_seed": 0, "prompt_base": "...", "prompt_final": "..."}, ...]}, ...]}
-# where lora_stack names an entry of the lora_stacks input (empty : none)
+# where lora_stack names an entry of the lora_stacks input (empty : none), and start_video, a setting
+# of the whole script, the tag of a video slot of the media input (empty : none)
 # A missing or broken field gets its default, an empty list one default clip or version, and the
 # active indexes are clamped to their lists
 def parse_clips_state(clips_state: str) -> dict:
@@ -78,7 +79,34 @@ def parse_clips_state(clips_state: str) -> dict:
     clips = [parse_clip(clip) for clip in state.get("clips") or [] if isinstance(clip, dict)]
     if not clips:
         clips.append({"active": 0, "versions": [dict(DEFAULT_VERSION)]})
-    return {"active": clamp_index(state.get("active", 0), len(clips)), "clips": clips}
+    return {"start_video": str(state.get("start_video") or ""), "active": clamp_index(state.get("active", 0), len(clips)),
+            "clips": clips}
+
+# the video slot of a media bundle tagged start_video (case-insensitively, like the @tag references
+# of the prompt) ; a tag no slot holds, held by a slot that is not a video, or by a slot switched
+# off fails the prompt
+def find_start_video(media: dict, start_video: str) -> dict:
+    key = start_video.lower()
+    videos = []
+    for kind in PARSER_KINDS:
+        for entry in media.get(kind, []):
+            tag = normalize_tag(entry.get("tag")) if isinstance(entry, dict) else None
+            if tag is None:
+                continue
+            if kind == "videos":
+                videos.append(tag)
+            if tag.lower() != key:
+                continue
+            spec = PARSER_KINDS[kind]
+            if kind != "videos":
+                raise ValueError(f"MediaH3Script : start_video {start_video} is the tag of {spec['slot']} {int(entry['slot']) + 1} "
+                                 f"({entry['name']}), not of a video")
+            if not is_enabled(entry):
+                raise ValueError(f"MediaH3Script : start_video {start_video} : video {int(entry['slot']) + 1} ({entry['name']}) "
+                                 "is switched off")
+            return entry
+    raise ValueError(f"MediaH3Script : start_video {start_video} : no slot of the Media Loader has this tag "
+                     f"(video tags of the Media Loader : {', '.join(videos) or 'none'})")
 
 # ===== NODES ==================================================================================================================================
 
@@ -92,7 +120,8 @@ class MediaH3Script(io.ComfyNode):
     version is a copy of the active one) ; each version has a workflow type, a duration, a
     lora_stack, a noise_seed, a short prompt_base and an optional longer prompt_final ; the Picture / Video /
     Audio buttons above the prompts insert the @tag of a slot of the Media Loader in prompt_base
-    (prompt_final is not parsed).
+    (prompt_final is not parsed). Above the clips, start_video is a setting of the whole script : the
+    tag of a video slot of the Media Loader, typed or picked with its Video button.
 
     A run works on the active version of the active clip, the tabs selected on the node : the
     general settings and the version's fields go into the pipe (project, width, height, clip_index,
@@ -165,6 +194,15 @@ class MediaH3Script(io.ComfyNode):
                 logger.info(f"lora_stack : {stack_name} ({len(stack) if isinstance(stack, (list, tuple)) else '?'} LoRAs)")
             else:
                 logger.warning(f"lora_stack : {stack_name} not found in lora_stacks, no lora_stack in the pipe")
+
+        # the first clip continues the video tagged start_video, if any : its frames and audio, with
+        # their edits applied, become the chain the H3 Motion Context nodes continue
+        start_video = state["start_video"].strip()
+        if start_video and clip_index <= 1:
+            entry = find_start_video(media if isinstance(media, dict) else {}, start_video)
+            pipe["chain_video"] = decode_slot("chain_video", "video_frames", entry)
+            pipe["chain_audio"] = decode_slot("chain_audio", "video_audio", entry)
+            report += f"\nstart_video {start_video} => chain_video + chain_audio => video {int(entry['slot']) + 1} ({entry['name']})"
 
         # an empty prompt_final (or blank only) falls back on the parsed prompt_base
         pipe["prompt_final"] = clip["prompt_final"] if clip["prompt_final"].strip() else prompt_base
