@@ -214,6 +214,9 @@ class LoadH3MotionContextLatent(io.ComfyNode):
     folder, clip_index = the previous clip). The first clip continues nothing, and a missing file
     is not an error : the output is then None. The counter widget is not used : changing it only
     forces the node to run again.
+
+    The images and audio outputs are None, except for the first clip (clip_index <= 1) : they then
+    carry the chain_video and chain_audio entries of the pipe (None when the pipe has none).
     """
 
     @classmethod
@@ -223,7 +226,8 @@ class LoadH3MotionContextLatent(io.ComfyNode):
             display_name=f"{ADDON_PREFIX} Load H3 Motion Context Latent",
             description="Load the motion context latent of the clip before the pipe's clip_index (saved by H3 Motion Context "
                         "Save Latent in <output>/<latent_dir>/<project>/<subdir>/clip_NNNNN.safetensors), through the H3 "
-                        "Motion Context Load Latent node. None for the first clip, or when the file does not exist.",
+                        "Motion Context Load Latent node. None for the first clip, or when the file does not exist. For the "
+                        "first clip, images and audio carry the chain_video and chain_audio of the pipe.",
             category=f"{ADDON_CATEGORY}/images",
             inputs=[
                 DICT_TYPE.Input("pipe", tooltip="A pipe holding clip_index, the clip being generated (from a Media H3 Script)."),
@@ -238,6 +242,8 @@ class LoadH3MotionContextLatent(io.ComfyNode):
             outputs=[
                 io.Latent.Output("latent", tooltip="The latent of the previous clip, for the context_latent input of "
                                                    "H3 Motion Context ; None when there is none."),
+                io.Image.Output("images", tooltip="For the first clip, the chain_video of the pipe ; None otherwise."),
+                io.Audio.Output("audio", tooltip="For the first clip, the chain_audio of the pipe ; None otherwise."),
             ],
         )
 
@@ -247,19 +253,22 @@ class LoadH3MotionContextLatent(io.ComfyNode):
         pipe = pipe if isinstance(pipe, dict) else {}
         clip_index = pipe_clip_index(pipe)
         if clip_index <= 1:
-            logger.info(f"clip {clip_index} : no previous clip, no latent")
-            return io.NodeOutput(None)
+            # the first clip : the chain's video and audio pass through instead
+            images, audio = pipe.get("chain_video"), pipe.get("chain_audio")
+            logger.info(f"clip {clip_index} : no previous clip, no latent ; chain_video {'passed' if images is not None else 'not in the pipe'}, "
+                        f"chain_audio {'passed' if audio is not None else 'not in the pipe'}")
+            return io.NodeOutput(None, images, audio)
 
         previous = clip_index - 1
         latent_dir = h3_latent_dir(latent_dir, pipe, subdir)
         path = h3_latent_path(latent_dir, previous)
         if not os.path.isfile(path):
             logger.warning(f"clip {clip_index} : no latent of clip {previous} ({path}), no latent")
-            return io.NodeOutput(None)
+            return io.NodeOutput(None, None, None)
 
         latent = run_h3_node("LoadH3MotionContextLatent", H3_LOAD_LATENT_NODE, latent_path=latent_dir, clip_index=previous)[0]
         logger.info(f"clip {clip_index} : latent of clip {previous} loaded ({path})")
-        return io.NodeOutput(latent)
+        return io.NodeOutput(latent, None, None)
 
 class SaveH3MotionContextLatent(io.ComfyNode):
     """Save the latent of the pipe's clip, for the next clip's LoadH3MotionContextLatent.
