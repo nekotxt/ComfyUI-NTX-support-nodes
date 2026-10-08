@@ -17,11 +17,12 @@ MIN_DURATION = 1
 MAX_DURATION = 600
 
 # a clip as the frontend creates it (web/js/media_h3_script.js)
-DEFAULT_CLIP = {"wf_type": WF_TYPES[0], "duration": DEFAULT_DURATION, "prompt_base": "", "prompt_final": ""}
+DEFAULT_CLIP = {"wf_type": WF_TYPES[0], "duration": DEFAULT_DURATION, "lora_stack": "", "prompt_base": "", "prompt_final": ""}
 
 # the clips_state widget holds a JSON object with the clips of the script, in order, and the index
 # (from 0) of the active one, the tab selected on the node :
-#   {"active": 1, "clips": [{"wf_type": "T2VA", "duration": 5, "prompt_base": "...", "prompt_final": "..."}, ...]}
+#   {"active": 1, "clips": [{"wf_type": "T2VA", "duration": 5, "lora_stack": "", "prompt_base": "...", "prompt_final": "..."}, ...]}
+# where lora_stack names an entry of the lora_stacks input (empty : none)
 # A missing or broken field gets its default, an empty list one default clip, and the active index
 # is clamped to the list
 def parse_clips_state(clips_state: str) -> dict:
@@ -44,6 +45,7 @@ def parse_clips_state(clips_state: str) -> dict:
         clips.append({
             "wf_type": wf_type if wf_type in WF_TYPES else DEFAULT_CLIP["wf_type"],
             "duration": min(MAX_DURATION, max(MIN_DURATION, duration)),
+            "lora_stack": str(clip.get("lora_stack") or ""),
             "prompt_base": str(clip.get("prompt_base") or ""),
             "prompt_final": str(clip.get("prompt_final") or ""),
         })
@@ -73,7 +75,8 @@ class MediaH3Script(io.ComfyNode):
     prompt_base, prompt_final), prompt_base being parsed exactly as by the Media Parser first :
     its @tag references become <Picture N> / <Video N> / <Audio N> labels and the referenced media
     are decoded into the pipe as picture_N, video_N + video_audio_N and audio_N. An empty (or blank
-    only) prompt_final gets the parsed prompt_base.
+    only) prompt_final gets the parsed prompt_base. A clip naming a lora_stack puts the entry of
+    the lora_stacks input of that name into the pipe as lora_stack (nothing when there is none).
     """
 
     @classmethod
@@ -88,8 +91,8 @@ class MediaH3Script(io.ComfyNode):
             inputs=[
                 MEDIA_REFS_TYPE.Input("media", tooltip="The media bundle of a Media Loader node."),
                 DICT_TYPE.Input("pipe", optional=True, tooltip="A pipe the settings and media are added to (a new one when not connected)."),
-                # not used yet
-                DICT_TYPE.Input("lora_stacks", optional=True, tooltip="The LoRA stacks of the video (a pipe of LORA_STACK)."),
+                DICT_TYPE.Input("lora_stacks", optional=True,
+                                tooltip="The LoRA stacks of the video (a pipe of LORA_STACK), the clips picking theirs by name."),
                 io.String.Input("project", default="", tooltip="The identifier name of the video project."),
                 io.Int.Input("width", default=1280, min=64, max=8192, step=16, tooltip="The width of the video."),
                 io.Int.Input("height", default=720, min=64, max=8192, step=16, tooltip="The height of the video."),
@@ -124,6 +127,16 @@ class MediaH3Script(io.ComfyNode):
         # the media referenced by prompt_base decoded into the pipe, then the parsed prompt
         prompt_base, report = parse_prompt_media("MediaH3Script", media, clip["prompt_base"], pipe)
         pipe["prompt_base"] = prompt_base
+
+        # the clip's LoRA stack, picked by name in lora_stacks ; nothing in the pipe when not found
+        stack_name = clip["lora_stack"].strip()
+        if stack_name:
+            stack = lora_stacks.get(stack_name) if isinstance(lora_stacks, dict) else None
+            if stack is not None:
+                pipe["lora_stack"] = stack
+                logger.info(f"lora_stack : {stack_name} ({len(stack) if isinstance(stack, (list, tuple)) else '?'} LoRAs)")
+            else:
+                logger.warning(f"lora_stack : {stack_name} not found in lora_stacks, no lora_stack in the pipe")
 
         # an empty prompt_final (or blank only) falls back on the parsed prompt_base
         pipe["prompt_final"] = clip["prompt_final"] if clip["prompt_final"].strip() else prompt_base

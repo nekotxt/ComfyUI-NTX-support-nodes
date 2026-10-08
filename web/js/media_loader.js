@@ -573,7 +573,7 @@ function showReport(title, sections) {
 }
 
 // ask the user to confirm an action, through the frontend's dialog when it is there
-async function confirmDialog(title, message) {
+export async function confirmDialog(title, message) {
     const dialog = app.extensionManager?.dialog;
     if (typeof dialog?.confirm === "function") {
         return (await dialog.confirm({ title, message, type: "delete" })) === true;

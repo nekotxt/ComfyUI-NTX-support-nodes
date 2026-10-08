@@ -5,13 +5,16 @@
 //
 // The python node holds a string widget, clips_state, a JSON object with the
 // clips of the script and the index of the active one :
-//   {"active": 0, "clips": [{"wf_type", "duration", "prompt_base", "prompt_final"}, ...]}
+//   {"active": 0, "clips": [{"wf_type", "duration", "lora_stack", "prompt_base", "prompt_final"}, ...]}
 // It is replaced on the node by a panel (a DOM widget keeping the JSON as its
 // value) : a row of tabs, one per clip numbered from 1, with "+" (add a clip
 // after the last one, taking the workflow type and duration of the active clip)
 // and "−" (remove the active clip), then the fields of the active clip :
-// wf_type, duration, the Picture / Video / Audio tag buttons, prompt_base and
-// prompt_final. The tag buttons are the Media Parser's (media_parser.tag_picker.js) :
+// wf_type, duration, lora_stack, the Picture / Video / Audio tag buttons,
+// prompt_base and prompt_final. lora_stack names an entry of the lora_stacks
+// pipe : typed, or picked by its button among the LORA_STACK inputs of the
+// Pipe Custom directly linked to lora_stacks (the button does nothing while
+// lora_stacks is not linked). The tag buttons are the Media Parser's (media_parser.tag_picker.js) :
 // the chosen "@tag" always goes into prompt_base, at its cursor, prompt_final
 // not being parsed by the node. The active tab is the
 // clip a run works on.
@@ -23,7 +26,7 @@
 
 import { app } from "../../../scripts/app.js";
 import { ADDON_PREFIX, API_PREFIX } from "./config.js";
-import { el, toast, NODE_ID as LOADER_NODE_ID } from "./media_loader.js";
+import { el, toast, confirmDialog, NODE_ID as LOADER_NODE_ID } from "./media_loader.js";
 import { BUTTONS, openTagMenu, spliceTag } from "./media_parser.tag_picker.js";
 import { setPipeInputs } from "./context.pipe_custom.js";
 import { registerNodeMenu } from "./menu.js";
@@ -32,7 +35,7 @@ const NODE_ID = ADDON_PREFIX + "MediaH3Script";
 const WIDGET_NAME = "clips_state";
 const WIDGET_TYPE = "NTX_H3_CLIPS";
 const NODE_MIN_WIDTH = 360;
-const PANEL_MIN_HEIGHT = 340;
+const PANEL_MIN_HEIGHT = 370;
 
 // python twins : WF_TYPES, DEFAULT_CLIP, MIN_DURATION, MAX_DURATION
 const WF_TYPES = ["T2VA", "I2VA", "L2VA", "FL2VA", "Ref2VA"];
@@ -84,6 +87,18 @@ const CSS = `
 }
 .nhs-row select { flex: 1; min-width: 0; }
 .nhs-row input { width: 64px; }
+.nhs-row input.nhs-stack { flex: 1; width: auto; min-width: 0; padding: 0 6px; }
+.nhs-row button {
+    height: 22px;
+    padding: 0 8px;
+    border: 1px solid var(--border-color, #3a4150);
+    border-radius: 5px;
+    background: var(--comfy-input-bg, #1e232c);
+    color: var(--input-text, #c8cfda);
+    font-size: 12px;
+    cursor: pointer;
+}
+.nhs-row button:hover { filter: brightness(1.3); }
 .nhs-tagbtns { display: flex; gap: 4px; }
 .nhs-tagbtns button { flex: 1; min-width: 0; }
 .nhs-label { color: #8b94a4; font-size: 11px; margin-bottom: -2px; }
@@ -120,7 +135,7 @@ function clampDuration(value) {
 }
 
 function newClip(from) {
-    return { wf_type: from?.wf_type ?? WF_TYPES[0], duration: from?.duration ?? DEFAULT_DURATION, prompt_base: "", prompt_final: "" };
+    return { wf_type: from?.wf_type ?? WF_TYPES[0], duration: from?.duration ?? DEFAULT_DURATION, lora_stack: "", prompt_base: "", prompt_final: "" };
 }
 
 // the state of a clips_state value, repaired like parse_clips_state does in python
@@ -133,12 +148,44 @@ function parseState(value) {
         .map((c) => ({
             wf_type: WF_TYPES.includes(c.wf_type) ? c.wf_type : WF_TYPES[0],
             duration: clampDuration(c.duration ?? DEFAULT_DURATION),
+            lora_stack: String(c.lora_stack ?? ""),
             prompt_base: String(c.prompt_base ?? ""),
             prompt_final: String(c.prompt_final ?? ""),
         }));
     if (!clips.length) clips.push(newClip());
     const active = Math.min(clips.length - 1, Math.max(0, Math.round(Number(raw.active)) || 0));
     return { active, clips };
+}
+
+// ── LoRA stack picker ─────────────────────────────────────────────────────────
+
+const LORA_STACKS_INPUT = "lora_stacks";
+
+// the names of the LORA_STACK inputs of the Pipe Custom directly linked to the node's lora_stacks,
+// or null when lora_stacks is not linked (a string : why there is nothing to list)
+function stackNames(node) {
+    const slot = node.inputs?.findIndex((i) => i.name === LORA_STACKS_INPUT) ?? -1;
+    if (slot < 0 || node.inputs[slot].link == null) return null;
+    const source = node.getInputNode?.(slot);
+    if (source?.comfyClass !== PIPE_NODE_ID) return "lora_stacks is not linked directly to a Pipe Custom node.";
+    const names = (source.inputs ?? []).filter((i) => i.type === "LORA_STACK").map((i) => i.name);
+    return names.length ? names : "The Pipe Custom linked to lora_stacks has no LORA_STACK input.";
+}
+
+// the list of the LORA_STACK inputs, a click passing the chosen name to pick
+function openStackMenu(node, event, pick) {
+    const names = stackNames(node);
+    if (names === null) return;
+    if (typeof names === "string") {
+        toast("info", "No LoRA stack to pick", names);
+        return;
+    }
+    new LiteGraph.ContextMenu(names.map((name) => ({ content: name, callback: () => pick(name) })), {
+        event,
+        title: "lora_stack",
+        className: "dark",
+        scale: Math.max(1, app.canvas?.ds?.scale ?? 1),
+    });
 }
 
 // ── Panel ─────────────────────────────────────────────────────────────────────
@@ -181,12 +228,17 @@ function makeScriptWidget(node, inputName, value) {
         select(state.clips.length - 1);
     }
 
-    function removeClip() {
+    // through the frontend's dialog : the native confirm() is silently refused in some browsers
+    async function removeClip() {
         if (state.clips.length < 2) return;
-        const c = clip();
-        if ((c.prompt_base.trim() || c.prompt_final.trim()) && !window.confirm(`Remove clip ${state.active + 1} and its prompts?`)) return;
-        state.clips.splice(state.active, 1);
-        select(Math.min(state.active, state.clips.length - 1));
+        const index = state.active;
+        const c = state.clips[index];
+        if (c.prompt_base.trim() || c.prompt_final.trim()) {
+            if (!(await confirmDialog("Remove clip", `Remove clip ${index + 1} and its prompts?`))) return;
+            if (state.clips[index] !== c) return;       // the clips changed meanwhile
+        }
+        state.clips.splice(index, 1);
+        select(Math.min(index, state.clips.length - 1));
     }
 
     function tabs() {
@@ -198,7 +250,7 @@ function makeScriptWidget(node, inputName, value) {
             el("button", { type: "button", title: "Add a clip at the end (same workflow type and duration as the active one)",
                 onclick: (ev) => { ev.stopPropagation(); addClip(); } }, "+"),
             el("button", { type: "button", title: "Remove the active clip", disabled: state.clips.length < 2,
-                onclick: (ev) => { ev.stopPropagation(); removeClip(); } }, "−"));
+                onclick: (ev) => { ev.stopPropagation(); void removeClip(); } }, "−"));
     }
 
     function fields() {
@@ -212,6 +264,17 @@ function makeScriptWidget(node, inputName, value) {
         const row = el("div", { class: "nhs-row" },
             el("label", {}, `clip ${state.active + 1}  wf_type`), wfType,
             el("label", {}, "duration (s)"), duration);
+
+        const stack = el("input", { type: "text", class: "nhs-stack", value: c.lora_stack, placeholder: "none",
+            spellcheck: false, title: "The entry of the lora_stacks pipe used by the clip (empty : none)",
+            oninput: () => { c.lora_stack = stack.value; },
+            onchange: changed });
+        const pick = el("button", { type: "button", title: "Pick a LORA_STACK input of the Pipe Custom linked to lora_stacks",
+            onclick: (ev) => {
+                ev.stopPropagation();
+                openStackMenu(node, ev, (name) => { stack.value = name; c.lora_stack = name; changed(); });
+            } }, "▾");
+        const stackRow = el("div", { class: "nhs-row" }, el("label", {}, "lora_stack"), stack, pick);
 
         const buttons = el("div", { class: "nhs-tagbtns" },
             BUTTONS.map((spec) => el("button", { type: "button",
@@ -230,7 +293,7 @@ function makeScriptWidget(node, inputName, value) {
             textareas[name] = textarea;
             return [label, textarea];
         });
-        return [row, buttons, ...prompts];
+        return [row, stackRow, buttons, ...prompts];
     }
 
     // the tab titles follow the fields of their clip
