@@ -2831,3 +2831,114 @@ Right-click menu options on the node:
     `stack3`, its `pipe` on `lora_stacks`, and a **LoraStack** on its `stack1`.
 
   A toast lists the nodes created, or tells that everything is already connected.
+
+---
+
+## LoadH3MotionContextLatent
+
+![LoadH3MotionContextLatent node](images/LoadH3MotionContextLatent.png)
+
+Loads the latent a clip continues from, for the `context_latent` input of the **H3 Motion
+Context** node of the [H3-Motion-Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context) extension, which must be installed
+(the run fails with an error naming it otherwise). The node works out the file from the pipe of a
+**MediaH3Script**, so a chain of clips needs no manual renumbering: it is the companion of
+**SaveH3MotionContextLatent**, which writes the files it reads.
+
+The `clip_index` of the pipe is the clip **being generated**; the latent loaded is the one of the
+clip **before** it, saved as
+
+```text
+<ComfyUI output folder>/<latent_dir>/<project>/<subdir>/clip_<clip_index - 1, 5 digits>.safetensors
+```
+
+where `project` comes from the pipe; an empty `latent_dir`, `project` or `subdir` is skipped, and
+spaces around each are ignored. When the file exists, it is loaded through the extension's **H3
+Motion Context Load Latent** node, with that folder as `latent_path` and `clip_index - 1` as
+`clip_index`.
+
+- For the **first clip** (`clip_index` of `1` or less, or none in the pipe) there is nothing to
+  continue from: `latent` is `None`, and `images` / `audio` carry the pipe's `chain_video` and
+  `chain_audio` instead (each `None` when the pipe has no such key).
+- A **missing file** is not an error: all three outputs are `None`, and the console shows a
+  warning with the path that was looked for.
+
+ComfyUI reuses the node's previous result as long as its inputs are unchanged, and the pipe is
+seen as unchanged while its settings are; change `counter` to make the node run again — for
+instance when it returned `None` because the previous clip's file was not saved yet.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `pipe` | DICT | The pipe of a MediaH3Script, giving `clip_index`, `project`, and for the first clip `chain_video` / `chain_audio`. |
+| `latent_dir` | STRING | The folder of the saved latents, relative to the ComfyUI output folder. Default `h3_context`. |
+| `subdir` | STRING | A subfolder of `<latent_dir>/<project>`. Default empty (skipped). |
+| `counter` | INT | Not used: change it to force the node to run again, regardless of the cache. Default `0`. |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `latent` | LATENT | The latent of the previous clip, for the `context_latent` input of H3 Motion Context only (it is not a decodable latent); `None` for the first clip or when the file is missing. |
+| `images` | IMAGE | For the first clip, the `chain_video` of the pipe; `None` otherwise. |
+| `audio` | AUDIO | For the first clip, the `chain_audio` of the pipe; `None` otherwise. |
+
+### Example
+
+With `latent_dir` = `h3_context`, `subdir` = `pass1` and a pipe holding `project` = `city_run`:
+
+| Pipe `clip_index` | `latent` | `images` / `audio` |
+|---|---|---|
+| `1` | `None` | `chain_video` / `chain_audio` of the pipe |
+| `2` | `output/h3_context/city_run/pass1/clip_00001.safetensors` | `None` |
+| `3` | `output/h3_context/city_run/pass1/clip_00002.safetensors` | `None` |
+
+---
+
+## SaveH3MotionContextLatent
+
+![SaveH3MotionContextLatent node](images/SaveH3MotionContextLatent.png)
+
+Saves the AV latent of the clip just generated, so that the next clip's
+**LoadH3MotionContextLatent** can continue from it. It requires the H3-Motion-Context extension,
+whose **H3 Motion Context Save Latent** node does the saving (the run fails with an error naming
+the extension when it is missing).
+
+The folder is built exactly as by LoadH3MotionContextLatent — `<latent_dir>/<project>/<subdir>`
+under the ComfyUI output folder, `project` coming from the pipe, the empty parts skipped — and the
+extension's node is called with `<folder>/clip` as `filename_prefix` and the pipe's `clip_index`.
+The file is therefore
+
+```text
+<ComfyUI output folder>/<latent_dir>/<project>/<subdir>/clip_<clip_index, 5 digits>.safetensors
+```
+
+the one LoadH3MotionContextLatent reads when the pipe moves on to the next clip. Saving a clip again
+(a re-roll) **overwrites** its own file, so a rejected attempt is never picked up later.
+
+When the pipe has **no `clip_index`** (or `0`), the extension's auto mode applies instead: a new
+file numbered by run, with a trailing underscore (`clip_00001_.safetensors`). Such files are never
+read by LoadH3MotionContextLatent, since their numbers count runs, not clips.
+
+The node is an output node: it saves even when nothing is connected to `latent_path`.
+
+### Inputs
+
+| Input | Type | Description |
+|---|---|---|
+| `pipe` | DICT | The pipe of a MediaH3Script, giving `clip_index` and `project`. |
+| `latent` | LATENT | The sampler's output latent of the clip (an H3 AV latent: video and audio streams). |
+| `latent_dir` | STRING | The folder of the saved latents, relative to the ComfyUI output folder. Default `h3_context`. |
+| `subdir` | STRING | A subfolder of `<latent_dir>/<project>`. Default empty (skipped). |
+
+### Outputs
+
+| Output | Type | Description |
+|---|---|---|
+| `latent_path` | STRING | The full path of the saved file. |
+
+### Example
+
+With `latent_dir` = `h3_context`, `subdir` = `pass1` and a pipe holding `project` = `city_run` and
+`clip_index` = `2`, the latent is saved as `output/h3_context/city_run/pass1/clip_00002.safetensors`;
+generating clip 3 next, LoadH3MotionContextLatent with the same settings loads that file.
