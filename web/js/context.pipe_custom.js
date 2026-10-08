@@ -1139,6 +1139,16 @@ function getPipeWidget(node) {
     return node.widgets?.find(w => w.name === WIDGET_NAME);
 }
 
+// Set the custom inputs of a PipeCustom node ([{name, type}, ...]) and create their
+// slots, as the input editor does; false when the node has no pipe widget.
+export function setPipeInputs(node, entries) {
+    const widget = getPipeWidget(node);
+    if (!widget?.__isPipeUI) return false;
+    widget.setEntries("inputs", parseEntries(entries));
+    syncSlots(node, widget.getData());
+    return true;
+}
+
 // ── UI rebuild ────────────────────────────────────────────────────────────────
 // If the node is re-created from the unpatched Python definition, inputs_data
 // shows up as a raw-JSON STRING widget — replace it with the custom widget,

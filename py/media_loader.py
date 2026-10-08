@@ -721,33 +721,40 @@ class MediaParser(io.ComfyNode):
     @classmethod
     def execute(cls, media, prompt, pipe=None) -> io.NodeOutput:
         logger.node_name("MediaParser")
-        media = media if isinstance(media, dict) else {}
         pipe = {} if pipe is None else clone_data(pipe)
-        references, final_prompt = resolve_tag_references("MediaParser", media, prompt)
-
-        # decode the media into the pipe, and describe them in the report
-        lines = []
-        for ref in references:
-            kind, entry, number = ref["kind"], ref["entry"], ref["number"]
-            key = f"{PARSER_KINDS[kind]['key']}_{number}"
-            if kind == "pictures":
-                pipe[key] = decode_slot(key, "pictures", entry)
-                outputs = key
-            elif kind == "videos":
-                audio_key = f"video_audio_{number}"
-                pipe[key] = decode_slot(key, "video_frames", entry)
-                pipe[audio_key] = decode_slot(audio_key, "video_audio", entry)
-                outputs = f"{key} + {audio_key}" + ("" if pipe[audio_key] is not None else " (no audio)")
-                if pipe[key] is None:
-                    outputs += " (no frames)"
-            else:
-                pipe[key] = decode_slot(key, "audios", entry)
-                outputs = key + ("" if pipe[key] is not None else " (no audio)")
-            lines.append(reference_report(ref, outputs))
-        report = log_report(lines)
-        log_media_cache_stats()
-
+        final_prompt, report = parse_prompt_media("MediaParser", media, prompt, pipe)
         return io.NodeOutput(pipe, final_prompt, report)
+
+# the work of the Media Parser, shared with the Media H3 Script (py/media_h3_script.py) : the @tag
+# references of the prompt resolved against the media bundle, the referenced media decoded into
+# the pipe (changed in place), and the final prompt and the report returned
+def parse_prompt_media(node: str, media, prompt: str, pipe: dict) -> tuple[str, str]:
+    media = media if isinstance(media, dict) else {}
+    references, final_prompt = resolve_tag_references(node, media, prompt)
+
+    # decode the media into the pipe, and describe them in the report
+    lines = []
+    for ref in references:
+        kind, entry, number = ref["kind"], ref["entry"], ref["number"]
+        key = f"{PARSER_KINDS[kind]['key']}_{number}"
+        if kind == "pictures":
+            pipe[key] = decode_slot(key, "pictures", entry)
+            outputs = key
+        elif kind == "videos":
+            audio_key = f"video_audio_{number}"
+            pipe[key] = decode_slot(key, "video_frames", entry)
+            pipe[audio_key] = decode_slot(audio_key, "video_audio", entry)
+            outputs = f"{key} + {audio_key}" + ("" if pipe[audio_key] is not None else " (no audio)")
+            if pipe[key] is None:
+                outputs += " (no frames)"
+        else:
+            pipe[key] = decode_slot(key, "audios", entry)
+            outputs = key + ("" if pipe[key] is not None else " (no audio)")
+        lines.append(reference_report(ref, outputs))
+    report = log_report(lines)
+    log_media_cache_stats()
+
+    return final_prompt, report
 
 class MediaSelectByTag(io.ComfyNode):
     """Keep the media of a bundle referenced by the @tag references of a prompt, renumbered.

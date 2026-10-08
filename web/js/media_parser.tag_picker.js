@@ -33,7 +33,7 @@ const BUTTONS_HEIGHT = 24;
 
 // the buttons, in their order on the row : the kind of slots each lists (a list of the
 // loader's media_state), the slot name shown in the list, and whether a tag previews its media
-const BUTTONS = [
+export const BUTTONS = [
     { label: "Picture", kind: "pictures", slot: "picture", preview: true },
     { label: "Video",   kind: "videos",   slot: "video",   preview: false },
     { label: "Audio",   kind: "audios",   slot: "audio",   preview: false },
@@ -172,6 +172,15 @@ function promptTextarea(node, widget) {
     return own instanceof HTMLTextAreaElement ? own : null;
 }
 
+// "@tag" put in a text over the range start..end, spaced off the words around it : the new text
+// and the caret position after the tag
+export function spliceTag(text, start, end, tag) {
+    const before = start > 0 && TAG_CHAR.test(text[start - 1]) ? " " : "";
+    const after = end < text.length && TAG_CHAR.test(text[end]) ? " " : "";
+    const insert = `${before}@${tag}${after}`;
+    return { value: text.slice(0, start) + insert + text.slice(end), caret: start + insert.length };
+}
+
 // insert "@tag" at the cursor of the prompt (over the selection), spaced off the words around it
 function insertTag(node, tag) {
     const widget = node.widgets?.find((w) => w.name === PROMPT_WIDGET);
@@ -180,17 +189,13 @@ function insertTag(node, tag) {
     const text = textarea ? textarea.value : String(widget.value ?? "");
     const start = textarea ? textarea.selectionStart : text.length;
     const end = textarea ? textarea.selectionEnd : text.length;
-    const before = start > 0 && TAG_CHAR.test(text[start - 1]) ? " " : "";
-    const after = end < text.length && TAG_CHAR.test(text[end]) ? " " : "";
-    const insert = `${before}@${tag}${after}`;
-    const value = text.slice(0, start) + insert + text.slice(end);
+    const { value, caret } = spliceTag(text, start, end, tag);
 
     widget.value = value;
     widget.callback?.(value);
     if (textarea) {
         // the Vue textarea follows the widget value store, the classic one is the widget's element
         if (textarea.value !== value) textarea.value = value;
-        const caret = start + insert.length;
         textarea.focus();
         textarea.setSelectionRange(caret, caret);
     }
@@ -202,7 +207,9 @@ function insertTag(node, tag) {
 
 let closeOpenMenu = null;
 
-function openTagMenu(node, button) {
+// the list of the tags of a kind (a button of BUTTONS) of the loader feeding the node, a click on a
+// tag passing it to insert (by default : inserted in the node's prompt widget)
+export function openTagMenu(node, button, insert = (tag) => insertTag(node, tag)) {
     closeOpenMenu?.();
     const loader = upstreamLoader(node);
     if (!loader) {
@@ -270,7 +277,7 @@ function openTagMenu(node, button) {
                 onmouseenter: () => showThumb(slot, row),
                 onmouseleave: () => { if (hovered === slot) hideThumb(); },
                 onpointerdown: (ev) => { ev.stopPropagation(); ev.preventDefault(); },
-                onclick: (ev) => { ev.stopPropagation(); close(); insertTag(node, slot.tag); } },
+                onclick: (ev) => { ev.stopPropagation(); close(); insert(slot.tag); } },
                 el("span", { class: "ntp-tag" }, `@${slot.tag}`),
                 el("span", { class: "ntp-slot" }, `${button.slot} ${slot.index + 1}`));
             return row;
