@@ -1128,10 +1128,14 @@ The preset and aspect ratio lists are read from `image_presets.yaml` in the addo
   is required while this mode is selected. The width and height are read from that input.
   The size is still rounded with `divisible_by`, so set it to `1` when the output must match
   the reference exactly.
-- **`resize image`** — an extra **`match` input slot** (IMAGE or MASK, required while this
+- **`resize image by factor`** — an extra **`match` input slot** (IMAGE or MASK, required while this
   mode is selected) and a `multiplier` widget (FLOAT 0.01–16.0, default 1.0). The width and
   height are read from `match` and multiplied by `multiplier` (then rounded with
   `divisible_by`).
+- **`resize image to resolution`** — an extra **`match` input slot** (IMAGE or MASK, required while this
+  mode is selected) and a `megapixel` widget (FLOAT 0.01–256.0, default 1.0). The width and
+  height are read from `match` and the size is computed so that the total pixel count matches 
+  the requested megapixels while keeping the original aspect ratio.
 
 ### Outputs
 
