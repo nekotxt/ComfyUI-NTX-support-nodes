@@ -1095,7 +1095,7 @@ inputs.
 Outputs a `width` / `height` pair, computed with a selectable strategy: entered directly,
 picked from the size presets, derived from an aspect ratio and/or a pixel budget, or copied
 from an existing image or mask. The `mode` widget is a dynamic combo: selecting a mode shows
-only the widgets (and, for `match image`, the extra input slot) that the mode actually uses.
+only the widgets (and, for `match image` and `resize image`, the extra input slot) that the mode actually uses.
 
 Whatever the mode, the resulting width and height are rounded with `divisible_by` (nearest
 multiple, never below the divisor). Where a mode computes a side from an aspect ratio or a
@@ -1128,6 +1128,10 @@ The preset and aspect ratio lists are read from `image_presets.yaml` in the addo
   is required while this mode is selected. The width and height are read from that input.
   The size is still rounded with `divisible_by`, so set it to `1` when the output must match
   the reference exactly.
+- **`resize image`** — an extra **`match` input slot** (IMAGE or MASK, required while this
+  mode is selected) and a `multiplier` widget (FLOAT 0.01–16.0, default 1.0). The width and
+  height are read from `match` and multiplied by `multiplier` (then rounded with
+  `divisible_by`).
 
 ### Outputs
 

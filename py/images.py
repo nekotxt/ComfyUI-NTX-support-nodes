@@ -612,6 +612,10 @@ class ImageResolution(io.ComfyNode):
                     io.DynamicCombo.Option("match image", [
                         io.MultiType.Input("match", types=[io.Image, io.Mask]),
                     ]),
+                    io.DynamicCombo.Option("resize image", [
+                        io.MultiType.Input("match", types=[io.Image, io.Mask]),
+                        io.Float.Input("multiplier", default=1.0, min=0.01, max=16.0, step=0.05),
+                    ]),
                 ]),
                 io.Int.Input("divisible_by", default=8, min=1, max=1024, step=1),
             ],
@@ -650,6 +654,11 @@ class ImageResolution(io.ComfyNode):
             # both IMAGE [B, H, W, C] and MASK [B, H, W] have width and height at the same indices
             match = mode["match"]
             width, height = match.shape[2], match.shape[1]
+        elif mode["mode"] == "resize image":
+            # size of the IMAGE [B, H, W, C] or MASK [B, H, W], scaled by multiplier
+            match = mode["match"]
+            width = max(1, round(match.shape[2] * mode["multiplier"]))
+            height = max(1, round(match.shape[1] * mode["multiplier"]))
         else:  # "preset"
             width, height = extract_image_size(mode["image_size"])
 
