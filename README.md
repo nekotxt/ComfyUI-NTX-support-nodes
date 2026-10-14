@@ -2781,6 +2781,7 @@ Fields of a version (on the clip panel):
 | `wf_type` | COMBO | The type of workflow of the clip: `T2VA`, `I2VA`, `L2VA`, `FL2VA` or `Ref2VA`. Default `T2VA`. |
 | `duration` | FLOAT | The duration in seconds, 2 decimals: `0.01`–`600`, default `5`. Changing it sets `length` to `5 + 17 × ceil((max(5, round(duration × 24)) − 5) / 17)`. |
 | `length` | INT | The number of frames of the duration, of the form `5 + 17k`: `5`–`14404`, default `124`. A typed value is rounded up to the next valid one (`123` → `124`, `125` → `141`). Changing it sets `duration` to `length / 24`, rounded to 2 decimals. |
+| `context` | COMBO | The motion context the clip continues with: `none`, `22 video + 24 audio` or `39 video + 48 audio`. Default `none`. The node reads the two lengths from the text, so any entry of the form `<N> video + <M> audio` works. |
 | `lora_stack` | STRING | The name of an entry of `lora_stacks`; empty for none. Default empty. |
 | `noise_seed` | INT | The noise seed: `0`–`18446744073709551615`, default `0`. |
 | `prompt_base` | STRING (multiline) | The short prompt, suitable for further enhancement, referencing tagged slots of the MediaLoader as `@tag`. |
@@ -2790,7 +2791,7 @@ Fields of a version (on the clip panel):
 
 | Output | Type | Description |
 |---|---|---|
-| `pipe` | DICT | The input pipe plus: `project`, `width`, `height`, `clip_index` (from 1), `version_index` (from 0), `wf_type`, `duration`, `length`, `noise_seed`, `prompt_base` (parsed), `prompt_final` (as written, or the parsed `prompt_base` when empty), `lora_stack` (only when found), the media referenced by `prompt_base` under the MediaParser keys (`picture_N`, `video_N` + `video_audio_N`, `audio_N`), and for the first clip with a `start_video`, `context_frames` (IMAGE, the frames) and `context_audio` (AUDIO, `None` when the video has no audio track). Keys already present in the input pipe are overwritten. |
+| `pipe` | DICT | The input pipe plus: `project`, `width`, `height`, `clip_index` (from 1), `version_index` (from 0), `wf_type`, `duration`, `length`, `context_frames_length` and `context_audio_length` (the video and audio values of `context`, `0` for `none`), `noise_seed`, `prompt_base` (parsed), `prompt_final` (as written, or the parsed `prompt_base` when empty), `lora_stack` (only when found), the media referenced by `prompt_base` under the MediaParser keys (`picture_N`, `video_N` + `video_audio_N`, `audio_N`), and for the first clip with a `start_video`, `context_frames` (IMAGE, the frames) and `context_audio` (AUDIO, `None` when the video has no audio track). Keys already present in the input pipe are overwritten. |
 | `clip_index` | INT | The number of the active clip, from 1. |
 | `prompt_base` | STRING | The parsed `prompt_base`, references replaced by their labels. |
 | `report` | STRING | The MediaParser report of the references of `prompt_base` (one line per referenced tag; `no tag reference in the prompt` when there is none), followed for the first clip with a `start_video` by a line `start_video <tag> => context_frames + context_audio => video N (file name)`. |
@@ -2823,8 +2824,8 @@ The clip panel replaces the `clips_state` widget. From top to bottom:
   prompt (see the MediaParser *Frontend* section), but clicking a tag copies it into the field.
   The tag can always be typed, changed or erased by hand.
 - **Clip tabs** — one button per clip, numbered from 1; the active one is blue. **+** adds a clip
-  at the end, with a single version 0 taking the workflow type, duration and length of the
-  active version (the other fields start empty / at `0`), and selects it. **−** removes the active clip;
+  at the end, with a single version 0 taking the workflow type, duration, length and context
+  of the active version (the other fields start empty / at `0`), and selects it. **−** removes the active clip;
   it asks for confirmation when any of its versions has prompt text, and is disabled when only
   one clip is left. Hovering a tab shows its active version's workflow type and duration.
 - **Version tabs** — one button per version of the active clip, numbered from 0; the active one is
@@ -2834,6 +2835,7 @@ The clip panel replaces the `clips_state` widget. From top to bottom:
   version.
 - **`wf_type`**, **`duration`** and **`length`** (changing one recomputes the other), with a label naming the clip and version being edited
   (e.g. `clip 2 v0`).
+- **`context`** — a combo, on the left of `lora_stack` on the same row.
 - **`lora_stack`** — a text field, with a **▾** button that lists the LORA_STACK inputs of the
   **PipeCustom** connected **directly** to `lora_stacks` (not through reroutes); clicking one fills
   the field. The name can always be typed, changed or erased by hand. The button does nothing while

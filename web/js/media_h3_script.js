@@ -7,7 +7,7 @@
 // clips of the script and the index of the active one, each clip holding its
 // versions and the index of its active version :
 //   {"start_video": "", "active": 0, "clips": [{"active": 0, "versions": [
-//       {"wf_type", "duration", "length", "lora_stack", "noise_seed", "prompt_base", "prompt_final"}, ...]}, ...]}
+//       {"wf_type", "duration", "length", "context", "lora_stack", "noise_seed", "prompt_base", "prompt_final"}, ...]}, ...]}
 // (a clip of the older format, the fields without versions, is read as its
 // version 0). It is replaced on the node by a panel (a DOM widget keeping the
 // JSON as its value) : start_video, a setting of the whole script (the tag of a
@@ -18,7 +18,7 @@
 // tabs for the versions of the active clip numbered from 0, with "+" (add a
 // version after the last one, a copy of the active version) and "−" (remove
 // the active version), then the fields of the active version of the active clip :
-// wf_type, duration (seconds), length (frames), lora_stack, noise_seed (with a Random button, the same
+// wf_type, duration (seconds), length (frames), context, lora_stack, noise_seed (with a Random button, the same
 // draw as the Random Seed node), the Picture / Video / Audio tag buttons,
 // prompt_base and prompt_final. lora_stack names an entry of the lora_stacks
 // pipe : typed, or picked by its button among the LORA_STACK inputs of the
@@ -47,7 +47,7 @@ const WIDGET_TYPE = "NTX_H3_CLIPS";
 const NODE_MIN_WIDTH = 360;
 const PANEL_MIN_HEIGHT = 460;
 
-// python twins : WF_TYPES, DEFAULT_CLIP, MIN_DURATION, MAX_DURATION, DEFAULT_LENGTH, MIN_LENGTH, MAX_LENGTH
+// python twins : WF_TYPES, DEFAULT_CLIP, MIN_DURATION, MAX_DURATION, DEFAULT_LENGTH, MIN_LENGTH, MAX_LENGTH, CONTEXTS
 const WF_TYPES = ["T2VA", "I2VA", "L2VA", "FL2VA", "Ref2VA"];
 const DEFAULT_DURATION = 5;
 const MIN_DURATION = 0.01;
@@ -56,6 +56,8 @@ const DEFAULT_LENGTH = 124;
 const MIN_LENGTH = 5;
 const MAX_LENGTH = 14404;
 const FPS = 24;
+// "none" or "<N> video + <M> audio" : the node reads the lengths from the text
+const CONTEXTS = ["none", "22 video + 24 audio", "39 video + 48 audio"];
 const PROMPTS = ["prompt_base", "prompt_final"];
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -178,9 +180,9 @@ function durationOfLength(length) {
     return clampDuration(length / FPS);
 }
 
-// a new version, the workflow type, duration and length taken from another one
+// a new version, the workflow type, duration, length and context taken from another one
 function newVersion(from) {
-    return { wf_type: from?.wf_type ?? WF_TYPES[0], duration: from?.duration ?? DEFAULT_DURATION, length: from?.length ?? DEFAULT_LENGTH, lora_stack: "", noise_seed: 0, prompt_base: "", prompt_final: "" };
+    return { wf_type: from?.wf_type ?? WF_TYPES[0], duration: from?.duration ?? DEFAULT_DURATION, length: from?.length ?? DEFAULT_LENGTH, context: from?.context ?? CONTEXTS[0], lora_stack: "", noise_seed: 0, prompt_base: "", prompt_final: "" };
 }
 
 function newClip(from) {
@@ -192,6 +194,7 @@ function parseVersion(v) {
         wf_type: WF_TYPES.includes(v.wf_type) ? v.wf_type : WF_TYPES[0],
         duration: clampDuration(v.duration ?? DEFAULT_DURATION),
         length: clampLength(v.length ?? DEFAULT_LENGTH),
+        context: CONTEXTS.includes(v.context) ? v.context : CONTEXTS[0],
         lora_stack: String(v.lora_stack ?? ""),
         noise_seed: clampSeed(v.noise_seed ?? 0),
         prompt_base: String(v.prompt_base ?? ""),
@@ -352,7 +355,7 @@ function makeScriptWidget(node, inputName, value) {
             label: (i) => String(i + 1),
             title: (c, i) => { const v = c.versions[c.active]; return `Clip ${i + 1}, version ${c.active} : ${v.wf_type}, ${v.duration} s`; },
             onSelect: select, onAdd: addClip, onRemove: removeClip,
-            addTitle: "Add a clip at the end (same workflow type, duration and length as the active version)",
+            addTitle: "Add a clip at the end (same workflow type, duration, length and context as the active version)",
             removeTitle: "Remove the active clip",
         });
     }
@@ -403,7 +406,11 @@ function makeScriptWidget(node, inputName, value) {
                 ev.stopPropagation();
                 openStackMenu(node, ev, (name) => { stack.value = name; c.lora_stack = name; changed(); });
             } }, "▾");
-        const stackRow = el("div", { class: "nhs-row" }, el("label", {}, "lora_stack"), stack, pick);
+        const context = el("select", { title: "The motion context the clip continues with, in video + audio frames",
+            onchange: () => { c.context = context.value; changed(); } },
+            CONTEXTS.map((t) => el("option", { value: t, selected: t === c.context }, t)));
+        const stackRow = el("div", { class: "nhs-row" }, el("label", {}, "context"), context,
+            el("label", {}, "lora_stack"), stack, pick);
 
         const seed = el("input", { type: "number", class: "nhs-seed", min: 0, max: SEED_MAX, step: 1, value: c.noise_seed,
             title: "The noise seed of the clip",

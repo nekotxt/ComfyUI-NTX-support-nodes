@@ -5,6 +5,7 @@ import nodes
 
 import json
 import os
+import re
 
 from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY
 from .logging import logger
@@ -27,8 +28,19 @@ DEFAULT_LENGTH = 124
 MIN_LENGTH = 5
 MAX_LENGTH = 14404
 
+# the motion contexts a clip can continue with : "none", or "<N> video + <M> audio", the lengths
+# of the context in video frames and audio latent frames, read from the text by context_lengths
+# (a new entry only needs to follow that form)
+CONTEXTS = ("none", "22 video + 24 audio", "39 video + 48 audio")
+CONTEXT_PATTERN = re.compile(r"^\s*(\d+)\s*video\s*\+\s*(\d+)\s*audio\s*$", re.IGNORECASE)
+
+# the (video, audio) lengths of a context, (0, 0) for "none" or a text not of the form
+def context_lengths(context: str) -> tuple[int, int]:
+    match = CONTEXT_PATTERN.match(context or "")
+    return (int(match.group(1)), int(match.group(2))) if match else (0, 0)
+
 # a version of a clip as the frontend creates it (web/js/media_h3_script.js)
-DEFAULT_VERSION = {"wf_type": WF_TYPES[0], "duration": DEFAULT_DURATION, "length": DEFAULT_LENGTH, "lora_stack": "", "noise_seed": 0, "prompt_base": "", "prompt_final": ""}
+DEFAULT_VERSION = {"wf_type": WF_TYPES[0], "duration": DEFAULT_DURATION, "length": DEFAULT_LENGTH, "context": CONTEXTS[0], "lora_stack": "", "noise_seed": 0, "prompt_base": "", "prompt_final": ""}
 
 def clamp_index(value, length: int) -> int:
     try:
@@ -57,6 +69,7 @@ def parse_version(version: dict) -> dict:
         "wf_type": wf_type if wf_type in WF_TYPES else DEFAULT_VERSION["wf_type"],
         "duration": min(MAX_DURATION, max(MIN_DURATION, duration)),
         "length": min(MAX_LENGTH, max(MIN_LENGTH, length)),
+        "context": version.get("context") if version.get("context") in CONTEXTS else DEFAULT_VERSION["context"],
         "lora_stack": str(version.get("lora_stack") or ""),
         "noise_seed": min(SEED_MAX, max(0, noise_seed)),
         "prompt_base": str(version.get("prompt_base") or ""),
@@ -76,7 +89,7 @@ def parse_clip(clip: dict) -> dict:
 # (from 0) of the active one, the tab selected on the node ; each clip holds its versions, in order,
 # and the index (from 0, the version number) of its active one :
 #   {"start_video": "", "active": 1, "clips": [{"active": 0, "versions": [
-#       {"wf_type": "T2VA", "duration": 5, "length": 124, "lora_stack": "", "noise_seed": 0, "prompt_base": "...", "prompt_final": "..."}, ...]}, ...]}
+#       {"wf_type": "T2VA", "duration": 5, "length": 124, "context": "none", "lora_stack": "", "noise_seed": 0, "prompt_base": "...", "prompt_final": "..."}, ...]}, ...]}
 # where lora_stack names an entry of the lora_stacks input (empty : none), and start_video, a setting
 # of the whole script, the tag of a video slot of the media input (empty : none)
 # A missing or broken field gets its default, an empty list one default clip or version, and the
@@ -131,14 +144,15 @@ class MediaH3Script(io.ComfyNode):
     node by a tabbed panel (web/js/media_h3_script.js) with one tab per clip, numbered from 1, and
     Add / Remove buttons. Each clip has versions, numbered from 0, in a second row of tabs (a new
     version is a copy of the active one) ; each version has a workflow type, a duration (in
-    seconds) and its length (in frames), a lora_stack, a noise_seed, a short prompt_base and an optional longer prompt_final ; the Picture / Video /
+    seconds) and its length (in frames), a context,
+    a lora_stack, a noise_seed, a short prompt_base and an optional longer prompt_final ; the Picture / Video /
     Audio buttons above the prompts insert the @tag of a slot of the Media Loader in prompt_base
     (prompt_final is not parsed). Above the clips, start_video is a setting of the whole script : the
     tag of a video slot of the Media Loader, typed or picked with its Video button.
 
     A run works on the active version of the active clip, the tabs selected on the node : the
     general settings and the version's fields go into the pipe (project, width, height, clip_index,
-    version_index, wf_type, duration, length, noise_seed, prompt_base, prompt_final), prompt_base being parsed exactly
+    version_index, wf_type, duration, length, context_frames_length, context_audio_length, noise_seed, prompt_base, prompt_final), prompt_base being parsed exactly
     as by the Media Parser first :
     its @tag references become <Picture N> / <Video N> / <Audio N> labels and the referenced media
     are decoded into the pipe as picture_N, video_N + video_audio_N and audio_N. An empty (or blank
@@ -193,6 +207,7 @@ class MediaH3Script(io.ComfyNode):
         pipe["wf_type"] = clip["wf_type"]
         pipe["duration"] = clip["duration"]
         pipe["length"] = clip["length"]
+        pipe["context_frames_length"], pipe["context_audio_length"] = context_lengths(clip["context"])
         pipe["noise_seed"] = clip["noise_seed"]
 
         # the media referenced by prompt_base decoded into the pipe, then the parsed prompt
