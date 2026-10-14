@@ -151,7 +151,7 @@ class MediaH3Script(io.ComfyNode):
     (prompt_final is not parsed). Above the clips, start_video and guide_video are settings of the
     whole script : the tags of video slots of the Media Loader, typed or picked with their Video
     button. start_video's frames and audio go into the pipe as context_frames and context_audio on
-    the first clip, guide_video's frames as guide_main on every clip.
+    the first clip, guide_video's frames as guide_main_frames on every clip.
 
     A run works on the active version of the active clip, the tabs selected on the node : the
     general settings and the version's fields go into the pipe (project, width, height, clip_index,
@@ -240,8 +240,8 @@ class MediaH3Script(io.ComfyNode):
         guide_video = state["guide_video"].strip()
         if guide_video:
             entry = find_video(media if isinstance(media, dict) else {}, "guide_video", guide_video)
-            pipe["guide_main"] = decode_slot("guide_main", "video_frames", entry)
-            report += f"\nguide_video {guide_video} => guide_main => video {int(entry['slot']) + 1} ({entry['name']})"
+            pipe["guide_main_frames"] = decode_slot("guide_main_frames", "video_frames", entry)
+            report += f"\nguide_video {guide_video} => guide_main_frames => video {int(entry['slot']) + 1} ({entry['name']})"
 
         # an empty prompt_final (or blank only) falls back on the parsed prompt_base
         pipe["prompt_final"] = clip["prompt_final"] if clip["prompt_final"].strip() else prompt_base
