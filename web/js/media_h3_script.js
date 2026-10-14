@@ -7,18 +7,18 @@
 // clips of the script and the index of the active one, each clip holding its
 // versions and the index of its active version :
 //   {"start_video": "", "active": 0, "clips": [{"active": 0, "versions": [
-//       {"wf_type", "duration", "lora_stack", "noise_seed", "prompt_base", "prompt_final"}, ...]}, ...]}
+//       {"wf_type", "duration", "length", "lora_stack", "noise_seed", "prompt_base", "prompt_final"}, ...]}, ...]}
 // (a clip of the older format, the fields without versions, is read as its
 // version 0). It is replaced on the node by a panel (a DOM widget keeping the
 // JSON as its value) : start_video, a setting of the whole script (the tag of a
 // video slot of the Media Loader, typed or picked with its Video button, the
 // same list as the Video tag button), a row of tabs, one per clip numbered from 1, with "+"
 // (add a clip after the last one, with a version 0 taking the workflow type and
-// duration of the active version) and "−" (remove the active clip), a row of
+// duration and length of the active version) and "−" (remove the active clip), a row of
 // tabs for the versions of the active clip numbered from 0, with "+" (add a
 // version after the last one, a copy of the active version) and "−" (remove
 // the active version), then the fields of the active version of the active clip :
-// wf_type, duration, lora_stack, noise_seed (with a Random button, the same
+// wf_type, duration (seconds), length (frames), lora_stack, noise_seed (with a Random button, the same
 // draw as the Random Seed node), the Picture / Video / Audio tag buttons,
 // prompt_base and prompt_final. lora_stack names an entry of the lora_stacks
 // pipe : typed, or picked by its button among the LORA_STACK inputs of the
@@ -47,11 +47,15 @@ const WIDGET_TYPE = "NTX_H3_CLIPS";
 const NODE_MIN_WIDTH = 360;
 const PANEL_MIN_HEIGHT = 460;
 
-// python twins : WF_TYPES, DEFAULT_CLIP, MIN_DURATION, MAX_DURATION
+// python twins : WF_TYPES, DEFAULT_CLIP, MIN_DURATION, MAX_DURATION, DEFAULT_LENGTH, MIN_LENGTH, MAX_LENGTH
 const WF_TYPES = ["T2VA", "I2VA", "L2VA", "FL2VA", "Ref2VA"];
 const DEFAULT_DURATION = 5;
-const MIN_DURATION = 1;
+const MIN_DURATION = 0.01;
 const MAX_DURATION = 600;
+const DEFAULT_LENGTH = 124;
+const MIN_LENGTH = 5;
+const MAX_LENGTH = 14404;
+const FPS = 24;
 const PROMPTS = ["prompt_base", "prompt_final"];
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -146,14 +150,37 @@ function clampSeed(value) {
     return Number.isFinite(n) ? Math.min(SEED_MAX, Math.max(0, n)) : 0;
 }
 
+// a duration in seconds, rounded to 2 decimals
 function clampDuration(value) {
-    const n = Math.round(Number(value));
+    const n = Math.round(Number(value) * 100) / 100;
     return Number.isFinite(n) ? Math.min(MAX_DURATION, Math.max(MIN_DURATION, n)) : DEFAULT_DURATION;
 }
 
-// a new version, the workflow type and duration taken from another one
+function clampLength(value) {
+    const n = Math.round(Number(value));
+    return Number.isFinite(n) ? Math.min(MAX_LENGTH, Math.max(MIN_LENGTH, n)) : DEFAULT_LENGTH;
+}
+
+// the length in frames of a duration : at least 5 frames, then whole steps of 17 frames
+function lengthOfDuration(duration) {
+    const frames = Math.max(5, Math.round(duration * FPS));
+    return clampLength(5 + 17 * Math.ceil((frames - 5) / 17));
+}
+
+// a length typed by the user, rounded up to the next valid one : 5 + 17k frames
+function snapLength(value) {
+    const n = clampLength(value);
+    return clampLength(5 + 17 * Math.ceil((n - 5) / 17));
+}
+
+// the duration of a length in frames
+function durationOfLength(length) {
+    return clampDuration(length / FPS);
+}
+
+// a new version, the workflow type, duration and length taken from another one
 function newVersion(from) {
-    return { wf_type: from?.wf_type ?? WF_TYPES[0], duration: from?.duration ?? DEFAULT_DURATION, lora_stack: "", noise_seed: 0, prompt_base: "", prompt_final: "" };
+    return { wf_type: from?.wf_type ?? WF_TYPES[0], duration: from?.duration ?? DEFAULT_DURATION, length: from?.length ?? DEFAULT_LENGTH, lora_stack: "", noise_seed: 0, prompt_base: "", prompt_final: "" };
 }
 
 function newClip(from) {
@@ -164,6 +191,7 @@ function parseVersion(v) {
     return {
         wf_type: WF_TYPES.includes(v.wf_type) ? v.wf_type : WF_TYPES[0],
         duration: clampDuration(v.duration ?? DEFAULT_DURATION),
+        length: clampLength(v.length ?? DEFAULT_LENGTH),
         lora_stack: String(v.lora_stack ?? ""),
         noise_seed: clampSeed(v.noise_seed ?? 0),
         prompt_base: String(v.prompt_base ?? ""),
@@ -324,7 +352,7 @@ function makeScriptWidget(node, inputName, value) {
             label: (i) => String(i + 1),
             title: (c, i) => { const v = c.versions[c.active]; return `Clip ${i + 1}, version ${c.active} : ${v.wf_type}, ${v.duration} s`; },
             onSelect: select, onAdd: addClip, onRemove: removeClip,
-            addTitle: "Add a clip at the end (same workflow type and duration as the active version)",
+            addTitle: "Add a clip at the end (same workflow type, duration and length as the active version)",
             removeTitle: "Remove the active clip",
         });
     }
@@ -346,12 +374,25 @@ function makeScriptWidget(node, inputName, value) {
         const wfType = el("select", { title: "The type of workflow of the clip",
             onchange: () => { c.wf_type = wfType.value; refreshTabs(); changed(); } },
             WF_TYPES.map((t) => el("option", { value: t, selected: t === c.wf_type }, t)));
-        const duration = el("input", { type: "number", min: MIN_DURATION, max: MAX_DURATION, step: 1, value: c.duration,
-            title: "The duration of the clip, in seconds",
-            onchange: () => { c.duration = clampDuration(duration.value); duration.value = c.duration; refreshTabs(); changed(); } });
+        // duration and length follow each other : the one the user changes sets the other
+        const duration = el("input", { type: "number", min: MIN_DURATION, max: MAX_DURATION, step: 0.01, value: c.duration,
+            title: "The duration of the clip, in seconds (sets the length)",
+            onchange: () => {
+                c.duration = clampDuration(duration.value);
+                c.length = lengthOfDuration(c.duration);
+                duration.value = c.duration; length.value = c.length; refreshTabs(); changed();
+            } });
+        const length = el("input", { type: "number", min: MIN_LENGTH, max: MAX_LENGTH, step: 17, value: c.length,
+            title: "The length of the clip, in frames : 5 + 17k, rounded up to the next valid value (sets the duration)",
+            onchange: () => {
+                c.length = snapLength(length.value);
+                c.duration = durationOfLength(c.length);
+                duration.value = c.duration; length.value = c.length; refreshTabs(); changed();
+            } });
         const row = el("div", { class: "nhs-row" },
             el("label", {}, `clip ${state.active + 1} v${clip().active}  wf_type`), wfType,
-            el("label", {}, "duration (s)"), duration);
+            el("label", {}, "duration (s)"), duration,
+            el("label", {}, "length"), length);
 
         const stack = el("input", { type: "text", class: "nhs-stack", value: c.lora_stack, placeholder: "none",
             spellcheck: false, title: "The entry of the lora_stacks pipe used by the clip (empty : none)",

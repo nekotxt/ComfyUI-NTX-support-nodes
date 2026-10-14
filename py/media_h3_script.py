@@ -17,12 +17,18 @@ from .utils import MEDIA_REFS_TYPE, DICT_TYPE, clone_data
 # the workflow types a clip can be made with
 WF_TYPES = ("T2VA", "I2VA", "L2VA", "FL2VA", "Ref2VA")
 
+# the duration in seconds (2 decimals) and its length in frames, kept in step by the frontend :
+# length = 5 + 17 * ceil((max(5, round(duration * 24)) - 5) / 17), duration = round(length / 24, 2)
 DEFAULT_DURATION = 5
-MIN_DURATION = 1
+MIN_DURATION = 0.01
 MAX_DURATION = 600
 
+DEFAULT_LENGTH = 124
+MIN_LENGTH = 5
+MAX_LENGTH = 14404
+
 # a version of a clip as the frontend creates it (web/js/media_h3_script.js)
-DEFAULT_VERSION = {"wf_type": WF_TYPES[0], "duration": DEFAULT_DURATION, "lora_stack": "", "noise_seed": 0, "prompt_base": "", "prompt_final": ""}
+DEFAULT_VERSION = {"wf_type": WF_TYPES[0], "duration": DEFAULT_DURATION, "length": DEFAULT_LENGTH, "lora_stack": "", "noise_seed": 0, "prompt_base": "", "prompt_final": ""}
 
 def clamp_index(value, length: int) -> int:
     try:
@@ -34,9 +40,15 @@ def clamp_index(value, length: int) -> int:
 def parse_version(version: dict) -> dict:
     wf_type = version.get("wf_type")
     try:
-        duration = int(version.get("duration", DEFAULT_DURATION))
-    except (TypeError, ValueError):
+        duration = round(float(version.get("duration", DEFAULT_DURATION)), 2)
+    except (TypeError, ValueError, OverflowError):
         duration = DEFAULT_DURATION
+    if duration != duration:  # NaN
+        duration = DEFAULT_DURATION
+    try:
+        length = int(version.get("length", DEFAULT_LENGTH))
+    except (TypeError, ValueError):
+        length = DEFAULT_LENGTH
     try:
         noise_seed = int(version.get("noise_seed", 0))
     except (TypeError, ValueError):
@@ -44,6 +56,7 @@ def parse_version(version: dict) -> dict:
     return {
         "wf_type": wf_type if wf_type in WF_TYPES else DEFAULT_VERSION["wf_type"],
         "duration": min(MAX_DURATION, max(MIN_DURATION, duration)),
+        "length": min(MAX_LENGTH, max(MIN_LENGTH, length)),
         "lora_stack": str(version.get("lora_stack") or ""),
         "noise_seed": min(SEED_MAX, max(0, noise_seed)),
         "prompt_base": str(version.get("prompt_base") or ""),
@@ -63,7 +76,7 @@ def parse_clip(clip: dict) -> dict:
 # (from 0) of the active one, the tab selected on the node ; each clip holds its versions, in order,
 # and the index (from 0, the version number) of its active one :
 #   {"start_video": "", "active": 1, "clips": [{"active": 0, "versions": [
-#       {"wf_type": "T2VA", "duration": 5, "lora_stack": "", "noise_seed": 0, "prompt_base": "...", "prompt_final": "..."}, ...]}, ...]}
+#       {"wf_type": "T2VA", "duration": 5, "length": 124, "lora_stack": "", "noise_seed": 0, "prompt_base": "...", "prompt_final": "..."}, ...]}, ...]}
 # where lora_stack names an entry of the lora_stacks input (empty : none), and start_video, a setting
 # of the whole script, the tag of a video slot of the media input (empty : none)
 # A missing or broken field gets its default, an empty list one default clip or version, and the
@@ -117,15 +130,15 @@ class MediaH3Script(io.ComfyNode):
     in the clips_state widget (see parse_clips_state), a JSON string the frontend replaces on the
     node by a tabbed panel (web/js/media_h3_script.js) with one tab per clip, numbered from 1, and
     Add / Remove buttons. Each clip has versions, numbered from 0, in a second row of tabs (a new
-    version is a copy of the active one) ; each version has a workflow type, a duration, a
-    lora_stack, a noise_seed, a short prompt_base and an optional longer prompt_final ; the Picture / Video /
+    version is a copy of the active one) ; each version has a workflow type, a duration (in
+    seconds) and its length (in frames), a lora_stack, a noise_seed, a short prompt_base and an optional longer prompt_final ; the Picture / Video /
     Audio buttons above the prompts insert the @tag of a slot of the Media Loader in prompt_base
     (prompt_final is not parsed). Above the clips, start_video is a setting of the whole script : the
     tag of a video slot of the Media Loader, typed or picked with its Video button.
 
     A run works on the active version of the active clip, the tabs selected on the node : the
     general settings and the version's fields go into the pipe (project, width, height, clip_index,
-    version_index, wf_type, duration, noise_seed, prompt_base, prompt_final), prompt_base being parsed exactly
+    version_index, wf_type, duration, length, noise_seed, prompt_base, prompt_final), prompt_base being parsed exactly
     as by the Media Parser first :
     its @tag references become <Picture N> / <Video N> / <Audio N> labels and the referenced media
     are decoded into the pipe as picture_N, video_N + video_audio_N and audio_N. An empty (or blank
@@ -169,7 +182,7 @@ class MediaH3Script(io.ComfyNode):
         clip_index = state["active"] + 1
         version_index = state["clips"][state["active"]]["active"]
         clip = state["clips"][state["active"]]["versions"][version_index]
-        logger.info(f"clip {clip_index} of {len(state['clips'])}, version {version_index} : {clip['wf_type']}, {clip['duration']} s")
+        logger.info(f"clip {clip_index} of {len(state['clips'])}, version {version_index} : {clip['wf_type']}, {clip['duration']} s, {clip['length']} frames")
 
         # the general settings, then the active version of the active clip
         pipe["project"] = project
@@ -179,6 +192,7 @@ class MediaH3Script(io.ComfyNode):
         pipe["version_index"] = version_index
         pipe["wf_type"] = clip["wf_type"]
         pipe["duration"] = clip["duration"]
+        pipe["length"] = clip["length"]
         pipe["noise_seed"] = clip["noise_seed"]
 
         # the media referenced by prompt_base decoded into the pipe, then the parsed prompt
@@ -200,9 +214,9 @@ class MediaH3Script(io.ComfyNode):
         start_video = state["start_video"].strip()
         if start_video and clip_index <= 1:
             entry = find_start_video(media if isinstance(media, dict) else {}, start_video)
-            pipe["chain_video"] = decode_slot("chain_video", "video_frames", entry)
-            pipe["chain_audio"] = decode_slot("chain_audio", "video_audio", entry)
-            report += f"\nstart_video {start_video} => chain_video + chain_audio => video {int(entry['slot']) + 1} ({entry['name']})"
+            pipe["context_frames"] = decode_slot("context_frames", "video_frames", entry)
+            pipe["context_audio"] = decode_slot("context_audio", "video_audio", entry)
+            report += f"\nstart_video {start_video} => context_frames + context_audio => video {int(entry['slot']) + 1} ({entry['name']})"
 
         # an empty prompt_final (or blank only) falls back on the parsed prompt_base
         pipe["prompt_final"] = clip["prompt_final"] if clip["prompt_final"].strip() else prompt_base

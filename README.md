@@ -2747,7 +2747,7 @@ the inputs that are connected, so an unconnected `stack2` is "not found".
 `start_video` is a setting of the whole script, not of a clip: the tag of a **video** slot of the
 MediaLoader that the first clip continues. On a run of the **first clip** (`clip_index` `1`), that
 video's frames and audio track — with the slot's edits applied, decoded as by the MediaParser —
-go into the pipe as `chain_video` and `chain_audio`.
+go into the pipe as `context_frames` and `context_audio`.
 The tag is matched ignoring case, like the `@tag` references. A tag no slot holds, a tag held by a
 picture or audio slot, or a video slot switched off **fails the prompt** (the error lists the
 video tags the loader holds). When `start_video` is empty, or on any later clip, it is ignored —
@@ -2779,7 +2779,8 @@ Fields of a version (on the clip panel):
 | Field | Type | Description |
 |---|---|---|
 | `wf_type` | COMBO | The type of workflow of the clip: `T2VA`, `I2VA`, `L2VA`, `FL2VA` or `Ref2VA`. Default `T2VA`. |
-| `duration` | INT | The duration in seconds: `1`–`600`, default `5`. |
+| `duration` | FLOAT | The duration in seconds, 2 decimals: `0.01`–`600`, default `5`. Changing it sets `length` to `5 + 17 × ceil((max(5, round(duration × 24)) − 5) / 17)`. |
+| `length` | INT | The number of frames of the duration, of the form `5 + 17k`: `5`–`14404`, default `124`. A typed value is rounded up to the next valid one (`123` → `124`, `125` → `141`). Changing it sets `duration` to `length / 24`, rounded to 2 decimals. |
 | `lora_stack` | STRING | The name of an entry of `lora_stacks`; empty for none. Default empty. |
 | `noise_seed` | INT | The noise seed: `0`–`18446744073709551615`, default `0`. |
 | `prompt_base` | STRING (multiline) | The short prompt, suitable for further enhancement, referencing tagged slots of the MediaLoader as `@tag`. |
@@ -2789,10 +2790,10 @@ Fields of a version (on the clip panel):
 
 | Output | Type | Description |
 |---|---|---|
-| `pipe` | DICT | The input pipe plus: `project`, `width`, `height`, `clip_index` (from 1), `version_index` (from 0), `wf_type`, `duration`, `noise_seed`, `prompt_base` (parsed), `prompt_final` (as written, or the parsed `prompt_base` when empty), `lora_stack` (only when found), the media referenced by `prompt_base` under the MediaParser keys (`picture_N`, `video_N` + `video_audio_N`, `audio_N`), and for the first clip with a `start_video`, `chain_video` (IMAGE, the frames) and `chain_audio` (AUDIO, `None` when the video has no audio track). Keys already present in the input pipe are overwritten. |
+| `pipe` | DICT | The input pipe plus: `project`, `width`, `height`, `clip_index` (from 1), `version_index` (from 0), `wf_type`, `duration`, `length`, `noise_seed`, `prompt_base` (parsed), `prompt_final` (as written, or the parsed `prompt_base` when empty), `lora_stack` (only when found), the media referenced by `prompt_base` under the MediaParser keys (`picture_N`, `video_N` + `video_audio_N`, `audio_N`), and for the first clip with a `start_video`, `context_frames` (IMAGE, the frames) and `context_audio` (AUDIO, `None` when the video has no audio track). Keys already present in the input pipe are overwritten. |
 | `clip_index` | INT | The number of the active clip, from 1. |
 | `prompt_base` | STRING | The parsed `prompt_base`, references replaced by their labels. |
-| `report` | STRING | The MediaParser report of the references of `prompt_base` (one line per referenced tag; `no tag reference in the prompt` when there is none), followed for the first clip with a `start_video` by a line `start_video <tag> => chain_video + chain_audio => video N (file name)`. |
+| `report` | STRING | The MediaParser report of the references of `prompt_base` (one line per referenced tag; `no tag reference in the prompt` when there is none), followed for the first clip with a `start_video` by a line `start_video <tag> => context_frames + context_audio => video N (file name)`. |
 
 ### Example
 
@@ -2822,8 +2823,8 @@ The clip panel replaces the `clips_state` widget. From top to bottom:
   prompt (see the MediaParser *Frontend* section), but clicking a tag copies it into the field.
   The tag can always be typed, changed or erased by hand.
 - **Clip tabs** — one button per clip, numbered from 1; the active one is blue. **+** adds a clip
-  at the end, with a single version 0 taking the workflow type and duration of the active
-  version (the other fields start empty / at `0`), and selects it. **−** removes the active clip;
+  at the end, with a single version 0 taking the workflow type, duration and length of the
+  active version (the other fields start empty / at `0`), and selects it. **−** removes the active clip;
   it asks for confirmation when any of its versions has prompt text, and is disabled when only
   one clip is left. Hovering a tab shows its active version's workflow type and duration.
 - **Version tabs** — one button per version of the active clip, numbered from 0; the active one is
@@ -2831,7 +2832,7 @@ The clip panel replaces the `clips_state` widget. From top to bottom:
   selects it. **−** removes the active version; it asks for confirmation when the version has
   prompt text, and is disabled when only one version is left. Each clip remembers its own active
   version.
-- **`wf_type`** and **`duration`**, with a label naming the clip and version being edited
+- **`wf_type`**, **`duration`** and **`length`** (changing one recomputes the other), with a label naming the clip and version being edited
   (e.g. `clip 2 v0`).
 - **`lora_stack`** — a text field, with a **▾** button that lists the LORA_STACK inputs of the
   **PipeCustom** connected **directly** to `lora_stacks` (not through reroutes); clicking one fills
