@@ -6,6 +6,7 @@ import nodes
 import json
 import os
 import re
+import torch
 
 from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY
 from .logging import logger
@@ -38,6 +39,19 @@ CONTEXT_PATTERN = re.compile(r"^\s*(\d+)\s*video\s*\+\s*(\d+)\s*audio\s*$", re.I
 def context_lengths(context: str) -> tuple[int, int]:
     match = CONTEXT_PATTERN.match(context or "")
     return (int(match.group(1)), int(match.group(2))) if match else (0, 0)
+
+# the number of guide frames a version uses : its length less its context video frames (0 at least)
+def version_guide_length(version: dict) -> int:
+    return max(0, version["length"] - context_lengths(version["context"])[0])
+
+# guide_length frames of a video's frames, from the frame guide_used_frames on, the last frame
+# repeated for the missing ones ; a clone, the decoded frames being cached
+def guide_span(frames: torch.Tensor, guide_used_frames: int, guide_length: int) -> torch.Tensor:
+    span = frames[guide_used_frames:guide_used_frames + guide_length]
+    missing = guide_length - span.shape[0]
+    if missing > 0:
+        span = torch.cat([span, frames[-1:].expand(missing, *frames.shape[1:])])
+    return span.clone()
 
 # a version of a clip as the frontend creates it (web/js/media_h3_script.js)
 DEFAULT_VERSION = {"wf_type": WF_TYPES[0], "duration": DEFAULT_DURATION, "length": DEFAULT_LENGTH, "context": CONTEXTS[0], "lora_stack": "", "noise_seed": 0, "prompt_base": "", "prompt_final": ""}
@@ -151,7 +165,10 @@ class MediaH3Script(io.ComfyNode):
     (prompt_final is not parsed). Above the clips, start_video and guide_video are settings of the
     whole script : the tags of video slots of the Media Loader, typed or picked with their Video
     button. start_video's frames and audio go into the pipe as context_frames and context_audio on
-    the first clip, guide_video's frames as guide_main_frames on every clip.
+    the first clip, and on every clip guide_video's frames as guide_main_frames : the clip's
+    share of them, length less the context video frames, after the shares of the clips before it
+    (their active versions), the last frame repeated when the video is too short ; guide_main_idx
+    is then the context video frames of the clip.
 
     A run works on the active version of the active clip, the tabs selected on the node : the
     general settings and the version's fields go into the pipe (project, width, height, clip_index,
@@ -240,8 +257,19 @@ class MediaH3Script(io.ComfyNode):
         guide_video = state["guide_video"].strip()
         if guide_video:
             entry = find_video(media if isinstance(media, dict) else {}, "guide_video", guide_video)
-            pipe["guide_main_frames"] = decode_slot("guide_main_frames", "video_frames", entry)
-            report += f"\nguide_video {guide_video} => guide_main_frames => video {int(entry['slot']) + 1} ({entry['name']})"
+            # the clip's share of the frames, after the shares of the clips before it (their active versions)
+            guide_length = version_guide_length(clip)
+            guide_used_frames = sum(version_guide_length(previous["versions"][previous["active"]])
+                                    for previous in state["clips"][:state["active"]])
+            frames = decode_slot("guide_main_frames", "video_frames", entry)
+            if frames is not None and frames.shape[0] > guide_used_frames:
+                frames = guide_span(frames, guide_used_frames, guide_length)
+                logger.info(f"guide_main_frames : frames {guide_used_frames} to {guide_used_frames + guide_length - 1} "
+                            f"({guide_length} frames)")
+                pipe["guide_main_frames"] = frames
+                pipe["guide_main_idx"] = context_lengths(clip["context"])[0]
+                report += (f"\nguide_video {guide_video} => guide_main_frames => video {int(entry['slot']) + 1} ({entry['name']}), "
+                        f"{guide_length} frames from frame {guide_used_frames}")
 
         # an empty prompt_final (or blank only) falls back on the parsed prompt_base
         pipe["prompt_final"] = clip["prompt_final"] if clip["prompt_final"].strip() else prompt_base
