@@ -2747,7 +2747,7 @@ the inputs that are connected, so an unconnected `stack2` is "not found".
 `start_video` is a setting of the whole script, not of a clip: the tag of a **video** slot of the
 MediaLoader that the first clip continues. On a run of the **first clip** (`clip_index` `1`), that
 video's frames and audio track — with the slot's edits applied, decoded as by the MediaParser —
-go into the pipe as `chain_video` and `chain_audio`, for **LoadH3MotionContextLatent** to pass on.
+go into the pipe as `chain_video` and `chain_audio`.
 The tag is matched ignoring case, like the `@tag` references. A tag no slot holds, a tag held by a
 picture or audio slot, or a video slot switched off **fails the prompt** (the error lists the
 video tags the loader holds). When `start_video` is empty, or on any later clip, it is ignored —
@@ -2884,9 +2884,8 @@ Motion Context Load Latent** node, with that folder as `latent_path` and `clip_i
 `clip_index`.
 
 - For the **first clip** (`clip_index` of `1` or less, or none in the pipe) there is nothing to
-  continue from: `latent` is `None`, and `images` / `audio` carry the pipe's `chain_video` and
-  `chain_audio` instead (each `None` when the pipe has no such key).
-- A **missing file** is not an error: all three outputs are `None`, and the console shows a
+  continue from: `latent` is `None`.
+- A **missing file** is not an error: `latent` is `None`, and the console shows a
   warning with the path that was looked for.
 
 ComfyUI reuses the node's previous result as long as its inputs are unchanged, and the pipe is
@@ -2897,7 +2896,7 @@ instance when it returned `None` because the previous clip's file was not saved 
 
 | Input | Type | Description |
 |---|---|---|
-| `pipe` | DICT | The pipe of a MediaH3Script, giving `clip_index`, `project`, and for the first clip `chain_video` / `chain_audio`. |
+| `pipe` | DICT | The pipe of a MediaH3Script, giving `clip_index` and `project`. |
 | `latent_dir` | STRING | The folder of the saved latents, relative to the ComfyUI output folder. Default `h3_context`. |
 | `subdir` | STRING | A subfolder of `<latent_dir>/<project>`. Default empty (skipped). |
 | `counter` | INT | Not used: change it to force the node to run again, regardless of the cache. Default `0`. |
@@ -2907,18 +2906,16 @@ instance when it returned `None` because the previous clip's file was not saved 
 | Output | Type | Description |
 |---|---|---|
 | `latent` | LATENT | The latent of the previous clip, for the `context_latent` input of H3 Motion Context only (it is not a decodable latent); `None` for the first clip or when the file is missing. |
-| `images` | IMAGE | For the first clip, the `chain_video` of the pipe; `None` otherwise. |
-| `audio` | AUDIO | For the first clip, the `chain_audio` of the pipe; `None` otherwise. |
 
 ### Example
 
 With `latent_dir` = `h3_context`, `subdir` = `pass1` and a pipe holding `project` = `city_run`:
 
-| Pipe `clip_index` | `latent` | `images` / `audio` |
-|---|---|---|
-| `1` | `None` | `chain_video` / `chain_audio` of the pipe |
-| `2` | `output/h3_context/city_run/pass1/clip_00001.safetensors` | `None` |
-| `3` | `output/h3_context/city_run/pass1/clip_00002.safetensors` | `None` |
+| Pipe `clip_index` | `latent` |
+|---|---|
+| `1` | `None` |
+| `2` | `output/h3_context/city_run/pass1/clip_00001.safetensors` |
+| `3` | `output/h3_context/city_run/pass1/clip_00002.safetensors` |
 
 ---
 
