@@ -6,13 +6,13 @@
 // The python node holds a string widget, clips_state, a JSON object with the
 // clips of the script and the index of the active one, each clip holding its
 // versions and the index of its active version :
-//   {"start_video": "", "active": 0, "clips": [{"active": 0, "versions": [
+//   {"start_video": "", "guide_video": "", "active": 0, "clips": [{"active": 0, "versions": [
 //       {"wf_type", "duration", "length", "context", "lora_stack", "noise_seed", "prompt_base", "prompt_final"}, ...]}, ...]}
 // (a clip of the older format, the fields without versions, is read as its
 // version 0). It is replaced on the node by a panel (a DOM widget keeping the
-// JSON as its value) : start_video, a setting of the whole script (the tag of a
-// video slot of the Media Loader, typed or picked with its Video button, the
-// same list as the Video tag button), a row of tabs, one per clip numbered from 1, with "+"
+// JSON as its value) : start_video and guide_video, settings of the whole script
+// (the tags of video slots of the Media Loader, each typed or picked with its
+// Video button, the same list as the Video tag button), a row of tabs, one per clip numbered from 1, with "+"
 // (add a clip after the last one, with a version 0 taking the workflow type and
 // duration and length of the active version) and "−" (remove the active clip), a row of
 // tabs for the versions of the active clip numbered from 0, with "+" (add a
@@ -225,7 +225,7 @@ function parseState(value) {
     if (!raw || typeof raw !== "object") raw = {};
     const clips = (Array.isArray(raw.clips) ? raw.clips : []).filter((c) => c && typeof c === "object").map(parseClip);
     if (!clips.length) clips.push(newClip());
-    return { start_video: String(raw.start_video ?? ""), active: clampIndex(raw.active, clips.length), clips };
+    return { start_video: String(raw.start_video ?? ""), guide_video: String(raw.guide_video ?? ""), active: clampIndex(raw.active, clips.length), clips };
 }
 
 // ── LoRA stack picker ─────────────────────────────────────────────────────────
@@ -439,19 +439,19 @@ function makeScriptWidget(node, inputName, value) {
         return [row, stackRow, seedRow, buttons, ...prompts];
     }
 
-    // start_video : typed, or picked among the video tags of the loader
-    function startRow() {
-        const input = el("input", { type: "text", class: "nhs-stack", value: state.start_video, placeholder: "none",
-            spellcheck: false, title: "The tag of the video the first clip continues (empty : none)",
-            oninput: () => { state.start_video = input.value; },
+    // a video tag of the script (start_video, guide_video) : typed, or picked among the video tags of the loader
+    function videoRow(field, title) {
+        const input = el("input", { type: "text", class: "nhs-stack", value: state[field], placeholder: "none",
+            spellcheck: false, title,
+            oninput: () => { state[field] = input.value; },
             onchange: changed });
         const video = BUTTONS.find((spec) => spec.kind === "videos");
         const pick = el("button", { type: "button", title: "Pick the tag of a video slot of the Media Loader",
             onclick: (ev) => {
                 ev.stopPropagation();
-                openTagMenu(node, video, (tag) => { input.value = tag; state.start_video = tag; changed(); });
+                openTagMenu(node, video, (tag) => { input.value = tag; state[field] = tag; changed(); });
             } }, video.label);
-        return el("div", { class: "nhs-row" }, el("label", {}, "start_video"), input, pick);
+        return el("div", { class: "nhs-row" }, el("label", {}, field), input, pick);
     }
 
     // the tab rows, kept to be replaced when their titles change
@@ -468,7 +468,10 @@ function makeScriptWidget(node, inputName, value) {
     function render() {
         clipRow = tabs();
         versionRow = versionTabs();
-        panel.replaceChildren(startRow(), clipRow, versionRow, ...fields());
+        panel.replaceChildren(
+            videoRow("start_video", "The tag of the video the first clip continues (empty : none)"),
+            videoRow("guide_video", "The tag of the video whose frames guide every clip (empty : none)"),
+            clipRow, versionRow, ...fields());
     }
 
     const widget = node.addDOMWidget(inputName, WIDGET_TYPE, panel, {
