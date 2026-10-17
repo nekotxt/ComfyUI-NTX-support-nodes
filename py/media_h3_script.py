@@ -10,7 +10,7 @@ import torch
 
 from ..config_variables import ADDON_PREFIX, ADDON_CATEGORY
 from .logging import logger
-from .media_loader import parse_prompt_media, decode_slot, normalize_tag, is_enabled, PARSER_KINDS
+from .media_loader import resolve_prompt_tags, extract_used_media, media_to_pipe, decode_slot, normalize_tag, is_enabled, PARSER_KINDS
 from .seed import SEED_MAX
 from .utils import MEDIA_REFS_TYPE, DICT_TYPE, clone_data
 
@@ -174,8 +174,9 @@ class MediaH3Script(io.ComfyNode):
     general settings and the version's fields go into the pipe (project, width, height, clip_index,
     version_index, wf_type, duration, length, context_frames_length, context_audio_length, noise_seed, prompt_base, prompt_final), prompt_base being parsed exactly
     as by the Media Parser first :
-    its @tag references become <Picture N> / <Video N> / <Audio N> labels and the referenced media
-    are decoded into the pipe as picture_N, video_N + video_audio_N and audio_N. An empty (or blank
+    its @tag references become <Picture N> / <Video N> / <Audio N> labels, the referenced slots
+    numbered from 1 per kind in slot order, and the referenced media are decoded into the pipe as
+    picture_N, video_N + video_audio_N and audio_N. An empty (or blank
     only) prompt_final gets the parsed prompt_base. A clip naming a lora_stack puts the entry of
     the lora_stacks input of that name into the pipe as lora_stack (nothing when there is none).
     """
@@ -230,8 +231,11 @@ class MediaH3Script(io.ComfyNode):
         pipe["context_frames_length"], pipe["context_audio_length"] = context_lengths(clip["context"])
         pipe["noise_seed"] = clip["noise_seed"]
 
-        # the media referenced by prompt_base decoded into the pipe, then the parsed prompt
-        prompt_base, report = parse_prompt_media("MediaH3Script", media, clip["prompt_base"], pipe)
+        # prompt_base parsed like the Media Parser does : @tag -> <Picture N> of the loader's slot,
+        # then only the used slots, renumbered from 1, decoded into the pipe
+        slot_prompt = resolve_prompt_tags("MediaH3Script", media, clip["prompt_base"])
+        used_media, prompt_base, report = extract_used_media("MediaH3Script", media, slot_prompt)
+        pipe = media_to_pipe("MediaH3Script", used_media, pipe)
         pipe["prompt_base"] = prompt_base
 
         # the clip's LoRA stack, picked by name in lora_stacks ; nothing in the pipe when not found

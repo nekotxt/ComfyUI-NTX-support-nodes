@@ -2765,12 +2765,11 @@ clip and switch between them.
 
 A run works on the **active version of the active clip** — the tabs selected on the node. It puts
 the general settings and the fields of that version into the output pipe, after parsing
-`prompt_base`: every `@tag` is replaced by its `<Picture N>` / `<Video N>` / `<Audio N>` label
-and the referenced media are decoded into the pipe as by the **MediaParser** (see MediaParser for
-the decoding). Unlike the MediaParser, the labels are numbered per kind **in order of first
-appearance in the prompt**, not in slot order: the first picture referenced becomes
-`<Picture 1>` / `picture_1` whatever its slot. A reference to a tag no slot holds, or to a slot
-switched off, fails the prompt. `prompt_final` is
+`prompt_base` exactly as the **MediaParser** does: every `@tag` is replaced by its
+`<Picture N>` / `<Video N>` / `<Audio N>` label, numbered per kind in slot order, and the
+referenced media are decoded into the pipe (see MediaParser for the numbering rules, the
+decoding and the errors). As with MediaParser, a reference to a tag no slot holds, or to a slot
+that does not exist or is switched off, fails the prompt. `prompt_final` is
 **not parsed**: it is passed as written, and when it is empty (or holds only spaces and newlines)
 it gets the parsed `prompt_base` instead.
 
@@ -2848,7 +2847,7 @@ Fields of a version (on the clip panel):
 | `pipe` | DICT | The input pipe plus: `project`, `width`, `height`, `clip_index` (from 1), `version_index` (from 0), `wf_type`, `duration`, `length`, `context_frames_length` and `context_audio_length` (the video and audio values of `context`, `0` for `none`), `noise_seed`, `prompt_base` (parsed), `prompt_final` (as written, or the parsed `prompt_base` when empty), `lora_stack` (only when found), the media referenced by `prompt_base` under the MediaParser keys (`picture_N`, `video_N` + `video_audio_N`, `audio_N`), and for the first clip with a `start_video`, `context_frames` (IMAGE, the frames) and `context_audio` (AUDIO, `None` when the video has no audio track), and with a `guide_video`, `guide_main_frames` (IMAGE, the clip's share of the frames) and `guide_main_idx` (INT, the clip's `context_frames_length`). Keys already present in the input pipe are overwritten. |
 | `clip_index` | INT | The number of the active clip, from 1. |
 | `prompt_base` | STRING | The parsed `prompt_base`, references replaced by their labels. |
-| `report` | STRING | The MediaParser report of the references of `prompt_base` (one line per referenced tag; `no tag reference in the prompt` when there is none), followed for the first clip with a `start_video` by a line `start_video <tag> => context_frames + context_audio => video N (file name)`, and with a `guide_video` by a line `guide_video <tag> => guide_main_frames => video N (file name), L frames from frame U`. |
+| `report` | STRING | The MediaParser report of the references of `prompt_base` (one line per referenced slot, per kind in slot order; `no tag reference in the prompt` when there is none), followed for the first clip with a `start_video` by a line `start_video <tag> => context_frames + context_audio => video N (file name)`, and with a `guide_video` by a line `guide_video <tag> => guide_main_frames => video N (file name), L frames from frame U`. |
 
 ### Example
 
