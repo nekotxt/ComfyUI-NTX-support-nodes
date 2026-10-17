@@ -613,6 +613,34 @@ class MediaSplitter(io.ComfyNode):
         outputs += [None] * (SPLIT_OUTPUTS - len(outputs))
         return io.NodeOutput(*outputs)
 
+# decode every slot of a media bundle switched on into a pipe, like the Media To Pipe does : one key
+# per slot named after its kind and number from 1, picture_N, video_N (the frames) with
+# video_audio_N (its audio, None when it has none), audio_N. The pipe (a new one when None) is
+# changed in place and returned ; node names the caller in the log
+def media_to_pipe(node: str, media, pipe: dict | None = None) -> dict:
+    media = media if isinstance(media, dict) else {}
+    pipe = {} if pipe is None else pipe
+    off = 0
+    for kind in PARSER_KINDS:
+        entries = sorted((entry for entry in media.get(kind, []) if isinstance(entry, dict)), key=lambda entry: int(entry["slot"]))
+        for entry in entries:
+            if not is_enabled(entry):
+                off += 1
+                continue
+            number = int(entry["slot"]) + 1
+            key = f"{PARSER_KINDS[kind]['key']}_{number}"
+            if kind == "pictures":
+                pipe[key] = decode_slot(key, "pictures", entry)
+            elif kind == "videos":
+                pipe[key] = decode_slot(key, "video_frames", entry)
+                pipe[f"video_audio_{number}"] = decode_slot(f"video_audio_{number}", "video_audio", entry)
+            else:
+                pipe[key] = decode_slot(key, "audios", entry)
+    if off:
+        logger.info(f"{node} : {off} slot{'s' if off > 1 else ''} switched off, left out of the pipe")
+    log_media_cache_stats()
+    return pipe
+
 class MediaToPipe(io.ComfyNode):
     """Decode every slot of a media bundle into a pipe.
 
