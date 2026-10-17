@@ -738,6 +738,106 @@ def log_report(lines: list[str]) -> str:
     logger.info("report :\n" + report)
     return report
 
+# A slot reference in a prompt : <Picture N>, <Video N> or <Audio N>, N the slot number from 1
+SLOT_REFERENCE = re.compile(r"<(Picture|Video|Audio) (\d+)>")
+
+# the kind of slot of a label of PARSER_KINDS ("Picture" -> "pictures")
+LABEL_KINDS = {spec["label"]: kind for kind, spec in PARSER_KINDS.items()}
+
+# the slot reference of an entry : <Picture N>, N its slot number from 1
+def slot_label(kind: str, entry: dict) -> str:
+    return f"<{PARSER_KINDS[kind]['label']} {int(entry['slot']) + 1}>"
+
+# replace the @tag references of a prompt (TAG_REFERENCE) by the slot references of the tagged
+# slots of a media bundle : <Picture N> / <Video N> / <Audio N>, N the slot number from 1, as in
+# the bundle. The tags are matched case-insensitively ; a reference to a tag no slot holds, or to
+# a slot switched off, raises a ValueError naming node (the caller) and listing every unresolved
+# reference
+def resolve_prompt_tags(node: str, media: dict, prompt: str) -> str:
+    media = media if isinstance(media, dict) else {}
+
+    # the tagged slots, by lowercased tag (a duplicate tag left to the first slot holding it)
+    tagged = {}
+    for kind in PARSER_KINDS:
+        for entry in media.get(kind, []):
+            tag = normalize_tag(entry.get("tag")) if isinstance(entry, dict) else None
+            if tag is not None:
+                tagged.setdefault(tag.lower(), (kind, entry))
+
+    # every unresolved reference is collected, so that the error lists them all
+    errors = []
+    for match in TAG_REFERENCE.finditer(prompt or ""):
+        written = match.group(1)
+        found = tagged.get(written.lower())
+        if found is None:
+            message = f"no slot of the Media Loader has this tag @{written}"
+        elif not is_enabled(found[1]):
+            message = f"@{written} {slot_label(*found)} is switched off"
+        else:
+            continue
+        if message not in errors:
+            errors.append(message)
+    if errors:
+        known = ", ".join(f"@{entry['tag']}" for _, entry in tagged.values()) or "none"
+        raise ValueError(f"{node} : unresolved tag references\n" + "\n".join(errors) + f"\n(tags of the Media Loader : {known})")
+
+    return TAG_REFERENCE.sub(lambda match: slot_label(*tagged[match.group(1).lower()]), prompt or "")
+
+# keep the slots of a media bundle referenced by the slot references of a prompt (SLOT_REFERENCE),
+# renumbered from 1 per kind in slot order (<Picture 2>, <Picture 4>, <Video 2> become
+# <Picture 1>, <Picture 2>, <Video 1>), the prompt renumbered to match. Returns the new bundle,
+# its entries copied with their new "slot" and its "tags" map rebuilt, and the new prompt. A
+# reference to a slot the bundle does not hold, or to a slot switched off, raises a ValueError
+# naming node (the caller) and listing every unresolved reference
+def extract_used_media(node: str, media: dict, prompt: str) -> tuple[dict, str]:
+    media = media if isinstance(media, dict) else {}
+
+    # the slots of the bundle, by slot reference
+    slots = {}
+    for kind in PARSER_KINDS:
+        for entry in media.get(kind, []):
+            if isinstance(entry, dict):
+                slots.setdefault(slot_label(kind, entry), (kind, entry))
+
+    # the referenced slots ; every unresolved reference is collected, so that the error lists them all
+    used = {}
+    errors = []
+    for match in SLOT_REFERENCE.finditer(prompt or ""):
+        label = match.group(0)
+        key = f"<{match.group(1)} {int(match.group(2))}>"
+        found = slots.get(key)
+        if found is None:
+            message = f"no slot of the Media Loader has this number {label}"
+        elif not is_enabled(found[1]):
+            message = f"{label} is switched off"
+        else:
+            used[key] = found
+            continue
+        if message not in errors:
+            errors.append(message)
+    if errors:
+        known = ", ".join(slots) or "none"
+        raise ValueError(f"{node} : unresolved slot references\n" + "\n".join(errors) + f"\n(slots of the Media Loader : {known})")
+
+    # the used entries, copied, renumbered from 0 per kind in slot order
+    final_media = {kind: [] for kind in PARSER_KINDS}
+    final_media["tags"] = {}
+    renamed = {}            # slot reference in the prompt -> new slot reference
+    for kind in PARSER_KINDS:
+        entries = sorted((found[1] for found in used.values() if found[0] == kind), key=lambda entry: int(entry["slot"]))
+        for index, entry in enumerate(entries):
+            old_label = slot_label(kind, entry)
+            entry = clone_data(entry)
+            entry["slot"] = index
+            final_media[kind].append(entry)
+            if normalize_tag(entry.get("tag")) is not None:
+                final_media["tags"][entry["tag"]] = {"kind": kind, "slot": index}
+            renamed[old_label] = slot_label(kind, entry)
+
+    # in one pass, so that a new reference is not renamed again
+    final_prompt = SLOT_REFERENCE.sub(lambda match: renamed[f"<{match.group(1)} {int(match.group(2))}>"], prompt or "")
+    return final_media, final_prompt
+
 # the work of the Media Parser, shared with the Media H3 Script (py/media_h3_script.py) : the @tag
 # references of the prompt resolved against the media bundle, the referenced media decoded into
 # the pipe (changed in place), and the final prompt and the report returned
