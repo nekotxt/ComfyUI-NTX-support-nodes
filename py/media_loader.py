@@ -586,56 +586,43 @@ class MediaSplitter(io.ComfyNode):
     @classmethod
     def execute(cls, media, rows=DEFAULT_SPLIT_ROWS) -> io.NodeOutput:
         logger.node_name("MediaSplitter")
-        media = media if isinstance(media, dict) else {}
-        # the slots switched off on the loader are left out, as if they were empty (for a video,
-        # both its frames and its audio)
-        by_slot = lambda kind: {int(entry["slot"]): entry for entry in media.get(kind, [])
-                                if isinstance(entry, dict) and is_enabled(entry)}
-        off = sum(1 for kind in ("pictures", "videos", "audios") for entry in media.get(kind, [])
-                  if isinstance(entry, dict) and not is_enabled(entry))
-        if off:
-            logger.info(f"{off} slot{'s' if off > 1 else ''} switched off, output as None")
-        entries = {"pictures": by_slot("pictures"), "videos": by_slot("videos"), "audios": by_slot("audios")}
+        # the slots decoded into a pipe, keyed by the output names of the layout (picture_N,
+        # video_N, video_audio_N, audio_N) ; the slots switched off have no key, as if they were empty
+        # (only the slots of the layout's rows)
         layout = split_layout(rows)
+        pipe = media_to_pipe("MediaSplitter", media, keys=[name for name, _, _ in layout])
 
-        # decode each slot once, the outputs of the layout then pick from these
-        loaded = {}
-        for name, kind, slot in layout:
-            entry = entries["videos" if kind.startswith("video") else kind].get(slot)
-            if entry is None or (kind, slot) in loaded:
-                continue
-            loaded[(kind, slot)] = decode_slot(name, kind, entry)
-
-        log_media_cache_stats()
-
-        # the outputs of the layout, then None on the unused ones
-        outputs = [loaded.get((kind, slot)) for _, kind, slot in layout]
+        # the outputs of the layout, None for an empty slot, then None on the unused ones
+        outputs = [pipe.get(name) for name, _, _ in layout]
         outputs += [None] * (SPLIT_OUTPUTS - len(outputs))
         return io.NodeOutput(*outputs)
 
 # decode every slot of a media bundle switched on into a pipe, like the Media To Pipe does : one key
 # per slot named after its kind and number from 1, picture_N, video_N (the frames) with
 # video_audio_N (its audio, None when it has none), audio_N, added to a copy of the pipe (a new
-# one when None), returned ; the input pipe is not changed. node names the caller in the log
-def media_to_pipe(node: str, media, pipe: dict | None = None) -> dict:
+# one when None), returned ; the input pipe is not changed. keys, when given, limits the decoding
+# to those keys (a video's frames and audio being two keys), the other slots left out. node names
+# the caller in the log
+def media_to_pipe(node: str, media, pipe: dict | None = None, keys: list[str] | None = None) -> dict:
     media = media if isinstance(media, dict) else {}
     pipe = {} if pipe is None else clone_data(pipe)
+    wanted = None if keys is None else set(keys)
     off = 0
     for kind in PARSER_KINDS:
         entries = sorted((entry for entry in media.get(kind, []) if isinstance(entry, dict)), key=lambda entry: int(entry["slot"]))
         for entry in entries:
+            number = int(entry["slot"]) + 1
+            key = f"{PARSER_KINDS[kind]['key']}_{number}"
+            # the keys of the slot and the media they hold : a video has its frames and its audio
+            slot_keys = [(key, "video_frames"), (f"video_audio_{number}", "video_audio")] if kind == "videos" else [(key, kind)]
+            slot_keys = [(name, what) for name, what in slot_keys if wanted is None or name in wanted]
+            if not slot_keys:
+                continue
             if not is_enabled(entry):
                 off += 1
                 continue
-            number = int(entry["slot"]) + 1
-            key = f"{PARSER_KINDS[kind]['key']}_{number}"
-            if kind == "pictures":
-                pipe[key] = decode_slot(key, "pictures", entry)
-            elif kind == "videos":
-                pipe[key] = decode_slot(key, "video_frames", entry)
-                pipe[f"video_audio_{number}"] = decode_slot(f"video_audio_{number}", "video_audio", entry)
-            else:
-                pipe[key] = decode_slot(key, "audios", entry)
+            for name, what in slot_keys:
+                pipe[name] = decode_slot(name, what, entry)
     if off:
         logger.info(f"{node} : {off} slot{'s' if off > 1 else ''} switched off, left out of the pipe")
     log_media_cache_stats()
