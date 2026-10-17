@@ -2650,42 +2650,73 @@ into a pipe.
 
 ![MediaSelectByTag node](images/MediaSelectByTag.png)
 
-Same as **MediaParser** — the `@tag` references are resolved, numbered and replaced in the
-prompt in exactly the same way, with the same errors — but instead of decoding the media into a
-pipe, it **filters the bundle**: the output is a new **NTX_MEDIA_REFS** holding only the
+Like **MediaParser**, it resolves the `@tag` references of the prompt (ignoring case, with the
+same errors for a tag no slot holds or a slot switched off), but instead of decoding the media into
+a pipe, it **filters the bundle**: the output is a new **NTX_MEDIA_REFS** holding only the
 referenced media, renumbered to match the labels of the prompt. Fed to a **MediaSplitter**,
 `<Picture N>` then comes out on `picture_N`, `<Video N>` on `video_N` and `video_audio_N`, and
 `<Audio N>` on `audio_N`.
+
+It works in two steps:
+
+1. each `@tag` is replaced by the label of its slot **on the loader**: picture slot 4 tagged
+   `Carmen` gives `<Picture 4>`;
+2. only the slots the prompt references are kept, **renumbered from 1 per kind, in slot order**,
+   and the labels of the prompt are renumbered to match: if picture slots 2 and 4 and video slot 3
+   are referenced, they become `<Picture 1>`, `<Picture 2>` and `<Video 1>`.
+
+The numbering therefore follows the **slot order**, not the order of appearance in the prompt as
+on the MediaParser. A label already written in the prompt, such as `<Picture 3>`, selects its slot
+too, and fails the prompt when the loader has no such slot (`no slot of the Media Loader has this
+number <Picture 3>`) or when it is switched off (`<Picture 3> is switched off`).
 
 Differences from MediaParser:
 
 - no `pipe` input; the outputs are `final_media`, `final_prompt` and `report`;
 - `final_media` holds, in each of the `pictures` / `videos` / `audios` lists, **only the
-  referenced entries, in order of first appearance in the prompt**, each with its `slot` changed
-  to its label number minus one (`<Picture 1>` is slot `0`); every other field (`name`, `file`,
-  `path`, `edit`, `enabled`, `tag`) is kept as it is. The `tags` map is rebuilt for the kept
-  entries and their new slots. The input bundle is not modified;
+  referenced entries, in slot order**, each with its `slot` changed to its new label number
+  minus one (`<Picture 1>` is slot `0`); every other field (`name`, `file`, `path`, `edit`,
+  `enabled`, `tag`) is kept as it is. The `tags` map is rebuilt for the kept entries and their
+  new slots. The input bundle is not modified;
 - **nothing is decoded**, so the node is instant and the report cannot tell whether a video has
-  an audio track (no `(no audio)` mark); the output names of the report (`picture_1`,
-  `video_1 + video_audio_1`, …) are the MediaSplitter outputs the media land on.
+  an audio track (no `(no audio)` mark). The report has one line per kept slot, per kind in slot
+  order: `@tag => outputs => slot on the loader (file name)`, where the outputs (`picture_1`,
+  `video_1 + video_audio_1`, …) are the MediaSplitter outputs the media land on, and an untagged
+  slot referenced by its label is shown by that label instead of `@tag`.
 
-With the loader and the prompt of the MediaParser example, `final_media` becomes (other fields
-omitted):
+With the loader and the prompt of the MediaParser example, the `final_prompt` is
+
+```text
+<Subject 1> is Char1, as defined by <Picture 2>
+<Subject 2> is Char2, as defined by <Picture 1>
+Use <Video 1> as the reference for the movement of <Picture 2>
+```
+
+the `report`
+
+```text
+@Alice => picture_1 => image 1 (alice.png)
+@Bob => picture_2 => image 2 (bob.png)
+@video_ref_aux => video_1 + video_audio_1 => video 3 (aux.mp4)
+```
+
+and `final_media` becomes (other fields omitted):
 
 ```json
 {
-    "pictures": [ {"slot": 0, "tag": "Bob"}, {"slot": 1, "tag": "Alice"} ],
+    "pictures": [ {"slot": 0, "tag": "Alice"}, {"slot": 1, "tag": "Bob"} ],
     "videos":   [ {"slot": 0, "tag": "video_ref_aux"} ],
     "audios":   [],
     "tags": {
-        "Bob":           {"kind": "pictures", "slot": 0},
-        "Alice":         {"kind": "pictures", "slot": 1},
+        "Alice":         {"kind": "pictures", "slot": 0},
+        "Bob":           {"kind": "pictures", "slot": 1},
         "video_ref_aux": {"kind": "videos",   "slot": 0}
     }
 }
 ```
 
-`Bob` was picture slot 1 in the loader; the prompt calls it `<Picture 1>`, so it is now slot `0`.
+`Alice` (picture slot 1) and `Bob` (picture slot 2) keep their order and become `<Picture 1>` and
+`<Picture 2>`; `video_ref_aux` (video slot 3) is the only video, so it becomes `<Video 1>`.
 
 ### Frontend
 

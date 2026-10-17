@@ -913,12 +913,13 @@ class MediaParser(io.ComfyNode):
 class MediaSelectByTag(io.ComfyNode):
     """Keep the media of a bundle referenced by the @tag references of a prompt, renumbered.
 
-    The prompt is resolved exactly as by the Media Parser (same labels, same numbering, same
-    errors), but nothing is decoded : the output is a media bundle holding only the referenced
-    entries, each one's "slot" changed to its number in the prompt minus one (<Picture 1> is
-    picture slot 0), the lists in that order, and the "tags" map rebuilt to match. Fed to a
-    Media Splitter, <Picture N> then comes out on picture_N, <Video N> on video_N and
-    video_audio_N, <Audio N> on audio_N.
+    Each @tag becomes the slot reference of its slot on the loader (resolve_prompt_tags), then
+    only the referenced slots are kept, renumbered from 1 per kind in slot order, the prompt
+    renumbered to match (extract_used_media) : picture slots 2 and 4 become <Picture 1> and
+    <Picture 2>. Nothing is decoded : the output is a media bundle holding only those entries,
+    their "slot" changed, and the "tags" map rebuilt to match. Fed to a Media Splitter,
+    <Picture N> then comes out on picture_N, <Video N> on video_N and video_audio_N, <Audio N>
+    on audio_N. A slot reference already written in the prompt (<Picture 3>) selects its slot too.
     """
 
     @classmethod
@@ -927,7 +928,7 @@ class MediaSelectByTag(io.ComfyNode):
             node_id=f"{ADDON_PREFIX}MediaSelectByTag",
             display_name=f"{ADDON_PREFIX} Media Select By Tag",
             description="Replace the @tag references of a prompt with <Picture N>, <Video N> and <Audio N> labels, numbered "
-                        "in order of appearance, and keep only the referenced media of a Media Loader bundle, renumbered so "
+                        "from 1 in slot order, and keep only the referenced media of a Media Loader bundle, renumbered so "
                         "that <Picture N> is in picture slot N (and so on for videos and audios).",
             category=f"{ADDON_CATEGORY}/images",
             inputs=[
@@ -946,20 +947,21 @@ class MediaSelectByTag(io.ComfyNode):
     def execute(cls, media, prompt) -> io.NodeOutput:
         logger.node_name("MediaSelectByTag")
         media = media if isinstance(media, dict) else {}
-        references, final_prompt = resolve_tag_references("MediaSelectByTag", media, prompt)
+        # @tag -> <Picture N> of the loader's slot, then only the used slots, renumbered from 1
+        slot_prompt = resolve_prompt_tags("MediaSelectByTag", media, prompt)
+        final_media, final_prompt = extract_used_media("MediaSelectByTag", media, slot_prompt)
 
-        # the referenced entries, copied, in prompt order with their new slot
-        final_media = {kind: [] for kind in PARSER_KINDS}
-        final_media["tags"] = {}
+        # the loader's slot numbers of the used slots, per kind in slot order like final_media
+        used = {kind: set() for kind in PARSER_KINDS}
+        for match in SLOT_REFERENCE.finditer(slot_prompt):
+            used[LABEL_KINDS[match.group(1)]].add(int(match.group(2)))
         lines = []
-        for ref in references:
-            kind, number = ref["kind"], ref["number"]
-            entry = clone_data(ref["entry"])
-            entry["slot"] = number - 1
-            final_media[kind].append(entry)
-            final_media["tags"][entry["tag"]] = {"kind": kind, "slot": entry["slot"]}
-            key = f"{PARSER_KINDS[kind]['key']}_{number}"
-            lines.append(reference_report(ref, f"{key} + video_audio_{number}" if kind == "videos" else key))
+        for kind, spec in PARSER_KINDS.items():
+            for entry, number in zip(final_media[kind], sorted(used[kind])):
+                key = f"{spec['key']}_{int(entry['slot']) + 1}"
+                outputs = f"{key} + video_audio_{int(entry['slot']) + 1}" if kind == "videos" else key
+                source = f"@{entry['tag']}" if normalize_tag(entry.get("tag")) is not None else f"<{spec['label']} {number}>"
+                lines.append(f"{source} => {outputs} => {spec['slot']} {number} ({entry['name']})")
         report = log_report(lines)
 
         return io.NodeOutput(final_media, final_prompt, report)
