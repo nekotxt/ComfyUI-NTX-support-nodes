@@ -671,29 +671,7 @@ class MediaToPipe(io.ComfyNode):
     @classmethod
     def execute(cls, media) -> io.NodeOutput:
         logger.node_name("MediaToPipe")
-        media = media if isinstance(media, dict) else {}
-        pipe = {}
-        off = 0
-        for kind in PARSER_KINDS:
-            entries = sorted((entry for entry in media.get(kind, []) if isinstance(entry, dict)), key=lambda entry: int(entry["slot"]))
-            for entry in entries:
-                if not is_enabled(entry):
-                    off += 1
-                    continue
-                number = int(entry["slot"]) + 1
-                key = f"{PARSER_KINDS[kind]['key']}_{number}"
-                if kind == "pictures":
-                    pipe[key] = decode_slot(key, "pictures", entry)
-                elif kind == "videos":
-                    pipe[key] = decode_slot(key, "video_frames", entry)
-                    pipe[f"video_audio_{number}"] = decode_slot(f"video_audio_{number}", "video_audio", entry)
-                else:
-                    pipe[key] = decode_slot(key, "audios", entry)
-        if off:
-            logger.info(f"{off} slot{'s' if off > 1 else ''} switched off, left out of the pipe")
-        log_media_cache_stats()
-
-        return io.NodeOutput(pipe)
+        return io.NodeOutput(media_to_pipe("MediaToPipe", media))
 
 # ===== MEDIA PARSER ===========================================================================================================================
 
