@@ -469,8 +469,8 @@ function makeScriptWidget(node, inputName, value) {
         clipRow = tabs();
         versionRow = versionTabs();
         panel.replaceChildren(
-            videoRow("start_video", "The tag of the video the first clip continues (empty : none)"),
-            videoRow("guide_video", "The tag of the video whose frames guide every clip (empty : none)"),
+            videoRow("start_video", "The tag of the video the first clip continues (empty : none)\nUse the 'context' setting to specify the number of frames to be used for the continuation.\n\nThe video will be stored in the pipe output (for the first clip only) as context_frames + context_audio."),
+            videoRow("guide_video", "The tag of the video whose frames guide every clip (empty : none)\nThe node takes into account the 'context' video setting.\nSo for a 124 frames clip with 22 frames context only 102 frames of the guide are used.\nIf a 'context' is present for the clip, the guide is applied after those frames.\nFor multiple clips, the guide is split between clips taking into account their length and context.\nIf there are not enough frames for a clip, the last available frame is duplicated.\n\nExample:\n- the video guide is 300 frames\n- clip 1 is 124 frames, no context: 124 frames are applied starting from frame 0 of the clip, 176 passed on\n- clip 2 is 141 frames, 22 context: 119 frames are applied starting from frame 22 of the clip, 57 passed on\n- clip 3 is 124 frames, 22 context: 102 frames (57 from guide + 45 duplicated from the last frame) are applied starting from frame 22 of the clip\n\nThe frames relevant for the active clip will be stored in the pipe output as guide_main_frames, and the context start (if any) will be stored as guide_main_idx"),
             clipRow, versionRow, ...fields());
     }
 

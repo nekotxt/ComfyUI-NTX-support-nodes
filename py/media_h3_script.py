@@ -51,7 +51,7 @@ def guide_span(frames: torch.Tensor, guide_used_frames: int, guide_length: int) 
     missing = guide_length - span.shape[0]
     if missing > 0:
         span = torch.cat([span, frames[-1:].expand(missing, *frames.shape[1:])])
-    return span.clone()
+    return span.clone(), missing
 
 # a version of a clip as the frontend creates it (web/js/media_h3_script.js)
 DEFAULT_VERSION = {"wf_type": WF_TYPES[0], "duration": DEFAULT_DURATION, "length": DEFAULT_LENGTH, "context": CONTEXTS[0], "lora_stack": "", "noise_seed": 0, "prompt_base": "", "prompt_final": ""}
@@ -263,9 +263,10 @@ class MediaH3Script(io.ComfyNode):
                                     for previous in state["clips"][:state["active"]])
             frames = decode_slot("guide_main_frames", "video_frames", entry)
             if frames is not None and frames.shape[0] > guide_used_frames:
-                frames = guide_span(frames, guide_used_frames, guide_length)
+                frames, missing = guide_span(frames, guide_used_frames, guide_length)
+                missing_text = "" if missing == 0 else f", {missing} final frames duplicated"
                 logger.info(f"guide_main_frames : frames {guide_used_frames} to {guide_used_frames + guide_length - 1} "
-                            f"({guide_length} frames)")
+                            f"({guide_length} frames{missing_text})")
                 pipe["guide_main_frames"] = frames
                 pipe["guide_main_idx"] = context_lengths(clip["context"])[0]
                 report += (f"\nguide_video {guide_video} => guide_main_frames => video {int(entry['slot']) + 1} ({entry['name']}), "
