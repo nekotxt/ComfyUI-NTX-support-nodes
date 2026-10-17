@@ -378,7 +378,9 @@ function makeScriptWidget(node, inputName, value) {
             onchange: () => { c.wf_type = wfType.value; refreshTabs(); changed(); } },
             WF_TYPES.map((t) => el("option", { value: t, selected: t === c.wf_type }, t)));
         // duration and length follow each other : the one the user changes sets the other
-        const duration = el("input", { type: "number", min: MIN_DURATION, max: MAX_DURATION, step: 0.01, value: c.duration,
+        // the arrows step by whole seconds ; no min, so that they land on whole values (the step base
+        // being the min), MIN_DURATION being applied by clampDuration
+        const duration = el("input", { type: "number", max: MAX_DURATION, step: 1, value: c.duration,
             title: "The duration of the clip, in seconds (sets the length)",
             onchange: () => {
                 c.duration = clampDuration(duration.value);
