@@ -619,7 +619,7 @@ class MediaSplitter(io.ComfyNode):
 # changed in place and returned ; node names the caller in the log
 def media_to_pipe(node: str, media, pipe: dict | None = None) -> dict:
     media = media if isinstance(media, dict) else {}
-    pipe = {} if pipe is None else pipe
+    pipe = {} if pipe is None else clone_data(pipe)
     off = 0
     for kind in PARSER_KINDS:
         entries = sorted((entry for entry in media.get(kind, []) if isinstance(entry, dict)), key=lambda entry: int(entry["slot"]))
@@ -920,8 +920,11 @@ class MediaParser(io.ComfyNode):
     @classmethod
     def execute(cls, media, prompt, pipe=None) -> io.NodeOutput:
         logger.node_name("MediaParser")
-        pipe = {} if pipe is None else clone_data(pipe)
-        final_prompt, report = parse_prompt_media("MediaParser", media, prompt, pipe)
+        # @tag -> <Picture N> of the loader's slot, then only the used slots, renumbered from 1,
+        # decoded into the pipe
+        slot_prompt = resolve_prompt_tags("MediaParser", media, prompt)
+        final_media, final_prompt, report = extract_used_media("MediaParser", media, slot_prompt)
+        pipe = media_to_pipe("MediaParser", final_media, pipe)
         return io.NodeOutput(pipe, final_prompt, report)
 
 class MediaSelectByTag(io.ComfyNode):
