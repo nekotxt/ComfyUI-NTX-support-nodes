@@ -741,9 +741,6 @@ def log_report(lines: list[str]) -> str:
 # A slot reference in a prompt : <Picture N>, <Video N> or <Audio N>, N the slot number from 1
 SLOT_REFERENCE = re.compile(r"<(Picture|Video|Audio) (\d+)>")
 
-# the kind of slot of a label of PARSER_KINDS ("Picture" -> "pictures")
-LABEL_KINDS = {spec["label"]: kind for kind, spec in PARSER_KINDS.items()}
-
 # the slot reference of an entry : <Picture N>, N its slot number from 1
 def slot_label(kind: str, entry: dict) -> str:
     return f"<{PARSER_KINDS[kind]['label']} {int(entry['slot']) + 1}>"
@@ -786,10 +783,11 @@ def resolve_prompt_tags(node: str, media: dict, prompt: str) -> str:
 # keep the slots of a media bundle referenced by the slot references of a prompt (SLOT_REFERENCE),
 # renumbered from 1 per kind in slot order (<Picture 2>, <Picture 4>, <Video 2> become
 # <Picture 1>, <Picture 2>, <Video 1>), the prompt renumbered to match. Returns the new bundle,
-# its entries copied with their new "slot" and its "tags" map rebuilt, and the new prompt. A
-# reference to a slot the bundle does not hold, or to a slot switched off, raises a ValueError
-# naming node (the caller) and listing every unresolved reference
-def extract_used_media(node: str, media: dict, prompt: str) -> tuple[dict, str]:
+# its entries copied with their new "slot" and its "tags" map rebuilt, the new prompt, and the
+# report (one line per kept slot, also logged). A reference to a slot the bundle does not hold,
+# or to a slot switched off, raises a ValueError naming node (the caller) and listing every
+# unresolved reference
+def extract_used_media(node: str, media: dict, prompt: str) -> tuple[dict, str, str]:
     media = media if isinstance(media, dict) else {}
 
     # the slots of the bundle, by slot reference
@@ -819,24 +817,34 @@ def extract_used_media(node: str, media: dict, prompt: str) -> tuple[dict, str]:
         known = ", ".join(slots) or "none"
         raise ValueError(f"{node} : unresolved slot references\n" + "\n".join(errors) + f"\n(slots of the Media Loader : {known})")
 
-    # the used entries, copied, renumbered from 0 per kind in slot order
+    # the used entries, copied, renumbered from 0 per kind in slot order ; one report line each :
+    # its @tag (its slot reference when untagged), the outputs of a Media Splitter it lands on, the
+    # slot it comes from
     final_media = {kind: [] for kind in PARSER_KINDS}
     final_media["tags"] = {}
     renamed = {}            # slot reference in the prompt -> new slot reference
-    for kind in PARSER_KINDS:
+    lines = []
+    for kind, spec in PARSER_KINDS.items():
         entries = sorted((found[1] for found in used.values() if found[0] == kind), key=lambda entry: int(entry["slot"]))
         for index, entry in enumerate(entries):
             old_label = slot_label(kind, entry)
+            number = int(entry["slot"]) + 1
             entry = clone_data(entry)
             entry["slot"] = index
             final_media[kind].append(entry)
-            if normalize_tag(entry.get("tag")) is not None:
+            tagged = normalize_tag(entry.get("tag")) is not None
+            if tagged:
                 final_media["tags"][entry["tag"]] = {"kind": kind, "slot": index}
             renamed[old_label] = slot_label(kind, entry)
 
+            key = f"{spec['key']}_{index + 1}"
+            outputs = f"{key} + video_audio_{index + 1}" if kind == "videos" else key
+            source = f"@{entry['tag']}" if tagged else old_label
+            lines.append(f"{source} => {outputs} => {spec['slot']} {number} ({entry['name']})")
+
     # in one pass, so that a new reference is not renamed again
     final_prompt = SLOT_REFERENCE.sub(lambda match: renamed[f"<{match.group(1)} {int(match.group(2))}>"], prompt or "")
-    return final_media, final_prompt
+    return final_media, final_prompt, log_report(lines)
 
 # the work of the Media Parser, shared with the Media H3 Script (py/media_h3_script.py) : the @tag
 # references of the prompt resolved against the media bundle, the referenced media decoded into
@@ -949,21 +957,7 @@ class MediaSelectByTag(io.ComfyNode):
         media = media if isinstance(media, dict) else {}
         # @tag -> <Picture N> of the loader's slot, then only the used slots, renumbered from 1
         slot_prompt = resolve_prompt_tags("MediaSelectByTag", media, prompt)
-        final_media, final_prompt = extract_used_media("MediaSelectByTag", media, slot_prompt)
-
-        # the loader's slot numbers of the used slots, per kind in slot order like final_media
-        used = {kind: set() for kind in PARSER_KINDS}
-        for match in SLOT_REFERENCE.finditer(slot_prompt):
-            used[LABEL_KINDS[match.group(1)]].add(int(match.group(2)))
-        lines = []
-        for kind, spec in PARSER_KINDS.items():
-            for entry, number in zip(final_media[kind], sorted(used[kind])):
-                key = f"{spec['key']}_{int(entry['slot']) + 1}"
-                outputs = f"{key} + video_audio_{int(entry['slot']) + 1}" if kind == "videos" else key
-                source = f"@{entry['tag']}" if normalize_tag(entry.get("tag")) is not None else f"<{spec['label']} {number}>"
-                lines.append(f"{source} => {outputs} => {spec['slot']} {number} ({entry['name']})")
-        report = log_report(lines)
-
+        final_media, final_prompt, report = extract_used_media("MediaSelectByTag", media, slot_prompt)
         return io.NodeOutput(final_media, final_prompt, report)
 
 # ===== INITIALIZATION =========================================================================================================================
