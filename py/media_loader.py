@@ -552,6 +552,37 @@ def log_media_cache_stats():
         stats = media_cache_stats()
         logger.info(f"media cache : {stats['items']} items, {stats['bytes'] / 1024 ** 2:.0f} / {stats['max_bytes'] / 1024 ** 2:.0f} MB")
 
+# decode every slot of a media bundle switched on into a pipe, like the Media To Pipe does : one key
+# per slot named after its kind and number from 1, picture_N, video_N (the frames) with
+# video_audio_N (its audio, None when it has none), audio_N, added to a copy of the pipe (a new
+# one when None), returned ; the input pipe is not changed. keys, when given, limits the decoding
+# to those keys (a video's frames and audio being two keys), the other slots left out. node names
+# the caller in the log
+def media_to_pipe(node: str, media, pipe: dict | None = None, keys: list[str] | None = None) -> dict:
+    media = media if isinstance(media, dict) else {}
+    pipe = {} if pipe is None else clone_data(pipe)
+    wanted = None if keys is None else set(keys)
+    off = 0
+    for kind in PARSER_KINDS:
+        entries = sorted((entry for entry in media.get(kind, []) if isinstance(entry, dict)), key=lambda entry: int(entry["slot"]))
+        for entry in entries:
+            number = int(entry["slot"]) + 1
+            key = f"{PARSER_KINDS[kind]['key']}_{number}"
+            # the keys of the slot and the media they hold : a video has its frames and its audio
+            slot_keys = [(key, "video_frames"), (f"video_audio_{number}", "video_audio")] if kind == "videos" else [(key, kind)]
+            slot_keys = [(name, what) for name, what in slot_keys if wanted is None or name in wanted]
+            if not slot_keys:
+                continue
+            if not is_enabled(entry):
+                off += 1
+                continue
+            for name, what in slot_keys:
+                pipe[name] = decode_slot(name, what, entry)
+    if off:
+        logger.info(f"{node} : {off} slot{'s' if off > 1 else ''} switched off, left out of the pipe")
+    log_media_cache_stats()
+    return pipe
+
 class MediaSplitter(io.ComfyNode):
     """Split a media bundle into one output per slot.
 
@@ -596,37 +627,6 @@ class MediaSplitter(io.ComfyNode):
         outputs = [pipe.get(name) for name, _, _ in layout]
         outputs += [None] * (SPLIT_OUTPUTS - len(outputs))
         return io.NodeOutput(*outputs)
-
-# decode every slot of a media bundle switched on into a pipe, like the Media To Pipe does : one key
-# per slot named after its kind and number from 1, picture_N, video_N (the frames) with
-# video_audio_N (its audio, None when it has none), audio_N, added to a copy of the pipe (a new
-# one when None), returned ; the input pipe is not changed. keys, when given, limits the decoding
-# to those keys (a video's frames and audio being two keys), the other slots left out. node names
-# the caller in the log
-def media_to_pipe(node: str, media, pipe: dict | None = None, keys: list[str] | None = None) -> dict:
-    media = media if isinstance(media, dict) else {}
-    pipe = {} if pipe is None else clone_data(pipe)
-    wanted = None if keys is None else set(keys)
-    off = 0
-    for kind in PARSER_KINDS:
-        entries = sorted((entry for entry in media.get(kind, []) if isinstance(entry, dict)), key=lambda entry: int(entry["slot"]))
-        for entry in entries:
-            number = int(entry["slot"]) + 1
-            key = f"{PARSER_KINDS[kind]['key']}_{number}"
-            # the keys of the slot and the media they hold : a video has its frames and its audio
-            slot_keys = [(key, "video_frames"), (f"video_audio_{number}", "video_audio")] if kind == "videos" else [(key, kind)]
-            slot_keys = [(name, what) for name, what in slot_keys if wanted is None or name in wanted]
-            if not slot_keys:
-                continue
-            if not is_enabled(entry):
-                off += 1
-                continue
-            for name, what in slot_keys:
-                pipe[name] = decode_slot(name, what, entry)
-    if off:
-        logger.info(f"{node} : {off} slot{'s' if off > 1 else ''} switched off, left out of the pipe")
-    log_media_cache_stats()
-    return pipe
 
 class MediaToPipe(io.ComfyNode):
     """Decode every slot of a media bundle into a pipe.
@@ -673,58 +673,6 @@ PARSER_KINDS = {
     "videos":   {"label": "Video",   "key": "video",   "slot": "video"},
     "audios":   {"label": "Audio",   "key": "audio",   "slot": "audio"},
 }
-
-# resolve the @tag references of a prompt against a media bundle : the references in order of
-# first appearance, as [{"kind", "entry", "number", "written"}] where "number" counts within the
-# kind from 1 and "written" is the tag as first written in the prompt, and the prompt with every
-# reference replaced by its <Picture N> / <Video N> / <Audio N> label. A reference to a tag no
-# slot holds, or to a slot switched off, raises a ValueError listing every unresolved reference
-def resolve_tag_references(node: str, media: dict, prompt: str) -> tuple[list[dict], str]:
-    # the tagged slots, by lowercased tag
-    tagged = {}
-    for kind in PARSER_KINDS:
-        for entry in media.get(kind, []):
-            tag = normalize_tag(entry.get("tag")) if isinstance(entry, dict) else None
-            if tag is not None:
-                tagged.setdefault(tag.lower(), (kind, entry))
-
-    # each tag numbered within its kind ; every unresolved reference is collected so that the
-    # error lists them all
-    resolved = {}           # lowercased tag -> reference
-    counters = {kind: 0 for kind in PARSER_KINDS}
-    errors = []
-    for match in TAG_REFERENCE.finditer(prompt or ""):
-        written = match.group(1)
-        key = written.lower()
-        if key in resolved:
-            continue
-        found = tagged.get(key)
-        if found is None:
-            message = f"@{written} : no slot of the Media Loader has this tag"
-        elif not is_enabled(found[1]):
-            spec = PARSER_KINDS[found[0]]
-            message = f"@{written} : {spec['slot']} {int(found[1]['slot']) + 1} ({found[1]['name']}) is switched off"
-        else:
-            kind, entry = found
-            counters[kind] += 1
-            resolved[key] = {"kind": kind, "entry": entry, "number": counters[kind], "written": written}
-            continue
-        if message not in errors:
-            errors.append(message)
-    if errors:
-        known = ", ".join(f"@{kind_entry[1]['tag']}" for kind_entry in tagged.values()) or "none"
-        raise ValueError(f"{node} : unresolved tag references\n" + "\n".join(errors) + f"\n(tags of the Media Loader : {known})")
-
-    def label(match):
-        ref = resolved[match.group(1).lower()]
-        return f"<{PARSER_KINDS[ref['kind']]['label']} {ref['number']}>"
-    return list(resolved.values()), TAG_REFERENCE.sub(label, prompt or "")
-
-# the report line of a reference : the tag as written, the outputs it lands on, the slot it comes from
-def reference_report(ref: dict, outputs: str) -> str:
-    spec = PARSER_KINDS[ref["kind"]]
-    entry = ref["entry"]
-    return f"@{ref['written']} => {outputs} => {spec['slot']} {int(entry['slot']) + 1} ({entry['name']})"
 
 def log_report(lines: list[str]) -> str:
     report = "\n".join(lines) if lines else "no tag reference in the prompt"
@@ -838,37 +786,6 @@ def extract_used_media(node: str, media: dict, prompt: str) -> tuple[dict, str, 
     # in one pass, so that a new reference is not renamed again
     final_prompt = SLOT_REFERENCE.sub(lambda match: renamed[f"<{match.group(1)} {int(match.group(2))}>"], prompt or "")
     return final_media, final_prompt, log_report(lines)
-
-# the work of the Media Parser, shared with the Media H3 Script (py/media_h3_script.py) : the @tag
-# references of the prompt resolved against the media bundle, the referenced media decoded into
-# the pipe (changed in place), and the final prompt and the report returned
-def parse_prompt_media(node: str, media, prompt: str, pipe: dict) -> tuple[str, str]:
-    media = media if isinstance(media, dict) else {}
-    references, final_prompt = resolve_tag_references(node, media, prompt)
-
-    # decode the media into the pipe, and describe them in the report
-    lines = []
-    for ref in references:
-        kind, entry, number = ref["kind"], ref["entry"], ref["number"]
-        key = f"{PARSER_KINDS[kind]['key']}_{number}"
-        if kind == "pictures":
-            pipe[key] = decode_slot(key, "pictures", entry)
-            outputs = key
-        elif kind == "videos":
-            audio_key = f"video_audio_{number}"
-            pipe[key] = decode_slot(key, "video_frames", entry)
-            pipe[audio_key] = decode_slot(audio_key, "video_audio", entry)
-            outputs = f"{key} + {audio_key}" + ("" if pipe[audio_key] is not None else " (no audio)")
-            if pipe[key] is None:
-                outputs += " (no frames)"
-        else:
-            pipe[key] = decode_slot(key, "audios", entry)
-            outputs = key + ("" if pipe[key] is not None else " (no audio)")
-        lines.append(reference_report(ref, outputs))
-    report = log_report(lines)
-    log_media_cache_stats()
-
-    return final_prompt, report
 
 class MediaParser(io.ComfyNode):
     """Resolve the @tag references of a prompt against a media bundle.
