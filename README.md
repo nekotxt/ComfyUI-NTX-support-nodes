@@ -2558,12 +2558,16 @@ How the references are resolved:
   runs as long as such characters follow, so `@bob.` and `@bob,` name `bob` while `@bob-` names
   `bob-`. An `@` glued to a word before it (`me@site.com`) is not a reference and is left alone.
 - Tags are matched **ignoring case**: `@bob`, `@Bob` and `@BOB` all name the slot tagged `Bob`.
-- The numbering is **per kind, in order of first appearance in the prompt** — not in slot order:
-  the first picture referenced becomes `<Picture 1>` / `picture_1` whatever its slot. A tag
-  referenced again gets the **same label** as the first time.
-- A reference to a tag **no slot holds**, or to a slot **switched off** on the loader, **fails
-  the prompt**; the error lists every unresolved reference at once, with the tags the loader
-  does hold.
+- The numbering is **per kind, in slot order**, from 1, over the referenced slots only — not in
+  order of appearance in the prompt: if picture slots 2 and 4 are referenced, they become
+  `<Picture 1>` / `picture_1` and `<Picture 2>` / `picture_2`, whichever comes first in the
+  prompt. A tag referenced again gets the **same label**. The resolution is the same as on the
+  **MediaSelectByTag**.
+- A label already written in the prompt, such as `<Picture 3>`, selects picture slot 3 of the
+  loader too, and is renumbered like the others.
+- A reference to a tag **no slot holds**, a label of a slot the loader **does not hold**, or a
+  slot **switched off** on the loader **fails the prompt**; the error lists every unresolved
+  reference at once, with the tags (or slots) the loader does hold.
 
 The media are **decoded with their recorded edits applied**, exactly as the **MediaSplitter**
 does, and share its cache of decoded media (the **Clean media cache** entry of the splitter
@@ -2584,7 +2588,7 @@ empties it for both nodes). A referenced video always brings its audio track alo
 |---|---|---|
 | `pipe` | DICT | The input pipe plus one key per referenced media: `picture_N` (IMAGE, batch of one), `video_N` (IMAGE, the frames of the kept span) with `video_audio_N` (AUDIO, `None` when the video has no audio track), `audio_N` (AUDIO). A key already present in the input pipe is overwritten. |
 | `final_prompt` | STRING | The prompt with every reference replaced by its label. |
-| `report` | STRING | One line per referenced tag, in order of appearance: `@tag => pipe keys => slot (file name)`, with `(no audio)` after a video or audio without sound; `no tag reference in the prompt` when there is none. The report is also written to the console. |
+| `report` | STRING | One line per referenced slot, per kind in slot order: `@tag => pipe keys => slot on the loader (file name)` (an untagged slot referenced by its label shows that label instead of `@tag`); `no tag reference in the prompt` when there is none. The report is written before the media are decoded, so it does not tell whether a video or audio has sound. The report is also written to the console. |
 
 ### Example
 
@@ -2600,23 +2604,23 @@ Use @video_REF_AUX as the reference for the movement of @Bob
 gives the `final_prompt`
 
 ```text
-<Subject 1> is Char1, as defined by <Picture 1>
-<Subject 2> is Char2, as defined by <Picture 2>
-Use <Video 1> as the reference for the movement of <Picture 1>
+<Subject 1> is Char1, as defined by <Picture 2>
+<Subject 2> is Char2, as defined by <Picture 1>
+Use <Video 1> as the reference for the movement of <Picture 2>
 ```
 
 and the `report` (the file names being those of the slots)
 
 ```text
-@bob => picture_1 => image 2 (bob.png)
-@Alice => picture_2 => image 1 (alice.png)
-@video_REF_AUX => video_1 + video_audio_1 => video 3 (aux.mp4)
+@Alice => picture_1 => image 1 (alice.png)
+@Bob => picture_2 => image 2 (bob.png)
+@video_ref_aux => video_1 + video_audio_1 => video 3 (aux.mp4)
 ```
 
 | Pipe key | Media |
 |---|---|
-| `picture_1` | picture slot 2 (`Bob`) |
-| `picture_2` | picture slot 1 (`Alice`) |
+| `picture_1` | picture slot 1 (`Alice`) |
+| `picture_2` | picture slot 2 (`Bob`) |
 | `video_1` | the frames of video slot 3 (`video_ref_aux`) |
 | `video_audio_1` | the audio of video slot 3 |
 
@@ -2665,8 +2669,8 @@ It works in two steps:
    and the labels of the prompt are renumbered to match: if picture slots 2 and 4 and video slot 3
    are referenced, they become `<Picture 1>`, `<Picture 2>` and `<Video 1>`.
 
-The numbering therefore follows the **slot order**, not the order of appearance in the prompt as
-on the MediaParser. A label already written in the prompt, such as `<Picture 3>`, selects its slot
+The numbering therefore follows the **slot order**, not the order of appearance in the prompt,
+exactly as on the MediaParser. A label already written in the prompt, such as `<Picture 3>`, selects its slot
 too, and fails the prompt when the loader has no such slot (`no slot of the Media Loader has this
 number <Picture 3>`) or when it is switched off (`<Picture 3> is switched off`).
 
@@ -2761,10 +2765,12 @@ clip and switch between them.
 
 A run works on the **active version of the active clip** — the tabs selected on the node. It puts
 the general settings and the fields of that version into the output pipe, after parsing
-`prompt_base` exactly as the **MediaParser** does: every `@tag` is replaced by its
-`<Picture N>` / `<Video N>` / `<Audio N>` label and the referenced media are decoded into the pipe
-(see MediaParser for the numbering rules, the decoding and the errors). As with MediaParser, a
-reference to a tag no slot holds, or to a slot switched off, fails the prompt. `prompt_final` is
+`prompt_base`: every `@tag` is replaced by its `<Picture N>` / `<Video N>` / `<Audio N>` label
+and the referenced media are decoded into the pipe as by the **MediaParser** (see MediaParser for
+the decoding). Unlike the MediaParser, the labels are numbered per kind **in order of first
+appearance in the prompt**, not in slot order: the first picture referenced becomes
+`<Picture 1>` / `picture_1` whatever its slot. A reference to a tag no slot holds, or to a slot
+switched off, fails the prompt. `prompt_final` is
 **not parsed**: it is passed as written, and when it is empty (or holds only spaces and newlines)
 it gets the parsed `prompt_base` instead.
 

@@ -615,8 +615,8 @@ class MediaSplitter(io.ComfyNode):
 
 # decode every slot of a media bundle switched on into a pipe, like the Media To Pipe does : one key
 # per slot named after its kind and number from 1, picture_N, video_N (the frames) with
-# video_audio_N (its audio, None when it has none), audio_N. The pipe (a new one when None) is
-# changed in place and returned ; node names the caller in the log
+# video_audio_N (its audio, None when it has none), audio_N, added to a copy of the pipe (a new
+# one when None), returned ; the input pipe is not changed. node names the caller in the log
 def media_to_pipe(node: str, media, pipe: dict | None = None) -> dict:
     media = media if isinstance(media, dict) else {}
     pipe = {} if pipe is None else clone_data(pipe)
@@ -886,13 +886,15 @@ def parse_prompt_media(node: str, media, prompt: str, pipe: dict) -> tuple[str, 
 class MediaParser(io.ComfyNode):
     """Resolve the @tag references of a prompt against a media bundle.
 
-    Every "@tag" of the prompt naming a tagged slot of the Media Loader (case-insensitively) is
-    replaced by a label numbered per kind in order of first appearance in the prompt, <Picture N>,
-    <Video N> or <Audio N>, the same tag always getting the same label. The media behind the
-    labels are decoded with their edits applied, like the Media Splitter does (sharing its cache),
-    and added to the pipe as picture_N, video_N (the frames) with video_audio_N (the video's
-    audio, None when it has none), and audio_N. A reference to a tag no slot holds, or to a slot
-    switched off, fails the prompt.
+    Each @tag (case-insensitively) becomes the slot reference of its slot on the loader
+    (resolve_prompt_tags), then only the referenced slots are kept, renumbered from 1 per kind in
+    slot order, the prompt renumbered to match (extract_used_media) : picture slots 2 and 4 become
+    <Picture 1> and <Picture 2>, whatever their order in the prompt. A slot reference already
+    written in the prompt (<Picture 3>) selects its slot too. The kept media are decoded with their
+    edits applied, like the Media Splitter does (sharing its cache), and added to a copy of the
+    pipe (media_to_pipe) as picture_N, video_N (the frames) with video_audio_N (the video's audio,
+    None when it has none), and audio_N. A reference to a tag no slot holds, or to a slot that does
+    not exist or is switched off, fails the prompt.
     """
 
     @classmethod
@@ -901,7 +903,7 @@ class MediaParser(io.ComfyNode):
             node_id=f"{ADDON_PREFIX}MediaParser",
             display_name=f"{ADDON_PREFIX} Media Parser",
             description="Replace the @tag references of a prompt with <Picture N>, <Video N> and <Audio N> labels, numbered "
-                        "in order of appearance, and put the tagged media of a Media Loader bundle, decoded with their edits "
+                        "from 1 in slot order, and put the tagged media of a Media Loader bundle, decoded with their edits "
                         "applied, into the pipe as picture_N, video_N + video_audio_N and audio_N.",
             category=f"{ADDON_CATEGORY}/images",
             inputs=[
