@@ -2752,6 +2752,91 @@ renumbered the slots: `<Picture 1>` is `picture_1`, `<Video 1>` is `video_1` + `
 
 ---
 
+## Media nodes: function map
+
+How the `execute()` functions of the media nodes call the functions of `py/media_loader.py`.
+The two prompt functions only rewrite the prompt and filter the bundle; every decoding goes
+through `media_to_pipe`.
+
+```mermaid
+flowchart TD
+    parser["MediaParser<br/>execute()"]
+    select["MediaSelectByTag<br/>execute()"]
+    topipe["MediaToPipe<br/>execute()"]
+    splitter["MediaSplitter<br/>execute()"]
+
+    resolve["resolve_prompt_tags<br/>@tag to loader label"]
+    extract["extract_used_media<br/>keep, renumber, report"]
+    m2p["media_to_pipe<br/>decode into a pipe"]
+    layout["split_layout<br/>output names"]
+
+    parser --> resolve
+    parser --> extract
+    parser --> m2p
+    select --> resolve
+    select --> extract
+    topipe --> m2p
+    splitter --> m2p
+    splitter --> layout
+
+    classDef nodeexec fill:#EEEDFE,stroke:#534AB7,color:#3C3489
+    classDef func fill:#E1F5EE,stroke:#0F6E56,color:#085041
+    class parser,select,topipe,splitter nodeexec
+    class resolve,extract,m2p,layout func
+```
+
+`resolve_prompt_tags` and `extract_used_media` also use `slot_label`, `normalize_tag` and
+`is_enabled`; `extract_used_media` writes its report through `log_report`. The
+**MediaH3Script** (`py/media_h3_script.py`) parses its `prompt_base` with the same three
+functions as the MediaParser, and calls `decode_slot` directly for `start_video` and
+`guide_video`.
+
+The decode chain under `media_to_pipe`:
+
+```mermaid
+flowchart TD
+    m2p["media_to_pipe<br/>each requested slot"]
+    decode["decode_slot<br/>one media, by kind"]
+    normalize["normalize_*_edit<br/>clean edit settings"]
+    cache["cached_media<br/>file + edit cache"]
+    stats["log_media_cache_stats<br/>cache usage"]
+    picture["load_picture<br/>image file"]
+    video["load_video_frames<br/>kept span frames"]
+    audio["load_audio_span<br/>audio of a span"]
+    frames["apply_frame_edits<br/>rotate, mirror, crop"]
+    pyav["decode_audio_span<br/>PyAV audio decode"]
+
+    m2p --> decode
+    m2p --> stats
+    decode --> normalize
+    decode --> cache
+    cache -. cache miss .-> picture
+    cache -. cache miss .-> video
+    cache -. cache miss .-> audio
+    picture --> frames
+    video --> frames
+    audio --> pyav
+
+    classDef path fill:#E1F5EE,stroke:#0F6E56,color:#085041
+    classDef io fill:#FAECE7,stroke:#993C1D,color:#712B13
+    classDef helper fill:#F1EFE8,stroke:#5F5E5A,color:#444441
+    class m2p,decode,cache path
+    class picture,video,audio io
+    class normalize,stats,frames,pyav helper
+```
+
+`decode_slot` hands the loader of the slot's kind to `cached_media`, which runs it only when the
+file and its edits are not cached yet (dotted arrows). Green: the decode path; orange: the
+functions reading a file; gray: helpers.
+
+**MediaLoader** decodes nothing: its `execute()` reads the widget with `parse_media_state`, the
+tags with `slot_tags`, and builds each entry with `annotated_name` and the `normalize_*_edit` /
+`is_*_edited` helpers. The web routes of the frontend commands use `extract_audio`
+(`decode_audio_span`, `write_flac`, `safe_name`, `unique_path`), `export_zip` (`export_plan`)
+and `estimate_video_frames`.
+
+---
+
 ## MediaH3Script
 
 ![MediaH3Script node](images/MediaH3Script.png)
