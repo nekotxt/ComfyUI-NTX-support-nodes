@@ -103,6 +103,16 @@ class RerouteImage(RerouteBase):
     DATA_NAME = "image"
 
 
+class RerouteVideo(RerouteBase):
+    DATA_TYPE = io.Video
+    DATA_NAME = "video"
+
+
+class RerouteAudio(RerouteBase):
+    DATA_TYPE = io.Audio
+    DATA_NAME = "audio"
+
+
 class RerouteMask(RerouteBase):
     DATA_TYPE = io.Mask
     DATA_NAME = "mask"
@@ -156,6 +166,8 @@ def get_nodes_list() -> list[type[io.ComfyNode]]:
         RerouteClipVision,
         RerouteVae,
         RerouteImage,
+        RerouteVideo,
+        RerouteAudio,
         RerouteMask,
         RerouteLatent,
         RerouteDict,
